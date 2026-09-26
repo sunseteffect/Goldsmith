@@ -447,7 +447,11 @@ function addon:GetTierRows(recipe)
 
     local rows = {}
     for tier = 1, #td.qualities do
-        for _, row in ipairs({ plain[tier], concentrated[tier] }) do
+        -- Both checked by index: ipairs stops at the first nil, which
+        -- dropped tiers only reachable with concentration (no plain row)
+        local options = { plain[tier], concentrated[tier] }
+        for i = 1, 2 do
+            local row = options[i]
             -- Concentration that lands on a tier you can already reach
             -- without it at the same cost adds nothing; skip it
             local redundant = row and row.concentrate and plain[tier] and plain[tier].cost <= row.cost
@@ -491,10 +495,11 @@ end
 -- The best way to spend `budget` concentration on a profession's crafts:
 -- most gold per concentration point first, as many crafts as the budget
 -- allows (capped at about one day of the item's sales), then the next.
--- Only crafts that make a profit with concentration are used.
+-- Only crafts that make a profit with concentration are used, and only
+-- those accept(recipe, row) allows, if given.
 -- Returns { { recipe, row, crafts, points, gain, profit } }, points used,
 -- and total extra profit from concentrating.
-function addon:PlanConcentration(profession, budget)
+function addon:PlanConcentration(profession, budget, accept)
     -- Only recipes that spend this concentration (each expansion's version
     -- of a profession has its own)
     local currencyID = GoldsmithDB.concentrationCurrency and GoldsmithDB.concentrationCurrency[profession]
@@ -519,7 +524,7 @@ function addon:PlanConcentration(profession, budget)
                     best = e
                 end
             end
-            if best then
+            if best and (not accept or accept(recipe, best)) then
                 table.insert(candidates, { recipe = recipe, row = best, tierCount = rows[1] and rows[1].tierCount })
             end
         end

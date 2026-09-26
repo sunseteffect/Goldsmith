@@ -85,7 +85,7 @@ function addon:Font(name)
 end
 
 -- Money, formatted the same everywhere:
---   under 100g: 45.30g    under 1M g: 12,345g    above: 1.23M g
+--   under 1,000g: 321.24g    under 1M g: 12,345g    above: 1.23M g
 local function Thousands(n)
     local s = tostring(n)
     local result = s:reverse():gsub("(%d%d%d)", "%1,"):reverse()
@@ -95,7 +95,7 @@ end
 function addon:FormatMoney(copper)
     local gold = math.abs(copper) / 10000
     local text
-    if gold < 100 then
+    if gold < 1000 then
         text = string.format("%.2fg", gold)
     elseif gold < 1000000 then
         text = Thousands(math.floor(gold + 0.5)) .. "g"

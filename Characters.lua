@@ -184,16 +184,47 @@ local function GetStockItemIDs()
     return ids
 end
 
+-- The game only knows what's in your bank (and the warband bank) while the
+-- bank is open, so bags and bank are kept separately: bags are counted any
+-- time, the bank only while it's open (bankStock, bankTime), and stock is
+-- the two added up.
+local bankOpen = false
+
 local function SnapshotStock()
-    local stock, warband = {}, {}
+    local c = addon.char
+    local bags, bank, warband = {}, {}, {}
     for itemID in pairs(GetStockItemIDs()) do
-        local own = C_Item.GetItemCount(itemID, true, false, true, false) or 0
-        local withWarband = C_Item.GetItemCount(itemID, true, false, true, true) or 0
-        if own > 0 then stock[itemID] = own end
-        if withWarband > own then warband[itemID] = withWarband - own end
+        local inBags = C_Item.GetItemCount(itemID, false, false, false, false) or 0
+        if inBags > 0 then bags[itemID] = inBags end
+        if bankOpen then
+            local own = C_Item.GetItemCount(itemID, true, false, true, false) or 0
+            local withWarband = C_Item.GetItemCount(itemID, true, false, true, true) or 0
+            if own > inBags then bank[itemID] = own - inBags end
+            if withWarband > own then warband[itemID] = withWarband - own end
+        end
     end
-    addon.char.stock, addon.char.stockTime = stock, time()
-    GoldsmithDB.warbandStock = warband
+    c.bagStock = bags
+    if bankOpen then
+        c.bankStock, c.bankTime = bank, time()
+        GoldsmithDB.warbandStock = warband
+    end
+    local stock = {}
+    for itemID, count in pairs(bags) do stock[itemID] = count end
+    for itemID, count in pairs(c.bankStock or {}) do stock[itemID] = (stock[itemID] or 0) + count end
+    c.stock, c.stockTime = stock, time()
+end
+
+local function OnBankOpened()
+    if bankOpen then return end
+    bankOpen = true
+    -- Bank contents arrive a moment after it opens
+    C_Timer.After(1, SnapshotStock)
+end
+
+-- No snapshot on close: the bank's contents may already be gone by then,
+-- which counted it as empty. Snapshots while it's open cover it.
+local function OnBankClosed()
+    bankOpen = false
 end
 
 -- An item's stock across the account.
@@ -449,6 +480,23 @@ function addon:ListData()
     for _, count in pairs(GoldsmithDB.warbandStock) do wItems, wUnits = wItems + 1, wUnits + count end
     Print("Stock: %d kinds of item (%d units) on characters, %d kinds (%d units) in the warband bank.",
         items, units, wItems, wUnits)
+
+    -- What the game reports right now, to check whether bank counts are
+    -- available with the bank closed
+    local bags, withBank, withWarband = 0, 0, 0
+    for itemID in pairs(GetStockItemIDs()) do
+        bags = bags + (C_Item.GetItemCount(itemID, false, false, false, false) or 0)
+        withBank = withBank + (C_Item.GetItemCount(itemID, true, false, true, false) or 0)
+        withWarband = withWarband + (C_Item.GetItemCount(itemID, true, false, true, true) or 0)
+    end
+    Print("Game reports now (bank %s): %d units in bags, %d with bank, %d with warband bank.",
+        bankOpen and "open" or "closed", bags, withBank, withWarband)
+    local stock = addon:GetStockValue("All")
+    Print("Gold in stock (all professions): %s", addon:FormatMoney(stock.value))
+    for i = 1, math.min(#stock.items, 5) do
+        local item = stock.items[i]
+        print(string.format("  %s x%d: %s", item.name, item.count, addon:FormatMoney(item.value)))
+    end
 end
 
 function addon:InitializeCharacters()
@@ -484,15 +532,30 @@ function addon:InitializeCharacters()
     for event in pairs(GOLDMAKING_CLOSE) do frame:RegisterEvent(event) end
     C_Timer.NewTicker(GOLDMAKING_TICK, FlushGoldTime)
 
+    -- The bank also opens through the interaction manager (bank and warband
+    -- bank NPCs); either event counts
+    frame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_SHOW")
+    frame:RegisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
+    local bankTypes = {}
+    local types = Enum.PlayerInteractionType or {}
+    for _, name in ipairs({ "Banker", "AccountBanker", "CharacterBanker" }) do
+        if types[name] then bankTypes[types[name]] = true end
+    end
+
     local pending, stockPending = false, false
-    frame:SetScript("OnEvent", function(_, event)
+    frame:SetScript("OnEvent", function(_, event, arg1)
+        if event == "BANKFRAME_OPENED" or (event == "PLAYER_INTERACTION_MANAGER_FRAME_SHOW" and bankTypes[arg1]) then
+            OnBankOpened()
+        elseif event == "BANKFRAME_CLOSED" or (event == "PLAYER_INTERACTION_MANAGER_FRAME_HIDE" and bankTypes[arg1]) then
+            OnBankClosed()
+            if addon.Refresh then addon.Refresh() end
+        end
         if GOLDMAKING_OPEN[event] then
             OnGoldmakingOpen(GOLDMAKING_OPEN[event])
             return
         elseif GOLDMAKING_CLOSE[event] then
             OnGoldmakingClose(GOLDMAKING_CLOSE[event])
-            -- Closing the bank is when bank counts are surest
-            if event ~= "BANKFRAME_CLOSED" then return end
+            return
         end
 
         if event == "PLAYER_LOGOUT" then
@@ -501,13 +564,16 @@ function addon:InitializeCharacters()
             SnapshotStock()
         elseif event == "PLAYER_MONEY" then
             RecordGold()
-        elseif event == "BAG_UPDATE_DELAYED" or event == "BANKFRAME_CLOSED" then
+        elseif event:find("^PLAYER_INTERACTION_MANAGER") then
+            return
+        elseif event == "BAG_UPDATE_DELAYED" then
             -- Bags change in bursts while crafting or looting
             if not stockPending then
                 stockPending = true
                 C_Timer.After(10, function()
                     stockPending = false
                     SnapshotStock()
+                    if addon.Refresh then addon.Refresh() end
                 end)
             end
         elseif not pending then
@@ -518,6 +584,7 @@ function addon:InitializeCharacters()
             C_Timer.After(2, function()
                 pending = false
                 UpdateAll()
+                if addon.Refresh then addon.Refresh() end
                 if login then SnapshotStock() end
             end)
         end

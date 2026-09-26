@@ -188,7 +188,9 @@ end
 --   "Auctionator"  - Auctionator's last scan
 --   "TSM"          - TSM's minimum buyout
 --   "TSM market"   - TSM's market value, used because the lowest price
---                    looked like a small undercut
+--                    looked like a small undercut or far too high
+--   "TSM sale avg" - TSM's region sale average, used because the price
+--                    was far above what the item actually sells for
 -- nil if nothing has a price.
 function addon:GetAHPriceInfo(itemID)
     if not itemID then return nil end
@@ -220,19 +222,30 @@ end
 -- looks like a small undercut; far above it (e.g. a 9,999,999g listing when
 -- nothing else is up) isn't a real price either. Either way TSM's market
 -- value is used instead, with a note. Without TSM the price is unchanged.
+--
+-- Market value comes from listings, so for items that rarely sell it's as
+-- unrealistic as the listings themselves (an item-level-15 staff listed at
+-- 81,484g). TSM's region sale average is what it actually sold for, so a
+-- price more than SALE_HIGH_RATIO times that is capped at it.
 local OUTLIER_HIGH_RATIO = 5
+local SALE_HIGH_RATIO = 3
 
 function addon:CheckAgainstMarket(itemID, price, source, age)
+    local listed, note = price, nil
     local market = GetTSMValue("DBMarket", itemID)
     if market and price < market * UNDERCUT_RATIO then
-        return market, "TSM market", nil,
-            string.format("lowest listing %s looked like a small undercut", FormatGold(price))
+        price, source, age = market, "TSM market", nil
+        note = string.format("lowest listing %s looked like a small undercut", FormatGold(listed))
+    elseif market and price > market * OUTLIER_HIGH_RATIO then
+        price, source, age = market, "TSM market", nil
+        note = string.format("lowest listing %s is far above the usual price", FormatGold(listed))
     end
-    if market and price > market * OUTLIER_HIGH_RATIO then
-        return market, "TSM market", nil,
-            string.format("lowest listing %s is far above the usual price", FormatGold(price))
+    local saleAvg = GetTSMValue("DBRegionSaleAvg", itemID)
+    if saleAvg and price > saleAvg * SALE_HIGH_RATIO then
+        return saleAvg, "TSM sale avg", nil,
+            string.format("listed at %s, but it usually sells for %s", FormatGold(listed), FormatGold(saleAvg))
     end
-    return price, source, age
+    return price, source, age, note
 end
 
 function addon:GetAHPrice(itemID)
@@ -286,6 +299,7 @@ function addon:PriceAgeText(itemID)
     end
     if source == "TSM" then return "from TSM" end
     if source == "TSM market" then return "TSM market value (" .. note .. ")" end
+    if source == "TSM sale avg" then return "TSM region sale average (" .. note .. ")" end
     if source == "Vendor" then return "vendor price" end
     return addon:FormatAge(age)
 end
@@ -300,6 +314,7 @@ function addon:AHPriceAgeText(itemID)
     end
     if source == "TSM" then return "from TSM" end
     if source == "TSM market" then return "TSM market value (" .. note .. ")" end
+    if source == "TSM sale avg" then return "TSM region sale average (" .. note .. ")" end
     return addon:FormatAge(age)
 end
 
@@ -920,12 +935,13 @@ local function LotAverage(lots, units)
 end
 
 -- What the copies of this exact item (quality tier) in your bags and banks
--- cost you to craft, from your latest crafts of it. nil if never crafted.
-function addon:GetCraftedCost(itemID)
+-- cost you to craft, from your latest crafts of it (or the newest `units`
+-- of them). nil if never crafted.
+function addon:GetCraftedCost(itemID, units)
     local lots = GoldsmithDB.craftLots[itemID]
     if not lots or #lots == 0 then return nil end
     local onHand = C_Item.GetItemCount(itemID, true, false, true, true) or 0
-    return LotAverage(lots, onHand)
+    return LotAverage(lots, units or onHand)
 end
 
 -- Same, for every quality of an item with this name (sale mail and
@@ -1513,7 +1529,7 @@ function addon:InitializePricing()
         -- Item info can arrive just after the vendor opens
         C_Timer.After(0.5, function()
             RecordVendorPrices()
-            if addon.mainFrame and addon.mainFrame:IsShown() and addon.Refresh then
+            if addon.Refresh then
                 addon.Refresh()
             end
         end)
@@ -1530,7 +1546,7 @@ function addon:InitializePricing()
     bookFrame:SetScript("OnEvent", function(_, _, itemID)
         if itemID then
             RecordOrderBook(itemID)
-            if addon.mainFrame and addon.mainFrame:IsShown() and addon.Refresh then
+            if addon.Refresh then
                 addon.Refresh()
             end
         end
@@ -1590,7 +1606,7 @@ function addon:InitializePricing()
             addon:RecordPriceHistory()
             -- A scan loads the items it saw, so more scrolls can be matched
             addon:MatchEnchantScrolls()
-            if addon.mainFrame and addon.mainFrame:IsShown() and addon.Refresh then
+            if addon.Refresh then
                 addon.Refresh()
             end
         end)

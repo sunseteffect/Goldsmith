@@ -23,7 +23,7 @@ local TABS = {
 }
 
 -- Views: key -> { create = function(parent) -> view, refresh = function(view, state) }
--- state = { profession, range, since }
+-- state = { profession, range, since, setProfession(prof) }
 local views = {}
 
 function addon:RegisterView(key, view)
@@ -116,14 +116,19 @@ function addon:CreateWindow()
     header:SetPoint("TOPLEFT", 1, -1)
     header:SetPoint("TOPRIGHT", -1, -1)
     header:SetHeight(HEADER_HEIGHT)
-    header:EnableMouse(true)
-    header:RegisterForDrag("LeftButton")
-    header:SetScript("OnDragStart", function() frame:StartMoving() end)
-    header:SetScript("OnDragStop", function()
-        frame:StopMovingOrSizing()
-        local point, _, relativePoint, x, y = frame:GetPoint()
-        ui.point, ui.relativePoint, ui.x, ui.y = point, relativePoint, x, y
-    end)
+    -- The header and the tab strip both move the window (buttons on them
+    -- still take their own clicks)
+    local function MakeDragHandle(handle)
+        handle:EnableMouse(true)
+        handle:RegisterForDrag("LeftButton")
+        handle:SetScript("OnDragStart", function() frame:StartMoving() end)
+        handle:SetScript("OnDragStop", function()
+            frame:StopMovingOrSizing()
+            local point, _, relativePoint, x, y = frame:GetPoint()
+            ui.point, ui.relativePoint, ui.x, ui.y = point, relativePoint, x, y
+        end)
+    end
+    MakeDragHandle(header)
 
     local title = UI.Text(header, "title")
     title:SetPoint("LEFT", 18, 0)
@@ -165,6 +170,7 @@ function addon:CreateWindow()
     tabArea:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, 0)
     tabArea:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT", 0, 0)
     tabArea:SetHeight(TAB_HEIGHT)
+    MakeDragHandle(tabArea)
     local headerLine = UI.Line(frame, "border")
     headerLine:SetPoint("TOPLEFT", header, "BOTTOMLEFT")
     headerLine:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT")
@@ -222,6 +228,10 @@ function addon:CreateWindow()
             profession = ui.profession,
             range = ui.range,
             since = addon:DateRangeStart(ui.range),
+            setProfession = function(prof)
+                ui.profession = prof
+                Refresh()
+            end,
         })
     end
 
@@ -236,12 +246,21 @@ function addon:CreateWindow()
 
     -- Other files call addon.Refresh when data changes. Refresh whichever
     -- window is open; the v1 window's refresh only runs while it's shown.
+    -- Data changes come in bursts (AH searches, bag updates), so the new
+    -- window refreshes once, half a second after the last of a burst starts.
     local refreshOld = addon.Refresh
+    local refreshPending = false
     addon.Refresh = function()
         if refreshOld and addon.mainFrame and addon.mainFrame:IsShown() then
             refreshOld()
         end
-        Refresh()
+        if frame:IsShown() and not refreshPending then
+            refreshPending = true
+            C_Timer.After(0.5, function()
+                refreshPending = false
+                Refresh()
+            end)
+        end
     end
 
     if ui.shown then

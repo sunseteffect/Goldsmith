@@ -461,7 +461,7 @@ local function FillCraftRow(row, item)
         row.cells.age:SetTextColor(0.3, 1, 0.3)
     elseif source == "TSM" then
         row.cells.age:SetText("TSM")
-    elseif source == "TSM market" then
+    elseif source == "TSM market" or source == "TSM sale avg" then
         row.cells.age:SetText("TSM*")
         row.cells.age:SetTextColor(1, 0.82, 0)
     elseif source == "Vendor" then

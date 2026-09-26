@@ -206,6 +206,183 @@ function UI.StatTile(parent, style)
     return tile
 end
 
+-- Charts
+--
+-- chart:SetData(points), points = { { value, color (theme name, optional),
+-- tooltip = function(tooltip) } }. Drawn to fit the chart's size and
+-- redrawn when it changes. Values below zero go below a zero line.
+
+local function ValueRange(points)
+    local maxV, minV = 0, 0
+    for _, p in ipairs(points) do
+        maxV = math.max(maxV, p.value)
+        minV = math.min(minV, p.value)
+    end
+    local range = maxV - minV
+    return minV, range > 0 and range or 1
+end
+
+-- An invisible column over each point, for its hover tooltip
+local function HoverColumn(chart, i)
+    chart.hovers = chart.hovers or {}
+    local hover = chart.hovers[i]
+    if not hover then
+        hover = CreateFrame("Frame", nil, chart)
+        hover.highlight = hover:CreateTexture(nil, "BACKGROUND")
+        hover.highlight:SetAllPoints()
+        hover.highlight:SetColorTexture(addon:Color("hover"))
+        hover.highlight:Hide()
+        hover:EnableMouse(true)
+        hover:SetScript("OnEnter", function(self)
+            self.highlight:Show()
+            if self.point and self.point.tooltip then
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                self.point.tooltip(GameTooltip)
+                GameTooltip:Show()
+            end
+        end)
+        hover:SetScript("OnLeave", function(self)
+            self.highlight:Hide()
+            GameTooltip:Hide()
+        end)
+        chart.hovers[i] = hover
+    end
+    return hover
+end
+
+local function HideFrom(list, first)
+    for i = first, #(list or {}) do list[i]:Hide() end
+end
+
+function UI.BarChart(parent)
+    local chart = CreateFrame("Frame", nil, parent)
+    chart.bars = {}
+    chart.zero = UI.Line(chart, "borderStrong")
+    chart.zero:SetHeight(1)
+
+    function chart:Draw()
+        local points = chart.points or {}
+        local w, h = chart:GetWidth(), chart:GetHeight()
+        local n = #points
+        if n == 0 or w <= 0 or h <= 0 then
+            HideFrom(chart.bars, 1); HideFrom(chart.hovers, 1)
+            chart.zero:Hide()
+            return
+        end
+        local minV, range = ValueRange(points)
+        local zeroY = -minV / range * h
+        local gap = n > 20 and 2 or 5
+        local barWidth = math.max((w - gap * (n - 1)) / n, 1)
+        for i, p in ipairs(points) do
+            local bar = chart.bars[i]
+            if not bar then
+                bar = chart:CreateTexture(nil, "ARTWORK")
+                chart.bars[i] = bar
+            end
+            local height = math.abs(p.value) / range * h
+            local x = (i - 1) * (barWidth + gap)
+            bar:ClearAllPoints()
+            if p.value >= 0 then
+                bar:SetPoint("BOTTOMLEFT", chart, "BOTTOMLEFT", x, zeroY)
+            else
+                bar:SetPoint("TOPLEFT", chart, "BOTTOMLEFT", x, zeroY)
+            end
+            bar:SetSize(barWidth, math.max(height, 2))
+            local color = p.color or (p.value > 0 and "bar" or p.value < 0 and "loss" or "barEmpty")
+            bar:SetColorTexture(addon:Color(color))
+            bar:Show()
+
+            local hover = HoverColumn(chart, i)
+            hover.point = p
+            hover:ClearAllPoints()
+            hover:SetPoint("TOPLEFT", chart, "TOPLEFT", x, 0)
+            hover:SetSize(barWidth, h)
+            hover:Show()
+        end
+        HideFrom(chart.bars, n + 1); HideFrom(chart.hovers, n + 1)
+        chart.zero:ClearAllPoints()
+        chart.zero:SetPoint("BOTTOMLEFT", chart, "BOTTOMLEFT", 0, zeroY)
+        chart.zero:SetPoint("BOTTOMRIGHT", chart, "BOTTOMRIGHT", 0, zeroY)
+        chart.zero:Show()
+    end
+
+    function chart:SetData(points)
+        chart.points = points
+        chart:Draw()
+    end
+    chart:SetScript("OnSizeChanged", function() chart:Draw() end)
+    return chart
+end
+
+-- A line chart. The line is scaled between the lowest and highest values
+-- (not from zero), so changes in a large total stay visible.
+function UI.LineChart(parent)
+    local chart = CreateFrame("Frame", nil, parent)
+    chart.lines, chart.dots = {}, {}
+    chart.baseline = UI.Line(chart, "borderStrong")
+    chart.baseline:SetHeight(1)
+    chart.baseline:SetPoint("BOTTOMLEFT")
+    chart.baseline:SetPoint("BOTTOMRIGHT")
+
+    function chart:Draw()
+        local points = chart.points or {}
+        local w, h = chart:GetWidth(), chart:GetHeight()
+        local n = #points
+        HideFrom(chart.lines, 1); HideFrom(chart.dots, 1); HideFrom(chart.hovers, 1)
+        if n == 0 or w <= 0 or h <= 0 then return end
+
+        local minV, maxV = math.huge, -math.huge
+        for _, p in ipairs(points) do
+            minV, maxV = math.min(minV, p.value), math.max(maxV, p.value)
+        end
+        local range = maxV - minV
+        -- A flat line sits in the middle
+        local function Y(v) return range > 0 and ((v - minV) / range * (h - 8) + 4) or h / 2 end
+        local step = n > 1 and w / (n - 1) or 0
+        local function X(i) return n > 1 and (i - 1) * step or w / 2 end
+
+        for i, p in ipairs(points) do
+            if i > 1 then
+                local line = chart.lines[i - 1]
+                if not line then
+                    line = chart:CreateLine(nil, "ARTWORK")
+                    line:SetThickness(2)
+                    chart.lines[i - 1] = line
+                end
+                line:SetColorTexture(addon:Color(p.color or "gold"))
+                line:SetStartPoint("BOTTOMLEFT", chart, X(i - 1), Y(points[i - 1].value))
+                line:SetEndPoint("BOTTOMLEFT", chart, X(i), Y(p.value))
+                line:Show()
+            end
+            local dot = chart.dots[i]
+            if not dot then
+                dot = chart:CreateTexture(nil, "OVERLAY")
+                dot:SetSize(5, 5)
+                chart.dots[i] = dot
+            end
+            dot:SetColorTexture(addon:Color(p.color or "gold"))
+            dot:ClearAllPoints()
+            dot:SetPoint("CENTER", chart, "BOTTOMLEFT", X(i), Y(p.value))
+            dot:Show()
+
+            local hover = HoverColumn(chart, i)
+            hover.point = p
+            hover:ClearAllPoints()
+            local columnWidth = n > 1 and step or w
+            hover:SetPoint("TOPLEFT", chart, "TOPLEFT", math.max(X(i) - columnWidth / 2, 0), 0)
+            hover:SetSize(columnWidth, h)
+            hover:Show()
+        end
+    end
+
+    function chart:SetData(points)
+        chart.points = points
+        chart:Draw()
+    end
+    chart:SetScript("OnSizeChanged", function() chart:Draw() end)
+    return chart
+end
+
 -- A helpful empty screen: a heading and what to do next.
 -- box:Set(title, body)
 function UI.EmptyState(parent)

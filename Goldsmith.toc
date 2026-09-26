@@ -16,5 +16,7 @@ Milling.lua
 Stock.lua
 Planner.lua
 Quality.lua
+Insights.lua
 UI.lua
 Window.lua
+Overview.lua
