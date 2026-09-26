@@ -1,0 +1,16 @@
+## Interface: 120100
+## Title: Goldsmith
+## Notes: Crafting profitability analyzer
+## Author: You
+## SavedVariables: GoldsmithDB
+## OptionalDeps: Auctionator
+## Version: 0.1
+
+Core.lua
+Data.lua
+Pricing.lua
+Milling.lua
+Stock.lua
+Planner.lua
+Quality.lua
+UI.lua
