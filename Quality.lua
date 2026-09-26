@@ -18,7 +18,7 @@ local AH_CUT = 0.05
 -- partial mixes are tried too: more spent on materials means less
 -- concentration needed.
 --
--- Saved in GoldsmithDB.tierData[recipeID]:
+-- Saved in addon.char.tierData[recipeID]:
 --   { qualities = { qualityID, ... } (lowest first),
 --     outputs   = { [tier] = { itemID, link } },
 --     scenarios = { { mix = { [lowest-quality itemID] = better units },
@@ -276,7 +276,7 @@ function addon:RefreshTierData(recipeID)
         AddScenario(half, true)
     end
 
-    GoldsmithDB.tierData[recipeID] = {
+    addon.char.tierData[recipeID] = {
         qualities = qualities,
         outputs = outputs,
         scenarios = scenarios,
@@ -377,7 +377,7 @@ end
 -- Expected concentration spent per craft, after ingenuity refunds
 local function ExpectedConcentration(recipe, scenario)
     if scenario.concentration <= 0 then return 0 end
-    local stats = GoldsmithDB.recipeStats[recipe.recipeID]
+    local stats = addon.char.recipeStats[recipe.recipeID]
     local ingenuity = stats and stats.ingenuity or 0
     return math.max(scenario.concentration - ingenuity / 100 * scenario.ingenuityRefund, 0)
 end
@@ -391,7 +391,7 @@ end
 --     (expected per craft), cost, partial, price, priceSource, priceAge,
 --     profit, margin, demand, demandSource, concentrationValue, scenarios }
 function addon:GetTierRows(recipe)
-    local td = GoldsmithDB.tierData[recipe.recipeID]
+    local td = addon.char.tierData[recipe.recipeID]
     if not td then return nil end
 
     local evaluated = {}
@@ -500,7 +500,7 @@ function addon:PlanConcentration(profession, budget)
     local currencyID = GoldsmithDB.concentrationCurrency and GoldsmithDB.concentrationCurrency[profession]
     local candidates = {}
     for _, recipe in pairs(GoldsmithDB.recipes) do
-        local stats = GoldsmithDB.recipeStats[recipe.recipeID]
+        local stats = addon.char.recipeStats[recipe.recipeID]
         if recipe.profession == profession and stats and stats.concentrationCurrencyID == currencyID then
             local best
             local rows = addon:GetTierRows(recipe) or {}
@@ -558,7 +558,6 @@ function addon:TierIconText(tier, tierCount)
 end
 
 function addon:InitializeQuality()
-    GoldsmithDB.tierData = GoldsmithDB.tierData or {}
 end
 
 _G.Goldsmith = addon

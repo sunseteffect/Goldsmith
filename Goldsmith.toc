@@ -8,6 +8,7 @@
 
 Core.lua
 Data.lua
+Characters.lua
 Pricing.lua
 Milling.lua
 Stock.lua

@@ -360,6 +360,7 @@ function addon:Initialize()
         LearnProfessionIcons()
         if addon.Refresh then addon.Refresh() end
     end)
+    addon:InitializeCharacters()
     addon:InitializeStock()
     addon:InitializePricing()
     addon:InitializeMilling()
@@ -424,6 +425,7 @@ local function PrintHelp()
     print("  /gsm list - show tracked crafted items")
     print("  /gsm recipes - show saved recipes and their material cost")
     print("  /gsm milling - show your milling yields and pigment costs")
+    print("  /gsm chars - list your characters, professions and concentration")
     print("  /gsm reset - delete all transactions")
     print("  Right-click a row in the log to delete that entry.")
 end
@@ -456,6 +458,8 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:ListRecipes()
     elseif cmd == "milling" then
         addon:ListMilling()
+    elseif cmd == "chars" then
+        addon:ListCharacters()
     elseif cmd == "stats" then
         addon:DumpCraftingStats()
     elseif cmd == "reset" then

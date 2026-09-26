@@ -602,7 +602,7 @@ end
 -- Your multicraft, resourcefulness and ingenuity chances, concentration cost
 -- and expected quality come straight from the game for each recipe
 -- (C_TradeSkillUI.GetCraftingOperationInfo). They're read whenever you open
--- a profession and kept in GoldsmithDB.recipeStats[recipeID]:
+-- a profession and kept in addon.char.recipeStats[recipeID]:
 --   { multicraft = %, resourcefulness = %, ingenuity = %,
 --     concentrationCost, ingenuityRefund, quality, qualityID,
 --     isQualityCraft, updated }
@@ -638,7 +638,7 @@ function addon:RefreshRecipeStats(recipeID)
             stats[key] = stat.ratingPct
         end
     end
-    GoldsmithDB.recipeStats[recipeID] = stats
+    addon.char.recipeStats[recipeID] = stats
 
     -- Each expansion's version of a profession has its own concentration,
     -- stored as a currency (0 for recipes that don't use concentration).
@@ -669,7 +669,7 @@ end
 -- Calibration
 --
 -- Proc sizes, learned from your crafts and pooled per profession so they're
--- learned quickly. Kept in GoldsmithDB.calibration[profession]:
+-- learned quickly. Kept in addon.char.calibration[profession]:
 --   mcProcs, mcExtraRatio  - multicraft procs, and the sum of
 --                            (extra items / normal output) per proc
 --   resProcs, resSavedRatio - resourcefulness returns, and the sum of
@@ -681,7 +681,7 @@ local BASE_RESOURCEFULNESS_SAVE = 0.30 -- share of a material saved per proc
 local PRIOR_WEIGHT = 5
 
 local function GetCalibration(profession)
-    local c = GoldsmithDB.calibration[profession]
+    local c = addon.char.calibration[profession]
     local mcExtra, resSave = BASE_MULTICRAFT_EXTRA, BASE_RESOURCEFULNESS_SAVE
     if c then
         mcExtra = (BASE_MULTICRAFT_EXTRA * PRIOR_WEIGHT + (c.mcExtraRatio or 0)) / (PRIOR_WEIGHT + (c.mcProcs or 0))
@@ -699,7 +699,7 @@ end
 -- sizes. Without stats for the recipe, the recipe's base numbers.
 -- Returns outputPerCraft, slots ({ slot, quantity }), and the stats used.
 function addon:GetCraftModel(recipe)
-    local stats = recipe.recipeID and GoldsmithDB.recipeStats[recipe.recipeID]
+    local stats = recipe.recipeID and addon.char.recipeStats[recipe.recipeID]
     local base = recipe.outputQty
     local slots = {}
     if not stats then
@@ -787,10 +787,10 @@ local function OnCraftResult(resultData)
     stats.crafts = stats.crafts + 1
     stats.output = stats.output + (resultData.quantity or 0)
 
-    local c = GoldsmithDB.calibration[recipe.profession]
+    local c = addon.char.calibration[recipe.profession]
     if not c then
         c = { mcProcs = 0, mcExtraRatio = 0, resProcs = 0, resSavedRatio = 0 }
-        GoldsmithDB.calibration[recipe.profession] = c
+        addon.char.calibration[recipe.profession] = c
     end
 
     -- Multicraft: extra items beyond the recipe's normal output
@@ -1287,18 +1287,26 @@ local function ScanLearnedRecipes()
 
     -- New learned recipes to save, and saved ones whose stats haven't been
     -- read this session (stats change with gear, specialization and skill)
+    -- Each recipe this character has learned is marked as known by it;
+    -- stats are only read for those (they're this character's stats).
     local toSave, toStats = {}, {}
     for _, id in ipairs(ids) do
-        if GoldsmithDB.recipes[id] then
-            if not statsReadThisSession[id] then
-                statsReadThisSession[id] = true
-                table.insert(toStats, id)
-            end
-        elseif not triedThisSession[id] then
-            triedThisSession[id] = true
+        if not statsReadThisSession[id] and not triedThisSession[id] then
             local info = C_TradeSkillUI.GetRecipeInfo(id)
-            if info and info.learned then
-                table.insert(toSave, id)
+            local learned = info and info.learned
+            if learned then
+                addon:MarkRecipeKnown(id)
+            end
+            if GoldsmithDB.recipes[id] then
+                statsReadThisSession[id] = true
+                if learned then
+                    table.insert(toStats, id)
+                end
+            else
+                triedThisSession[id] = true
+                if learned then
+                    table.insert(toSave, id)
+                end
             end
         end
     end
@@ -1528,8 +1536,6 @@ function addon:InitializePricing()
         end
     end)
 
-    GoldsmithDB.recipeStats = GoldsmithDB.recipeStats or {}
-    GoldsmithDB.calibration = GoldsmithDB.calibration or {}
     GoldsmithDB.craftLog = GoldsmithDB.craftLog or {}
     GoldsmithDB.craftLots = GoldsmithDB.craftLots or {}
     -- Recipes saved before recipeID was stored in them
