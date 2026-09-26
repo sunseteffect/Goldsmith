@@ -115,7 +115,8 @@ function addon:CreateLedger(store)
         -- estimateCost(itemName) fills in cost for sales recorded before
         -- sales kept their cost; sales with no cost data at all are left
         -- out of profit and counted in unknownSales.
-        getSummary = function(self, prof, estimateCost)
+        -- since (a time) counts only entries from then on; nil for all time.
+        getSummary = function(self, prof, estimateCost, since)
             local s = {
                 sales = 0, soldCost = 0, deposits = 0, spent = 0,
                 profitSales = 0, unknownSales = 0, estimated = false,
@@ -124,7 +125,7 @@ function addon:CreateLedger(store)
                 refunds = 0, refundsKnown = true,
             }
             for _, e in ipairs(entries) do
-                if prof == "All" or e.profession == prof then
+                if (prof == "All" or e.profession == prof) and (not since or e.timestamp >= since) then
                     s.count = s.count + 1
                     if e.type == "REVENUE" then
                         s.sales = s.sales + e.totalCopper
@@ -158,7 +159,90 @@ function addon:CreateLedger(store)
             s.margin = s.soldCost > 0 and (s.profit / s.soldCost * 100) or nil
             return s
         end,
+
+        -- Profit and sales for each of the last `days` days (oldest first),
+        -- worked out the same way as getSummary: a sale counts on the day
+        -- it arrived, a deposit on the day it was paid.
+        -- Returns { { day = "YYYY-MM-DD", profit, sales } }.
+        getDailyProfit = function(self, prof, estimateCost, days)
+            local list, byDay = {}, {}
+            for i = days - 1, 0, -1 do
+                local day = date("%Y-%m-%d", time() - i * 86400)
+                local d = { day = day, profit = 0, sales = 0 }
+                table.insert(list, d)
+                byDay[day] = d
+            end
+            for _, e in ipairs(entries) do
+                local d = byDay[date("%Y-%m-%d", e.timestamp)]
+                if d and (prof == "All" or e.profession == prof) then
+                    if e.type == "REVENUE" then
+                        d.sales = d.sales + e.totalCopper
+                        local cost = e.costBasis
+                        if not cost and estimateCost then
+                            local unit = estimateCost(e.item)
+                            cost = unit and unit * e.quantity
+                        end
+                        if cost then
+                            d.profit = d.profit + e.totalCopper - cost
+                        end
+                    elseif e.kind == "DEPOSIT" then
+                        d.profit = d.profit - e.totalCopper
+                    end
+                end
+            end
+            return list
+        end,
     }
+end
+
+-- Date ranges for the date filter. Ranges start at midnight, so "Last 7
+-- days" is today and the 6 days before it.
+addon.DATE_RANGES = {
+    { key = "today", label = "Today", days = 1 },
+    { key = "7d", label = "Last 7 days", days = 7 },
+    { key = "30d", label = "Last 30 days", days = 30 },
+    { key = "all", label = "All time" },
+}
+
+function addon:GetDateRange(key)
+    for _, r in ipairs(addon.DATE_RANGES) do
+        if r.key == key then return r end
+    end
+    return addon.DATE_RANGES[2]
+end
+
+-- When a date range starts (a time), or nil for all time
+function addon:DateRangeStart(key)
+    local range = addon:GetDateRange(key)
+    if not range.days then return nil end
+    local t = date("*t", time() - (range.days - 1) * 86400)
+    return time({ year = t.year, month = t.month, day = t.day, hour = 0 })
+end
+
+-- Sales recorded before sales kept their cost get today's cost estimate
+local function EstimateSaleCost(itemName)
+    return (addon:GetUnitCostBasis(itemName))
+end
+
+-- Profit summary for a profession ("All" for every one) and date range key
+function addon:GetSummary(prof, rangeKey)
+    return addon.ledger:getSummary(prof, EstimateSaleCost, addon:DateRangeStart(rangeKey))
+end
+
+function addon:GetDailyProfit(prof, days)
+    return addon.ledger:getDailyProfit(prof, EstimateSaleCost, days)
+end
+
+-- Profit per hour of goldmaking for each of the last `days` days (oldest
+-- first): { { day, profit, seconds, perHour } }. perHour is nil on days
+-- without goldmaking time.
+function addon:GetGoldPerHour(prof, days)
+    local list = addon:GetDailyProfit(prof, days)
+    for _, d in ipairs(list) do
+        d.seconds = addon:GetGoldmakingSeconds(d.day)
+        d.perHour = d.seconds > 0 and (d.profit / d.seconds * 3600) or nil
+    end
+    return list
 end
 
 _G.Goldsmith = addon

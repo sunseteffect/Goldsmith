@@ -246,6 +246,9 @@ function addon:GetProfessions()
     for _, prof in pairs(GoldsmithDB.products or {}) do add(prof) end
     for _, prof in pairs(GoldsmithDB.reagents or {}) do add(prof) end
     for _, e in ipairs(addon.ledger:getAll()) do add(e.profession) end
+    for _, c in pairs(GoldsmithDB.characters or {}) do
+        for prof in pairs(c.professions or {}) do add(prof) end
+    end
 
     local list = {}
     for prof in pairs(seen) do
@@ -368,6 +371,7 @@ function addon:Initialize()
 
     addon.ledger = addon:CreateLedger(GoldsmithDB)
     addon:CreateMainFrame()
+    addon:CreateWindow()
     addon:ReassignProfessions()
 
     hooksecurefunc(C_AuctionHouse, "ConfirmCommoditiesPurchase", OnConfirmCommoditiesPurchase)
@@ -420,12 +424,14 @@ end
 local function PrintHelp()
     Print("Commands:")
     print("  /gsm - show or hide the window")
+    print("  /gsm old - show or hide the v1 window (until v2 is finished)")
     print("  /gsm add [item] - track a crafted item (shift-click it or type its name)")
     print("  /gsm remove [item] - stop tracking a crafted item")
     print("  /gsm list - show tracked crafted items")
     print("  /gsm recipes - show saved recipes and their material cost")
     print("  /gsm milling - show your milling yields and pigment costs")
     print("  /gsm chars - list your characters, professions and concentration")
+    print("  /gsm data - check the numbers behind the new window")
     print("  /gsm reset - delete all transactions")
     print("  Right-click a row in the log to delete that entry.")
 end
@@ -437,7 +443,7 @@ SlashCmdList["GOLDSMITH"] = function(msg)
     cmd = cmd:lower()
 
     if cmd == "" then
-        addon:ToggleMainFrame()
+        addon:ToggleWindow()
     elseif cmd == "add" and rest ~= "" then
         local name = ParseItemName(rest)
         GoldsmithDB.products[name] = true
@@ -460,6 +466,10 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:ListMilling()
     elseif cmd == "chars" then
         addon:ListCharacters()
+    elseif cmd == "data" then
+        addon:ListData()
+    elseif cmd == "old" then
+        addon:ToggleMainFrame()
     elseif cmd == "stats" then
         addon:DumpCraftingStats()
     elseif cmd == "reset" then
@@ -474,8 +484,9 @@ function addon:ToggleMainFrame()
     if addon.mainFrame:IsShown() then
         addon.mainFrame:Hide()
     else
-        addon.Refresh()
+        -- Shown first: addon.Refresh only refreshes the v1 window while it's open
         addon.mainFrame:Show()
+        addon.Refresh()
     end
 end
 

@@ -4,10 +4,12 @@
 ## Author: You
 ## SavedVariables: GoldsmithDB
 ## OptionalDeps: Auctionator
-## Version: 0.1
+## Version: 2.0-dev
 
 Core.lua
 Data.lua
+Theme.lua
+Widgets.lua
 Characters.lua
 Pricing.lua
 Milling.lua
@@ -15,3 +17,4 @@ Stock.lua
 Planner.lua
 Quality.lua
 UI.lua
+Window.lua

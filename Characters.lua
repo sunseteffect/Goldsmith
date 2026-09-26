@@ -20,9 +20,12 @@ end
 --     calibration   = { [profession] = procs }     (see Pricing.lua)
 --     concentration = { [profession] = { currencyID, current, max,
 --                                        cycleMS, perCycle, time } },
---     money, gold   = { ["YYYY-MM-DD"] = copper at the end of that day } }
+--     money, gold   = { ["YYYY-MM-DD"] = copper at the end of that day },
+--     goldTime      = { ["YYYY-MM-DD"] = seconds spent making gold },
+--     stock, stockTime = { [itemID] = count in bags and bank } and when }
 -- addon.char is the logged-in character's table. Prices, recipes' materials,
 -- the ledger, milling and vendor prices stay shared across the account.
+-- The warband bank is shared too: GoldsmithDB.warbandStock and warbandGold.
 --
 -- Concentration refills over time, so an alt's current amount is worked out
 -- from its last saved amount and how long ago that was.
@@ -38,13 +41,13 @@ local function NewCharacter(name, realm)
         name = name, realm = realm,
         professions = {}, knownRecipes = {},
         recipeStats = {}, tierData = {}, calibration = {},
-        concentration = {}, gold = {},
+        concentration = {}, gold = {}, goldTime = {}, stock = {},
     }
 end
 
 local function EnsureFields(c)
     for _, key in ipairs({ "professions", "knownRecipes", "recipeStats", "tierData",
-                           "calibration", "concentration", "gold" }) do
+                           "calibration", "concentration", "gold", "goldTime", "stock" }) do
         c[key] = c[key] or {}
     end
 end
@@ -126,15 +129,192 @@ local function SnapshotConcentration()
     end
 end
 
+local function PruneDays(days)
+    local cutoff = date("%Y-%m-%d", time() - GOLD_HISTORY_DAYS * 86400)
+    for day in pairs(days) do
+        if day < cutoff then days[day] = nil end
+    end
+end
+
+-- Gold in the warband bank, if the game reports it
+local function GetWarbandGold()
+    if not (C_Bank and C_Bank.FetchDepositedMoney and Enum.BankType and Enum.BankType.Account) then return nil end
+    local ok, money = pcall(C_Bank.FetchDepositedMoney, Enum.BankType.Account)
+    if ok and type(money) == "number" then return money end
+end
+
 local function RecordGold()
     local c = addon.char
     local money = GetMoney()
+    local today = date("%Y-%m-%d")
     c.money = money
-    c.gold[date("%Y-%m-%d")] = money
-    local cutoff = date("%Y-%m-%d", time() - GOLD_HISTORY_DAYS * 86400)
-    for day in pairs(c.gold) do
-        if day < cutoff then c.gold[day] = nil end
+    c.gold[today] = money
+    PruneDays(c.gold)
+
+    local warband = GetWarbandGold()
+    if warband then
+        GoldsmithDB.warbandGold[today] = warband
+        PruneDays(GoldsmithDB.warbandGold)
     end
+end
+
+-- Stock
+--
+-- How many of each item Goldsmith cares about (materials and crafted items)
+-- each character has in bags and bank, so alts' stock counts too. The
+-- warband bank is counted once, for the account.
+
+-- Every item worth counting: tracked materials, and recipe outputs
+-- including each quality tier's item
+local function GetStockItemIDs()
+    local ids = {}
+    for itemID in pairs(addon:GetTrackedMaterials()) do
+        ids[itemID] = true
+    end
+    for _, recipe in pairs(GoldsmithDB.recipes) do
+        if recipe.outputItemID then ids[recipe.outputItemID] = true end
+    end
+    for _, c in pairs(GoldsmithDB.characters) do
+        for _, td in pairs(c.tierData) do
+            for _, out in pairs(td.outputs or {}) do
+                if out.itemID then ids[out.itemID] = true end
+            end
+        end
+    end
+    return ids
+end
+
+local function SnapshotStock()
+    local stock, warband = {}, {}
+    for itemID in pairs(GetStockItemIDs()) do
+        local own = C_Item.GetItemCount(itemID, true, false, true, false) or 0
+        local withWarband = C_Item.GetItemCount(itemID, true, false, true, true) or 0
+        if own > 0 then stock[itemID] = own end
+        if withWarband > own then warband[itemID] = withWarband - own end
+    end
+    addon.char.stock, addon.char.stockTime = stock, time()
+    GoldsmithDB.warbandStock = warband
+end
+
+-- An item's stock across the account.
+-- Returns the total and a list of { key, name, count } (the warband bank
+-- has key "warband"), largest first.
+function addon:GetStock(itemID)
+    local list, total = {}, 0
+    for key, c in pairs(GoldsmithDB.characters) do
+        local count = c.stock[itemID]
+        if count and count > 0 then
+            table.insert(list, { key = key, name = c.name, count = count })
+            total = total + count
+        end
+    end
+    local warband = GoldsmithDB.warbandStock[itemID]
+    if warband and warband > 0 then
+        table.insert(list, { key = "warband", name = "Warband bank", count = warband })
+        total = total + warband
+    end
+    table.sort(list, function(a, b) return a.count > b.count end)
+    return total, list
+end
+
+-- Goldmaking time
+--
+-- Time spent making gold, for gold per hour: while a profession window, the
+-- AH, the mailbox, a vendor or the bank is open. A gap shorter than
+-- GOLDMAKING_GAP between two of them (walking from the AH to the mailbox)
+-- counts too. Dungeons, questing and idling in town don't.
+local GOLDMAKING_GAP = 5 * 60
+local GOLDMAKING_TICK = 30
+
+local GOLDMAKING_OPEN = {
+    TRADE_SKILL_SHOW = "profession", AUCTION_HOUSE_SHOW = "ah", MAIL_SHOW = "mail",
+    MERCHANT_SHOW = "vendor", BANKFRAME_OPENED = "bank",
+}
+local GOLDMAKING_CLOSE = {
+    TRADE_SKILL_CLOSE = "profession", AUCTION_HOUSE_CLOSED = "ah", MAIL_CLOSED = "mail",
+    MERCHANT_CLOSED = "vendor", BANKFRAME_CLOSED = "bank",
+}
+
+local openSources = {}   -- which of the above are open now
+local lastMark           -- time goldmaking time was last added up to
+local lastActiveEnd      -- when the last goldmaking stretch ended
+
+local function IsGoldmaking()
+    return next(openSources) ~= nil
+end
+
+local function AddGoldTime(seconds)
+    if seconds <= 0 then return end
+    local c = addon.char
+    local today = date("%Y-%m-%d")
+    c.goldTime[today] = (c.goldTime[today] or 0) + seconds
+end
+
+-- Count time up to now while goldmaking
+local function FlushGoldTime()
+    if IsGoldmaking() and lastMark then
+        local now = time()
+        AddGoldTime(now - lastMark)
+        lastMark = now
+    end
+end
+
+local function OnGoldmakingOpen(source)
+    local now = time()
+    if not IsGoldmaking() then
+        if lastActiveEnd and now - lastActiveEnd < GOLDMAKING_GAP then
+            AddGoldTime(now - lastActiveEnd)
+        end
+        lastMark = now
+    end
+    openSources[source] = true
+end
+
+local function OnGoldmakingClose(source)
+    if not openSources[source] then return end
+    FlushGoldTime()
+    openSources[source] = nil
+    if not IsGoldmaking() then
+        lastActiveEnd = time()
+    end
+end
+
+-- Seconds spent making gold on a day ("YYYY-MM-DD"), all characters
+function addon:GetGoldmakingSeconds(day)
+    local total = 0
+    for _, c in pairs(GoldsmithDB.characters) do
+        total = total + (c.goldTime[day] or 0)
+    end
+    return total
+end
+
+-- Account gold
+--
+-- Gold across all characters plus the warband bank, at the end of each of
+-- the last `days` days (oldest first). A character's gold on a day without
+-- a record is its most recent earlier record; before its first record it
+-- counts as nothing. Returns { { day, copper } }.
+local function ValueOn(history, day)
+    local best, bestDay
+    for d, value in pairs(history) do
+        if d <= day and (not bestDay or d > bestDay) then
+            best, bestDay = value, d
+        end
+    end
+    return best or 0
+end
+
+function addon:GetAccountGoldHistory(days)
+    local list = {}
+    for i = days - 1, 0, -1 do
+        local day = date("%Y-%m-%d", time() - i * 86400)
+        local total = ValueOn(GoldsmithDB.warbandGold, day)
+        for _, c in pairs(GoldsmithDB.characters) do
+            total = total + ValueOn(c.gold, day)
+        end
+        table.insert(list, { day = day, copper = total })
+    end
+    return list
 end
 
 local function UpdateAll()
@@ -144,6 +324,26 @@ local function UpdateAll()
     UpdateProfessions()
     SnapshotConcentration()
     RecordGold()
+end
+
+-- Whose stats to use
+--
+-- Recipe stats, tiers and calibration are read from addon:StatsChar(): the
+-- logged-in character, unless addon:WithCharacter is working something out
+-- for an alt (e.g. what an alt's concentration is worth). New stats are
+-- always saved to the logged-in character.
+function addon:StatsChar()
+    return addon.statsChar or addon.char
+end
+
+-- Runs fn(...) using charKey's stats and returns what it returns
+function addon:WithCharacter(charKey, fn, ...)
+    local previous = addon.statsChar
+    addon.statsChar = GoldsmithDB.characters[charKey] or addon.char
+    local results = { pcall(fn, ...) }
+    addon.statsChar = previous
+    if not results[1] then error(results[2], 0) end
+    return unpack(results, 2)
 end
 
 -- A character's concentration for a profession, worked out to now from its
@@ -213,8 +413,48 @@ function addon:ListCharacters()
     end
 end
 
+-- /gsm data: the numbers the v2 screens are built on, for checking them
+function addon:ListData()
+    FlushGoldTime()
+    RecordGold()
+    SnapshotStock()
+    Print("Profit on sales (all professions):")
+    for _, r in ipairs(addon.DATE_RANGES) do
+        local s = addon:GetSummary("All", r.key)
+        print(string.format("  %s: %s%s from %s of sales", r.label,
+            s.profit >= 0 and "+" or "-", FormatGold(math.abs(s.profit)), FormatGold(s.sales)))
+    end
+
+    local parts = {}
+    for _, d in ipairs(addon:GetGoldPerHour("All", 7)) do
+        table.insert(parts, string.format("%s %s%.0fg (%dm)", d.day:sub(6),
+            d.profit >= 0 and "+" or "-", math.abs(d.profit) / 10000, math.floor(d.seconds / 60)))
+    end
+    Print("Last 7 days, profit (goldmaking minutes): %s", table.concat(parts, ", "))
+
+    local history = addon:GetAccountGoldHistory(7)
+    parts = {}
+    for _, d in ipairs(history) do
+        table.insert(parts, string.format("%s %.0fg", d.day:sub(6), d.copper / 10000))
+    end
+    Print("Account gold: %s", table.concat(parts, ", "))
+    local warband = GetWarbandGold()
+    print(string.format("  Warband bank gold: %s", warband and FormatGold(warband) or "not reported"))
+
+    local items, units = 0, 0
+    for _, c in pairs(GoldsmithDB.characters) do
+        for _, count in pairs(c.stock) do items, units = items + 1, units + count end
+    end
+    local wItems, wUnits = 0, 0
+    for _, count in pairs(GoldsmithDB.warbandStock) do wItems, wUnits = wItems + 1, wUnits + count end
+    Print("Stock: %d kinds of item (%d units) on characters, %d kinds (%d units) in the warband bank.",
+        items, units, wItems, wUnits)
+end
+
 function addon:InitializeCharacters()
     GoldsmithDB.characters = GoldsmithDB.characters or {}
+    GoldsmithDB.warbandGold = GoldsmithDB.warbandGold or {}
+    GoldsmithDB.warbandStock = GoldsmithDB.warbandStock or {}
     local key = addon:CharKey()
     local c = GoldsmithDB.characters[key]
     if not c then
@@ -227,7 +467,11 @@ function addon:InitializeCharacters()
     MigrateAccountData()
     -- The migration may have created or filled this character's table
     addon.char = GoldsmithDB.characters[key]
-    EnsureFields(addon.char)
+    -- Every character, not just this one: alts saved by an older version
+    -- lack fields added since, and screens read all characters
+    for _, c in pairs(GoldsmithDB.characters) do
+        EnsureFields(c)
+    end
 
     local frame = CreateFrame("Frame")
     frame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -235,19 +479,46 @@ function addon:InitializeCharacters()
     frame:RegisterEvent("PLAYER_MONEY")
     frame:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
     frame:RegisterEvent("PLAYER_LOGOUT")
-    local pending = false
+    frame:RegisterEvent("BAG_UPDATE_DELAYED")
+    for event in pairs(GOLDMAKING_OPEN) do frame:RegisterEvent(event) end
+    for event in pairs(GOLDMAKING_CLOSE) do frame:RegisterEvent(event) end
+    C_Timer.NewTicker(GOLDMAKING_TICK, FlushGoldTime)
+
+    local pending, stockPending = false, false
     frame:SetScript("OnEvent", function(_, event)
+        if GOLDMAKING_OPEN[event] then
+            OnGoldmakingOpen(GOLDMAKING_OPEN[event])
+            return
+        elseif GOLDMAKING_CLOSE[event] then
+            OnGoldmakingClose(GOLDMAKING_CLOSE[event])
+            -- Closing the bank is when bank counts are surest
+            if event ~= "BANKFRAME_CLOSED" then return end
+        end
+
         if event == "PLAYER_LOGOUT" then
+            FlushGoldTime()
             UpdateAll()
+            SnapshotStock()
         elseif event == "PLAYER_MONEY" then
             RecordGold()
+        elseif event == "BAG_UPDATE_DELAYED" or event == "BANKFRAME_CLOSED" then
+            -- Bags change in bursts while crafting or looting
+            if not stockPending then
+                stockPending = true
+                C_Timer.After(10, function()
+                    stockPending = false
+                    SnapshotStock()
+                end)
+            end
         elseif not pending then
             -- Profession and currency data can arrive a moment after these
             -- events, and they can fire in bursts
             pending = true
+            local login = event == "PLAYER_ENTERING_WORLD"
             C_Timer.After(2, function()
                 pending = false
                 UpdateAll()
+                if login then SnapshotStock() end
             end)
         end
     end)

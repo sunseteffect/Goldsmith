@@ -377,7 +377,7 @@ end
 -- Expected concentration spent per craft, after ingenuity refunds
 local function ExpectedConcentration(recipe, scenario)
     if scenario.concentration <= 0 then return 0 end
-    local stats = addon.char.recipeStats[recipe.recipeID]
+    local stats = addon:StatsChar().recipeStats[recipe.recipeID]
     local ingenuity = stats and stats.ingenuity or 0
     return math.max(scenario.concentration - ingenuity / 100 * scenario.ingenuityRefund, 0)
 end
@@ -391,7 +391,7 @@ end
 --     (expected per craft), cost, partial, price, priceSource, priceAge,
 --     profit, margin, demand, demandSource, concentrationValue, scenarios }
 function addon:GetTierRows(recipe)
-    local td = addon.char.tierData[recipe.recipeID]
+    local td = addon:StatsChar().tierData[recipe.recipeID]
     if not td then return nil end
 
     local evaluated = {}
@@ -500,7 +500,7 @@ function addon:PlanConcentration(profession, budget)
     local currencyID = GoldsmithDB.concentrationCurrency and GoldsmithDB.concentrationCurrency[profession]
     local candidates = {}
     for _, recipe in pairs(GoldsmithDB.recipes) do
-        local stats = addon.char.recipeStats[recipe.recipeID]
+        local stats = addon:StatsChar().recipeStats[recipe.recipeID]
         if recipe.profession == profession and stats and stats.concentrationCurrencyID == currencyID then
             local best
             local rows = addon:GetTierRows(recipe) or {}

@@ -681,7 +681,7 @@ local BASE_RESOURCEFULNESS_SAVE = 0.30 -- share of a material saved per proc
 local PRIOR_WEIGHT = 5
 
 local function GetCalibration(profession)
-    local c = addon.char.calibration[profession]
+    local c = addon:StatsChar().calibration[profession]
     local mcExtra, resSave = BASE_MULTICRAFT_EXTRA, BASE_RESOURCEFULNESS_SAVE
     if c then
         mcExtra = (BASE_MULTICRAFT_EXTRA * PRIOR_WEIGHT + (c.mcExtraRatio or 0)) / (PRIOR_WEIGHT + (c.mcProcs or 0))
@@ -699,7 +699,7 @@ end
 -- sizes. Without stats for the recipe, the recipe's base numbers.
 -- Returns outputPerCraft, slots ({ slot, quantity }), and the stats used.
 function addon:GetCraftModel(recipe)
-    local stats = recipe.recipeID and addon.char.recipeStats[recipe.recipeID]
+    local stats = recipe.recipeID and addon:StatsChar().recipeStats[recipe.recipeID]
     local base = recipe.outputQty
     local slots = {}
     if not stats then
