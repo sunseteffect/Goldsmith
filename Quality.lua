@@ -471,6 +471,7 @@ function addon:GetTierRows(recipe)
                 row.description = addon:DescribeMix(recipe, row.scenario)
                 if row.itemID then
                     row.demand, row.demandSource = addon:GetDemand(row.itemID, recipe.outputName)
+                    row.saleRate = addon:GetSaleRate(row.itemID)
                 end
                 table.insert(rows, row)
             end

@@ -4,9 +4,9 @@ local UI = addon.UI
 -- Crafts tab
 --
 -- "What's worth crafting?" Every craft you know, in a simple view (Item,
--- Cost, AH price, Profit, ROI, Sold/day). The Concentration switch adds the
--- ways that use concentration, their Conc and g/conc columns, and a budget
--- bar. One cost number, estimated from your stats; the hover shows the worst
+-- Cost, AH price, Profit, ROI, Sold/day, Sale rate). The Concentration
+-- switch adds the ways that use concentration, their Conc and g/conc
+-- columns, and a budget bar. One cost number, estimated from your stats; the hover shows the worst
 -- case and what yours cost you. Clicking a craft opens the planner.
 --
 -- Crafts the Overview wouldn't recommend (old expansion, slow sellers) are
@@ -29,6 +29,7 @@ local SIMPLE_COLUMNS = {
     { key = "profit", label = "Profit", width = 84, justify = "RIGHT" },
     { key = "margin", label = "ROI", width = 56, justify = "RIGHT" },
     { key = "demand", label = "Sold/day", width = 70, justify = "RIGHT" },
+    { key = "saleRate", label = "Sale rate", width = 64, justify = "RIGHT" },
 }
 local CONC_COLUMNS = {
     { key = "item", label = "Item" },
@@ -39,6 +40,7 @@ local CONC_COLUMNS = {
     { key = "conc", label = "Conc", width = 50, justify = "RIGHT" },
     { key = "gpc", label = "g/conc", width = 60, justify = "RIGHT" },
     { key = "demand", label = "Sold/day", width = 70, justify = "RIGHT" },
+    { key = "saleRate", label = "Sale rate", width = 64, justify = "RIGHT" },
 }
 
 local function ItemText(item)
@@ -107,6 +109,7 @@ local SORTS = {
     conc   = { firstDescending = false, value = function(i) return i.info.concentrate and i.info.concentration or nil end },
     gpc    = { firstDescending = true,  value = function(i) return i.info.concentrate and i.info.concentrationValue or nil end },
     demand = { firstDescending = true,  value = function(i) return i.info.demand end },
+    saleRate = { firstDescending = true, value = function(i) return i.info.saleRate end },
 }
 local DEFAULT_SORT = { key = "profit", descending = true }
 
@@ -190,6 +193,9 @@ local function FillCraftRow(row, item)
         -- Only your own sales, which undercount the market
         cells.demand:SetTextColor(addon:Color("muted"))
     end
+
+    cells.saleRate:SetText(addon:FormatSaleRate(info.saleRate))
+    cells.saleRate:SetTextColor(addon:Color(info.saleRate and "text" or "dim"))
 end
 
 local LABEL, VALUE = { 0.8, 0.8, 0.8 }, { 1, 1, 1 }
@@ -248,6 +254,9 @@ local function CraftTooltip(tooltip, item)
     end
     if info.demand then
         Line(tooltip, "Sold per day", string.format("%s (%s)", addon:FormatDemand(info.demand), info.demandSource or "?"))
+    end
+    if info.saleRate then
+        Line(tooltip, "Sale rate", addon:FormatSaleRate(info.saleRate) .. " of listings sell")
     end
     local have = item.itemID and addon:GetStock(item.itemID) or 0
     if have > 0 then Line(tooltip, "You have", tostring(have)) end
@@ -615,8 +624,9 @@ local function CreatePlanScreen(parent)
 
         if plan.demand and plan.demand > 0 then
             local days = quantity / plan.demand
-            local text = string.format("Sells about %s a day (%s). Making %d is ",
-                addon:FormatDemand(plan.demand), plan.demandSource or "?", quantity)
+            local rate = plan.saleRate and (", " .. addon:FormatSaleRate(plan.saleRate) .. " of listings sell") or ""
+            local text = string.format("Sells about %s a day (%s%s). Making %d is ",
+                addon:FormatDemand(plan.demand), plan.demandSource or "?", rate, quantity)
             if days >= 1 then
                 text = text .. string.format("about %.1f days of sales, so it may be slow to sell.", days)
             elseif days < 0.01 then
@@ -797,6 +807,25 @@ local function Create(parent)
         addon.RefreshWindow()
     end)
     view.concSwitch:SetPoint("TOPRIGHT", 0, 0)
+
+    -- Hover explanations for the two options (hooked, so the widgets keep
+    -- their own hover colors)
+    local function Explain(frame, fill)
+        frame:HookScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+            fill(GameTooltip)
+            GameTooltip:Show()
+        end)
+        frame:HookScript("OnLeave", GameTooltip_Hide)
+    end
+    Explain(view.concSwitch, function(tooltip)
+        tooltip:AddLine("Concentration", 1, 1, 1)
+        Note(tooltip, "Adds the ways to craft with concentration: how much each uses (Conc) and the extra gold it earns per point (g/conc).")
+        Note(tooltip, "The bar at the bottom shows your concentration on all characters and the best way to spend it.")    end)
+    Explain(view.profitable, function(tooltip)
+        tooltip:AddLine("Profitable only", 1, 1, 1)
+        Note(tooltip, "Hides crafts that lose gold at current AH prices, and ones with no AH price yet.")
+    end)
     view.count = UI.Text(list, "label", "dim", "RIGHT")
     view.count:SetPoint("RIGHT", view.concSwitch, "LEFT", -12, 0)
 

@@ -208,6 +208,10 @@ local function CraftsAction(crafts, prof)
                 if c.demand then
                     tooltip:AddDoubleLine("Sold per day", addon:FormatDemand(c.demand), 0.8, 0.8, 0.8, 1, 1, 1)
                 end
+                if c.row.saleRate then
+                    tooltip:AddDoubleLine("Sale rate", addon:FormatSaleRate(c.row.saleRate) .. " of listings sell",
+                        0.8, 0.8, 0.8, 1, 1, 1)
+                end
                 if c.have > 0 then
                     tooltip:AddDoubleLine("You have", tostring(c.have), 0.8, 0.8, 0.8, 1, 1, 1)
                 end

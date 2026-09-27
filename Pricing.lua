@@ -391,6 +391,24 @@ function addon:FormatDemand(perDay)
     return string.format("%.1f", perDay)
 end
 
+-- Share of an item's auctions that sell (0 to 1), from TSM's region data,
+-- or nil without TSM or data. A low rate means most listings expire.
+function addon:GetSaleRate(itemID)
+    if not (itemID and TSM_API and TSM_API.GetCustomPriceValue) then return nil end
+    -- TSM returns whole numbers, so scale up to keep the decimals
+    local ok, value = pcall(TSM_API.GetCustomPriceValue, "dbregionsalerate*1000", "i:" .. itemID)
+    if ok and value then
+        return value / 1000
+    end
+end
+
+-- As a percent: 25%, or <1% for rates that round to nothing
+function addon:FormatSaleRate(rate)
+    if not rate then return "-" end
+    if rate > 0 and rate < 0.005 then return "<1%" end
+    return string.format("%.0f%%", rate * 100)
+end
+
 -- Expansions
 
 -- Expansion an item comes from (0 = Classic), or nil if not cached yet.
@@ -1088,6 +1106,7 @@ function addon:GetRecipeProfit(recipe, itemID)
         priceAgeText = price and addon:PriceAgeText(priceItemID),
         demand = demand,
         demandSource = demandSource,
+        saleRate = addon:GetSaleRate(priceItemID),
         profit = profit,
         margin = margin,
     }
@@ -1245,6 +1264,10 @@ function addon:AddRecipeTooltipLines(tooltip, recipe, itemID, showBreakdown)
     if info.demand then
         tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r sold per day",
             string.format("%s (%s)", addon:FormatDemand(info.demand), info.demandSource), 1, 1, 1, 1, 1, 1)
+    end
+    if info.saleRate then
+        tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r sale rate",
+            addon:FormatSaleRate(info.saleRate) .. " of listings sell", 1, 1, 1, 1, 1, 1)
     end
 
     -- Which stats the cost uses

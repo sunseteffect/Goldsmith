@@ -320,6 +320,7 @@ end
 --   spend     - gold to spend on those purchases
 --   price, revenue, profit, margin - selling `quantity` at the AH price
 --   demand, demandSource - units sold per day
+--   saleRate  - share of listings that sell (TSM region), or nil
 function addon:BuildPlan(recipe, quantity, useOnHand, tier)
     GoldsmithDB.ui.methodOverrides = GoldsmithDB.ui.methodOverrides or {}
     local ctx = { memo = {}, useOnHand = useOnHand }
@@ -400,6 +401,7 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier)
         plan.margin = plan.cost > 0 and (plan.profit / plan.cost * 100) or nil
     end
     plan.demand, plan.demandSource = addon:GetDemand((tier and tier.itemID) or recipe.outputItemID, recipe.outputName)
+    plan.saleRate = addon:GetSaleRate((tier and tier.itemID) or recipe.outputItemID)
     return plan
 end
 
