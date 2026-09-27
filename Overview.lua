@@ -17,6 +17,9 @@ local HALF_WIDTH = (WIDTH - GAP) / 2
 local BOTTOM_TOP = MIDDLE_TOP - MIDDLE_HEIGHT - GAP
 local BOTTOM_HEIGHT = 116
 local ACTION_COUNT = 3
+local CRAFTS_SHOWN = 3
+local ACTION_ROW_GAP = 8
+local CRAFTS_LISTED = 5
 local PROFESSION_CELLS = 6
 
 local CHARTS = {
@@ -80,17 +83,23 @@ local function FillSalesTile(tile, s)
     end
 end
 
-local function FillStockTile(tile, stock)
+local function FillStockTile(tile, stock, prof)
+    -- Say which profession is counted, so a filtered total isn't mistaken
+    -- for everything
+    local scope = prof == "All" and "All professions" or (addon:ProfessionIconText(prof) .. prof .. " only")
     local held = #stock.heldLong
     if held > 0 then
         tile:Set("Gold in stock", Money(stock.value), "text",
-            string.format("%d item%s held 7+ days", held, held == 1 and "" or "s"), "warning")
+            string.format("%s, %d item%s held 7+ days", scope, held, held == 1 and "" or "s"), "warning")
     else
         tile:Set("Gold in stock", Money(stock.value), "text",
-            #stock.items > 0 and "on all characters" or "nothing tracked in your bags yet")
+            #stock.items > 0 and (scope .. ", all characters") or "nothing tracked in your bags yet")
     end
     tile.tooltip = function(tooltip)
         tooltip:AddLine("Gold in stock", 1, 1, 1)
+        if prof ~= "All" then
+            tooltip:AddLine("Only " .. prof .. " items. Pick All professions at the top to see everything.", 1, 0.82, 0, true)
+        end
         tooltip:AddLine("Valued at what it cost you, or the AH price when there's no cost.", 0.6, 0.6, 0.6, true)
         for i = 1, math.min(#stock.items, 8) do
             local item = stock.items[i]
@@ -168,24 +177,28 @@ end
 
 local function CraftsAction(crafts, prof)
     if #crafts == 0 then return nil end
+    -- One craft per line; the row has room for CRAFTS_SHOWN, the hover lists
+    -- them all
     local parts = {}
-    for _, c in ipairs(crafts) do
+    for i = 1, math.min(#crafts, CRAFTS_SHOWN) do
+        local c = crafts[i]
         local icon = prof == "All" and addon:ProfessionIconText(c.recipe.profession) or ""
-        table.insert(parts, string.format("%s%s %s", icon,
+        local roi = c.margin and string.format("  ·  %.0f%% ROI", c.margin) or ""
+        table.insert(parts, string.format("%s%s   %s%s", icon,
             ItemText(c.itemID, c.recipe.outputName, c.row.tier, c.row.tierCount),
-            addon:Colorize(Signed(c.profit), "profit")))
+            addon:Colorize(Signed(c.profit), "profit"), roi))
     end
     return {
         title = "Best crafts right now",
-        detail = table.concat(parts, "   "),
+        detail = table.concat(parts, "\n"),
         tooltip = function(tooltip)
             tooltip:AddLine("Best crafts right now", 1, 1, 1)
-            tooltip:AddLine("Current-expansion items with a 15%+ margin that sell at least once a day, with no unknown costs. A craft drops off once you hold about a day's sales of it.", 0.6, 0.6, 0.6, true)
+            tooltip:AddLine("Current-expansion items with a 15%+ ROI (profit as a share of cost) that sell at least once a day, with no unknown costs. A craft drops off once you hold about a day's sales of it.", 0.6, 0.6, 0.6, true)
             for _, c in ipairs(crafts) do
                 tooltip:AddLine(" ")
                 tooltip:AddLine(ItemText(c.itemID, c.recipe.outputName, c.row.tier, c.row.tierCount)
                     .. OnWho(c.charKey), 1, 0.82, 0)
-                tooltip:AddDoubleLine("Profit each", string.format("%s (%.0f%%)", Signed(c.profit), c.margin or 0),
+                tooltip:AddDoubleLine("Profit each", string.format("%s (%.0f%% ROI)", Signed(c.profit), c.margin or 0),
                     0.8, 0.8, 0.8, 0.37, 0.81, 0.48)
                 if c.demand then
                     tooltip:AddDoubleLine("Sold per day", addon:FormatDemand(c.demand), 0.8, 0.8, 0.8, 1, 1, 1)
@@ -236,8 +249,8 @@ end
 
 local function CreateActionRow(parent, i)
     local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    -- Height and position are set in FillActionRow / Refresh, to fit the text
     row:SetSize(HALF_WIDTH - 32, 72)
-    row:SetPoint("TOPLEFT", 16, -44 - (i - 1) * 80)
     row.number = UI.Text(row, "heading", "muted")
     row.number:SetPoint("TOPLEFT", 12, -12)
     row.number:SetText(tostring(i))
@@ -248,7 +261,7 @@ local function CreateActionRow(parent, i)
     row.detail:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -5)
     row.detail:SetPoint("RIGHT", row, "RIGHT", -10, 0)
     row.detail:SetWordWrap(true)
-    row.detail:SetMaxLines(2)
+    row.detail:SetMaxLines(CRAFTS_SHOWN)
     row.detail:SetJustifyV("TOP")
     row:EnableMouse(true)
     UI.SetTooltip(row, function(tooltip)
@@ -269,6 +282,9 @@ local function FillActionRow(row, action)
     row.title:SetText(action.title)
     row.title:SetTextColor(addon:Color(action.muted and "muted" or "text"))
     row.detail:SetText(action.detail or "")
+    -- Tall enough for the title and however many detail lines there are
+    local textHeight = row.title:GetStringHeight() + 5 + row.detail:GetStringHeight()
+    row:SetHeight(math.max(56, math.ceil(11 + textHeight + 12)))
     row:Show()
 end
 
@@ -456,19 +472,26 @@ local function Refresh(view, state)
     local conc = addon:GetConcentrationOverview(prof)
     FillProfitTile(view.tiles[1], summary)
     FillSalesTile(view.tiles[2], summary)
-    FillStockTile(view.tiles[3], stock)
+    FillStockTile(view.tiles[3], stock, prof)
     FillConcentrationTile(view.tiles[4], conc)
 
     -- Do this next
     local list = {}
     local concAction = ConcentrationAction(conc)
     if concAction then table.insert(list, concAction) end
-    local craftsAction = CraftsAction(addon:GetBestCrafts(prof, 3), prof)
+    local craftsAction = CraftsAction(addon:GetBestCrafts(prof, CRAFTS_LISTED), prof)
     if craftsAction then table.insert(list, craftsAction) end
     local dealsAction = DealsAction(prof)
     if dealsAction then table.insert(list, dealsAction) end
+    local top = -44
     for i, row in ipairs(view.actionRows) do
-        if list[i] then FillActionRow(row, list[i]) else row:Hide() end
+        if list[i] then
+            FillActionRow(row, list[i])
+            row:SetPoint("TOPLEFT", 16, top)
+            top = top - row:GetHeight() - ACTION_ROW_GAP
+        else
+            row:Hide()
+        end
     end
     view.actionsEmpty:SetShown(#list == 0)
 
