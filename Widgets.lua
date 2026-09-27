@@ -383,6 +383,318 @@ function UI.LineChart(parent)
     return chart
 end
 
+-- An on/off switch with a label, for view options that are remembered
+-- (e.g. Crafts' Concentration). switch:SetOn(on) shows the state;
+-- onToggle(newState) runs when it's clicked.
+function UI.Switch(parent, text, onToggle)
+    local switch = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    switch:SetHeight(26)
+    switch.track = CreateFrame("Frame", nil, switch, "BackdropTemplate")
+    switch.track:SetSize(28, 14)
+    switch.track:SetPoint("LEFT", 8, 0)
+    switch.knob = switch.track:CreateTexture(nil, "OVERLAY")
+    switch.knob:SetSize(10, 10)
+    switch.label = UI.Text(switch, "small", "text")
+    switch.label:SetPoint("LEFT", switch.track, "RIGHT", 8, 0)
+    switch.label:SetText(text)
+    switch:SetWidth(8 + 28 + 8 + switch.label:GetStringWidth() + 12)
+
+    function switch:SetOn(on)
+        switch.on = on and true or false
+        UI.Style(switch, on and "highlight" or "panelRaised", on and "borderGold" or "borderStrong")
+        UI.Style(switch.track, on and "gold" or "barEmpty")
+        switch.knob:SetColorTexture(addon:Color("window"))
+        switch.knob:ClearAllPoints()
+        switch.knob:SetPoint(on and "RIGHT" or "LEFT", switch.track, on and "RIGHT" or "LEFT", on and -2 or 2, 0)
+        switch.label:SetTextColor(addon:Color(on and "gold" or "text"))
+    end
+    switch:SetScript("OnClick", function() onToggle(not switch.on) end)
+    switch:HookScript("OnEnter", function(self) self:SetBackdropBorderColor(addon:Color("gold")) end)
+    switch:HookScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(addon:Color(self.on and "borderGold" or "borderStrong"))
+    end)
+    switch:SetOn(false)
+    return switch
+end
+
+-- A checkbox with a label. box:SetChecked(checked); onToggle(newState).
+function UI.Checkbox(parent, text, onToggle)
+    local check = CreateFrame("Button", nil, parent)
+    check:SetHeight(24)
+    check.box = UI.Panel(check, "raised")
+    check.box:SetSize(14, 14)
+    check.box:SetPoint("LEFT", 0, 0)
+    check.mark = check.box:CreateTexture(nil, "OVERLAY")
+    check.mark:SetSize(8, 8)
+    check.mark:SetPoint("CENTER")
+    check.mark:SetColorTexture(addon:Color("gold"))
+    check.label = UI.Text(check, "small", "text")
+    check.label:SetPoint("LEFT", check.box, "RIGHT", 7, 0)
+    check.label:SetText(text)
+    check:SetWidth(14 + 7 + check.label:GetStringWidth() + 4)
+
+    function check:SetChecked(checked)
+        check.checked = checked and true or false
+        check.mark:SetShown(check.checked)
+    end
+    check:SetScript("OnClick", function() onToggle(not check.checked) end)
+    check:SetScript("OnEnter", function() check.box:SetBackdropBorderColor(addon:Color("gold")) end)
+    check:SetScript("OnLeave", function() check.box:SetBackdropBorderColor(addon:Color("borderStrong")) end)
+    check:SetChecked(false)
+    return check
+end
+
+-- A box for typing a whole number. onChange(number or nil) runs as it's
+-- typed; Enter and Escape stop typing.
+function UI.NumberBox(parent, width, onChange)
+    local box = CreateFrame("EditBox", nil, parent, "BackdropTemplate")
+    box:SetSize(width, 24)
+    UI.Style(box, "panelRaised", "borderStrong")
+    box:SetFontObject(addon:Font("body"))
+    box:SetTextInsets(8, 8, 0, 0)
+    box:SetJustifyH("RIGHT")
+    box:SetAutoFocus(false)
+    box:SetNumeric(true)
+    box:SetMaxLetters(6)
+    box:SetScript("OnTextChanged", function(self, userInput)
+        if userInput then onChange(tonumber(self:GetText())) end
+    end)
+    box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    box:SetScript("OnEditFocusGained", function(self) self:SetBackdropBorderColor(addon:Color("gold")) end)
+    box:SetScript("OnEditFocusLost", function(self) self:SetBackdropBorderColor(addon:Color("borderStrong")) end)
+    return box
+end
+
+-- A scrolling list with a header row.
+--
+-- columns = { { key, label, width (nil: takes the space left), justify } };
+-- list:SetColumns changes them (e.g. Crafts' concentration columns).
+-- Only the rows that fit on screen exist; scrolling shows other items in
+-- them. opts:
+--   fill(row, item)            sets row.cells[key] text and colors
+--   tooltip(tooltip, item)     hover lines (optional)
+--   onClick(item, mouseButton) (optional)
+--   onSort(key)                makes headers clickable (optional);
+--                              list:SetSort(key, descending) marks one
+--   empty                      text shown when there are no items
+local LIST_HEADER_HEIGHT = 24
+local LIST_PAD = 10
+local LIST_GAP = 8
+local SCROLLBAR_WIDTH = 6
+
+function UI.List(parent, opts)
+    local list = CreateFrame("Frame", nil, parent)
+    list.rowHeight = opts.rowHeight or 24
+    list.columns, list.items, list.offset = {}, {}, 0
+    list.headerCells, list.rows = {}, {}
+
+    local header = CreateFrame("Frame", nil, list)
+    header:SetPoint("TOPLEFT")
+    header:SetPoint("TOPRIGHT", -(SCROLLBAR_WIDTH + 4), 0)
+    header:SetHeight(LIST_HEADER_HEIGHT)
+    local headerLine = UI.Line(list, "border")
+    headerLine:SetPoint("TOPLEFT", header, "BOTTOMLEFT")
+    headerLine:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT")
+    headerLine:SetHeight(1)
+
+    local body = CreateFrame("Frame", nil, list)
+    body:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -3)
+    body:SetPoint("BOTTOMRIGHT", -(SCROLLBAR_WIDTH + 4), 0)
+    body:EnableMouseWheel(true)
+
+    local empty = UI.Text(body, "body", "muted", "CENTER")
+    empty:SetPoint("TOP", 0, -40)
+    empty:SetWidth(460)
+    empty:SetWordWrap(true)
+    empty:SetText(opts.empty or "")
+
+    local scrollbar = CreateFrame("Slider", nil, list, "BackdropTemplate")
+    scrollbar:SetOrientation("VERTICAL")
+    scrollbar:SetWidth(SCROLLBAR_WIDTH)
+    scrollbar:SetPoint("TOPRIGHT", body, "TOPRIGHT", SCROLLBAR_WIDTH + 4, 0)
+    scrollbar:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", SCROLLBAR_WIDTH + 4, 0)
+    UI.Style(scrollbar, "panelRaised")
+    local thumb = scrollbar:CreateTexture(nil, "OVERLAY")
+    thumb:SetColorTexture(addon:Color("borderStrong"))
+    thumb:SetSize(SCROLLBAR_WIDTH, 30)
+    scrollbar:SetThumbTexture(thumb)
+    scrollbar:SetValueStep(1)
+    scrollbar:SetObeyStepOnDrag(true)
+    scrollbar:EnableMouseWheel(true)
+
+    -- x position and width of each column across the given width
+    local function Layout(width)
+        local fixed, flexCount = 0, 0
+        for _, col in ipairs(list.columns) do
+            if col.width then fixed = fixed + col.width else flexCount = flexCount + 1 end
+        end
+        local gaps = LIST_GAP * math.max(#list.columns - 1, 0)
+        local flex = flexCount > 0 and math.max((width - 2 * LIST_PAD - fixed - gaps) / flexCount, 40) or 0
+        local x, layout = LIST_PAD, {}
+        for _, col in ipairs(list.columns) do
+            local w = col.width or flex
+            layout[col.key] = { x = x, width = w }
+            x = x + w + LIST_GAP
+        end
+        return layout
+    end
+
+    -- Shows a cell per current column (made on first use) and hides the rest
+    local function PlaceCells(frame, cells, layout, make)
+        for _, cell in pairs(cells) do cell:Hide() end
+        for _, col in ipairs(list.columns) do
+            local cell = cells[col.key]
+            if not cell then
+                cell = make(col)
+                cells[col.key] = cell
+            end
+            local l = layout[col.key]
+            cell:ClearAllPoints()
+            cell:SetPoint("LEFT", frame, "LEFT", l.x, 0)
+            cell:SetWidth(l.width)
+            local text = cell.text or cell
+            text:SetJustifyH(col.justify or "LEFT")
+            cell:Show()
+        end
+    end
+
+    local function HeaderCell(col)
+        local cell = CreateFrame("Button", nil, header)
+        cell:SetHeight(LIST_HEADER_HEIGHT)
+        cell.text = UI.Text(cell, "label", "muted")
+        cell.text:SetAllPoints()
+        if opts.onSort then
+            cell:SetScript("OnClick", function() opts.onSort(col.key) end)
+            cell:SetScript("OnEnter", function(self) self.text:SetTextColor(addon:Color("text")) end)
+            cell:SetScript("OnLeave", function(self)
+                self.text:SetTextColor(addon:Color(self.sorted and "gold" or "muted"))
+            end)
+        end
+        return cell
+    end
+
+    local Scroll -- defined below
+
+    local function GetRow(i)
+        if list.rows[i] then return list.rows[i] end
+        local row = CreateFrame("Button", nil, body)
+        row:SetHeight(list.rowHeight)
+        row:SetPoint("TOPLEFT", 0, -(i - 1) * list.rowHeight)
+        row:SetPoint("RIGHT", body, "RIGHT")
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        row:EnableMouseWheel(true)
+        row:SetScript("OnMouseWheel", function(_, delta) Scroll(nil, delta) end)
+        if i % 2 == 0 then
+            local zebra = row:CreateTexture(nil, "BACKGROUND")
+            zebra:SetAllPoints()
+            zebra:SetColorTexture(1, 1, 1, 0.025)
+        end
+        local hover = row:CreateTexture(nil, "HIGHLIGHT")
+        hover:SetAllPoints()
+        hover:SetColorTexture(addon:Color("hover"))
+        row.cells = {}
+        row:SetScript("OnClick", function(self, button)
+            if self.data and opts.onClick then opts.onClick(self.data, button) end
+        end)
+        row:SetScript("OnEnter", function(self)
+            if not (self.data and opts.tooltip) then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            opts.tooltip(GameTooltip, self.data)
+            if GameTooltip:NumLines() > 0 then GameTooltip:Show() else GameTooltip:Hide() end
+        end)
+        row:SetScript("OnLeave", GameTooltip_Hide)
+        list.rows[i] = row
+        return row
+    end
+
+    function list:Update()
+        local visible = math.max(math.floor((body:GetHeight() or 0) / list.rowHeight), 0)
+        local maxOffset = math.max(#list.items - visible, 0)
+        list.offset = math.min(math.max(list.offset, 0), maxOffset)
+        local layout = Layout(body:GetWidth() or 0)
+
+        PlaceCells(header, list.headerCells, layout, HeaderCell)
+        for _, col in ipairs(list.columns) do
+            local cell = list.headerCells[col.key]
+            local label = col.label:upper()
+            cell.sorted = list.sortKey == col.key
+            if cell.sorted then
+                local arrow = list.sortDescending and "v" or "^"
+                label = (col.justify == "RIGHT") and (arrow .. " " .. label) or (label .. " " .. arrow)
+            end
+            cell.text:SetText(label)
+            cell.text:SetTextColor(addon:Color(cell.sorted and "gold" or "muted"))
+        end
+
+        for i = 1, visible do
+            local row = GetRow(i)
+            local item = list.items[list.offset + i]
+            if item then
+                row.data = item
+                PlaceCells(row, row.cells, layout, function() return UI.Text(row, "body") end)
+                for _, cell in pairs(row.cells) do
+                    cell:SetText("")
+                    cell:SetTextColor(addon:Color("text"))
+                end
+                opts.fill(row, item)
+                row:Show()
+                -- Scrolled under the mouse: show the new item's hover
+                if GameTooltip:IsOwned(row) then row:GetScript("OnEnter")(row) end
+            else
+                row.data = nil
+                row:Hide()
+            end
+        end
+        for i = visible + 1, #list.rows do
+            list.rows[i].data = nil
+            list.rows[i]:Hide()
+        end
+
+        empty:SetShown(#list.items == 0)
+        scrollbar:SetShown(maxOffset > 0)
+        if maxOffset > 0 then
+            thumb:SetHeight(math.max(body:GetHeight() * visible / #list.items, 20))
+            scrollbar:SetMinMaxValues(0, maxOffset)
+            scrollbar:SetValue(list.offset)
+        end
+    end
+
+    function list:SetColumns(columns)
+        list.columns = columns
+        list:Update()
+    end
+
+    function list:SetItems(items)
+        list.items = items
+        list:Update()
+    end
+
+    function list:SetSort(key, descending)
+        list.sortKey, list.sortDescending = key, descending
+    end
+
+    function list:SetEmptyText(text) empty:SetText(text or "") end
+
+    function list:ScrollToTop() list.offset = 0 end
+
+    Scroll = function(_, delta)
+        list.offset = list.offset - delta * 3
+        list:Update()
+    end
+    body:SetScript("OnMouseWheel", Scroll)
+    scrollbar:SetScript("OnMouseWheel", Scroll)
+    scrollbar:SetScript("OnValueChanged", function(_, value)
+        value = math.floor(value + 0.5)
+        if value ~= list.offset then
+            list.offset = value
+            list:Update()
+        end
+    end)
+    body:SetScript("OnSizeChanged", function() list:Update() end)
+    return list
+end
+
 -- A helpful empty screen: a heading and what to do next.
 -- box:Set(title, body)
 function UI.EmptyState(parent)

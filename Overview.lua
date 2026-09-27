@@ -171,6 +171,11 @@ local function ConcentrationAction(conc)
                     string.format("%d conc, %s", p.points, Signed(p.gain)), 0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
             end
             tooltip:AddLine("Extra = profit on top of crafting the same thing without concentration.", 0.6, 0.6, 0.6, true)
+            tooltip:AddLine("Click to plan it: materials and shopping list.", 0.37, 0.81, 0.48)
+        end,
+        onClick = function()
+            addon:OpenCraftPlan(first.recipe, first.row, best.key,
+                math.max(math.floor(first.crafts * (first.row.outputPerCraft or 1)), 1))
         end,
     }
 end
@@ -207,6 +212,13 @@ local function CraftsAction(crafts, prof)
                     tooltip:AddDoubleLine("You have", tostring(c.have), 0.8, 0.8, 0.8, 1, 1, 1)
                 end
             end
+            tooltip:AddLine(" ")
+            tooltip:AddLine("Click to see these in Crafts.", 0.37, 0.81, 0.48)
+        end,
+        onClick = function()
+            local keys = {}
+            for _, c in ipairs(crafts) do keys[c.key] = true end
+            addon:OpenCrafts({ keys = keys, label = "Best crafts right now" })
         end,
     }
 end
@@ -267,6 +279,18 @@ local function CreateActionRow(parent, i)
     UI.SetTooltip(row, function(tooltip)
         if row.action and row.action.tooltip then row.action.tooltip(tooltip) end
     end)
+    -- Rows that lead somewhere get a gold border on hover
+    row:HookScript("OnEnter", function(self)
+        if self.action and self.action.onClick then self:SetBackdropBorderColor(addon:Color("gold")) end
+    end)
+    row:HookScript("OnLeave", function(self)
+        if self.action and self.action.onClick then
+            self:SetBackdropBorderColor(addon:Color(self.action.highlight and "borderGold" or "borderStrong"))
+        end
+    end)
+    row:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" and self.action and self.action.onClick then self.action.onClick() end
+    end)
     return row
 end
 
@@ -276,7 +300,7 @@ local function FillActionRow(row, action)
         UI.Style(row, "highlight", "borderGold")
         row.number:SetTextColor(addon:Color("gold"))
     else
-        UI.Style(row, "panelRaised")
+        UI.Style(row, "panelRaised", action.onClick and "borderStrong" or nil)
         row.number:SetTextColor(addon:Color("muted"))
     end
     row.title:SetText(action.title)

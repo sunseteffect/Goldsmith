@@ -20,3 +20,4 @@ Insights.lua
 UI.lua
 Window.lua
 Overview.lua
+Crafts.lua

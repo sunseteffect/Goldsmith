@@ -244,6 +244,13 @@ function addon:CreateWindow()
     addon.window = frame
     addon.RefreshWindow = Refresh
 
+    -- Opens the window on a tab, for links between screens (e.g. the
+    -- Overview's "Best crafts" opening Crafts)
+    function addon:ShowTab(key)
+        ui.tab = key
+        if frame:IsShown() then Refresh() else frame:Show() end
+    end
+
     -- Other files call addon.Refresh when data changes. Refresh whichever
     -- window is open; the v1 window's refresh only runs while it's shown.
     -- Data changes come in bursts (AH searches, bag updates), so the new

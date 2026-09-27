@@ -711,10 +711,11 @@ end
 
 -- The craft model for a recipe: expected items per craft and expected
 -- amount of each material per craft, with your stats and calibrated proc
--- sizes. Without stats for the recipe, the recipe's base numbers.
+-- sizes. Without stats for the recipe, or with noProcs (the worst case:
+-- no multicraft or resourcefulness), the recipe's base numbers.
 -- Returns outputPerCraft, slots ({ slot, quantity }), and the stats used.
-function addon:GetCraftModel(recipe)
-    local stats = recipe.recipeID and addon:StatsChar().recipeStats[recipe.recipeID]
+function addon:GetCraftModel(recipe, noProcs)
+    local stats = not noProcs and recipe.recipeID and addon:StatsChar().recipeStats[recipe.recipeID]
     local base = recipe.outputQty
     local slots = {}
     if not stats then
@@ -1035,9 +1036,10 @@ end
 -- stats: extra items from multicraft, materials saved by resourcefulness).
 -- Returns copper per item, a list of reagents with no cost, a breakdown of
 -- { name, quantity, unitCost, source } per reagent, and the stats used (nil
--- if the recipe's base numbers were used).
-function addon:GetRecipeCost(recipe)
-    local outputPerCraft, modelSlots, stats = addon:GetCraftModel(recipe)
+-- if the recipe's base numbers were used). noProcs: the worst case, with no
+-- multicraft or resourcefulness.
+function addon:GetRecipeCost(recipe, noProcs)
+    local outputPerCraft, modelSlots, stats = addon:GetCraftModel(recipe, noProcs)
     local perCraft = 0
     local missing = {}
     local breakdown = {}

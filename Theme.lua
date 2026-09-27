@@ -51,6 +51,7 @@ addon.themes = {
             body    = { "Fonts\\ARIALN.TTF", 14, "", "text" },
             small   = { "Fonts\\ARIALN.TTF", 12, "", "muted" },
             label   = { "Fonts\\ARIALN.TTF", 11, "", "muted" },
+            value   = { "Fonts\\ARIALN.TTF", 18, "", "text" },
             big     = { "Fonts\\ARIALN.TTF", 24, "", "text" },
             close   = { "Fonts\\ARIALN.TTF", 22, "", "muted" },
         },

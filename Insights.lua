@@ -17,13 +17,23 @@ local ENOUGH_STOCK_CAP = 20    -- see GetBestCrafts
 -- demand data, or old-expansion items with a few shelf listings) often show
 -- huge "profits" from listings that never sell, so they're left out.
 -- Items the game hasn't loaded yet are left out until it has.
-local function IsRecommendable(recipe, row)
+-- Returns nil if it's worth recommending, otherwise why not (plain words).
+function addon:WhyNotRecommended(recipe, row)
     local itemID = row.itemID or recipe.outputItemID
-    if not itemID or addon:GetItemExpansion(itemID) ~= addon:GetCurrentExpansion() then
-        return false
+    local expansion = itemID and addon:GetItemExpansion(itemID)
+    if not expansion then return "The game hasn't loaded this item yet." end
+    if expansion ~= addon:GetCurrentExpansion() then
+        return "From an older expansion. Its listings often sit unsold, so the profit may not be real."
     end
     local demand = row.demand or addon:GetDemand(itemID, recipe.outputName)
-    return demand ~= nil and demand >= MIN_DEMAND
+    if demand == nil then return "No sales data, so there's no telling whether it sells." end
+    if demand < MIN_DEMAND then
+        return string.format("Sells under %d a day, so it may take a long time to sell.", MIN_DEMAND)
+    end
+end
+
+local function IsRecommendable(recipe, row)
+    return addon:WhyNotRecommended(recipe, row) == nil
 end
 
 -- Crafted items: item ID -> recipe, for every recipe output including each
@@ -167,14 +177,21 @@ function addon:GetConcentrationOverview(prof)
 end
 
 -- Who can craft a recipe: the logged-in character if it knows it,
--- otherwise the first character (by name) that does
-local function CrafterFor(recipeID)
+-- otherwise the first character (by name) that does, or nil
+function addon:GetCrafter(recipeID)
     if addon.char.knownRecipes[recipeID] then return addon.charKey end
     local best
     for key, c in pairs(GoldsmithDB.characters) do
         if c.knownRecipes[recipeID] and (not best or key < best) then best = key end
     end
     return best
+end
+local function CrafterFor(recipeID) return addon:GetCrafter(recipeID) end
+
+-- Identifies one way of making a craft (recipe, tier, with or without
+-- concentration), so the Overview can point the Crafts tab at it
+function addon:CraftKey(recipeID, row)
+    return string.format("%d:%d:%s", recipeID, row.tier or 0, row.concentrate and "c" or "")
 end
 
 -- The best way to make a recipe without concentration: its most
@@ -215,6 +232,7 @@ function addon:GetBestCrafts(prof, count)
                     local enough = math.min(math.max(math.ceil(row.demand or 1), 1), ENOUGH_STOCK_CAP)
                     if have < enough then
                         table.insert(list, {
+                            key = addon:CraftKey(recipeID, row),
                             recipe = recipe, row = row, charKey = charKey, itemID = itemID,
                             profit = row.profit, margin = row.margin, demand = row.demand, have = have,
                         })
@@ -225,6 +243,46 @@ function addon:GetBestCrafts(prof, count)
     end
     table.sort(list, function(a, b) return a.profit > b.profit end)
     for i = #list, count + 1, -1 do list[i] = nil end
+    return list
+end
+
+-- Every craft for the Crafts tab, worked out with the stats of whoever
+-- crafts it (see GetCrafter). Crafts with quality tiers get a row per
+-- reachable tier (see GetTierRows), the rest a single row. Crafts that
+-- can't be listed on the AH (bind on pickup, warbound) are left out; items
+-- not in the game's cache yet are shown until their bind type loads.
+-- opts:
+--   concentration  - include the ways that use concentration
+--   profitableOnly - only rows with a profit at current prices (including
+--                    ones with unknown costs, whose profit is at most that)
+--   showExpansion  - function(expansionID) -> whether to include it
+-- Returns { { key, recipe, info (the tier row or GetRecipeProfit), tier,
+-- charKey, itemID, whyNot (see WhyNotRecommended) } }, unsorted.
+function addon:GetCraftRows(prof, opts)
+    local list = {}
+    for recipeID, recipe in pairs(GoldsmithDB.recipes) do
+        if (prof == "All" or recipe.profession == prof)
+            and addon:CanAuction(recipe.outputItemID) ~= false
+            and (not opts.showExpansion or opts.showExpansion(addon:GetItemExpansion(recipe.outputItemID))) then
+            local charKey = CrafterFor(recipeID) or addon.charKey
+            local rows = addon:WithCharacter(charKey, function()
+                local tierRows = addon:GetTierRows(recipe)
+                if tierRows and #tierRows > 0 then return tierRows end
+                return { addon:GetRecipeProfit(recipe) }
+            end)
+            for _, info in ipairs(rows) do
+                if (opts.concentration or not info.concentrate)
+                    and (not opts.profitableOnly or (info.profit and info.profit > 0)) then
+                    table.insert(list, {
+                        key = addon:CraftKey(recipeID, info),
+                        recipe = recipe, info = info, tier = info.tier, charKey = charKey,
+                        itemID = info.itemID or recipe.outputItemID,
+                        whyNot = addon:WhyNotRecommended(recipe, info),
+                    })
+                end
+            end
+        end
+    end
     return list
 end
 

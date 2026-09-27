@@ -327,9 +327,9 @@ end
 -- Cost per crafted item for a scenario's materials: each quality material
 -- split between its lowest and best quality as the mix says (priced by
 -- those exact items), everything else at its cheapest known cost. Uses the
--- craft model (your stats).
-local function ScenarioCost(recipe, scenario)
-    local outputPerCraft, modelSlots = addon:GetCraftModel(recipe)
+-- craft model (your stats, or none with noProcs).
+local function ScenarioCost(recipe, scenario, noProcs)
+    local outputPerCraft, modelSlots = addon:GetCraftModel(recipe, noProcs)
     local perCraft, complete = 0, true
     for _, m in ipairs(modelSlots) do
         local ids = m.slot.itemIDs or {}
@@ -353,6 +353,16 @@ local function ScenarioCost(recipe, scenario)
         end
     end
     return perCraft / outputPerCraft, complete, outputPerCraft
+end
+
+-- The worst case for a Crafts row (a tier row or GetRecipeProfit's
+-- result): cost per item with no multicraft or resourcefulness, like TSM's
+-- crafting cost. Worked out on request (hover) rather than for every row.
+function addon:GetWorstCaseCost(recipe, info)
+    if info.scenario then
+        return (ScenarioCost(recipe, info.scenario, true))
+    end
+    return (addon:GetRecipeCost(recipe, true))
 end
 
 -- Plain description of a scenario's materials, e.g. "cheapest materials",
