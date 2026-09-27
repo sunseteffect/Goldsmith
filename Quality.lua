@@ -14,9 +14,16 @@ local AH_CUT = 0.05
 -- then for each tier builds the cheapest mix that reaches it: upgrade the
 -- units that buy skill most cheaply first, stopping part way through a
 -- material if that's enough (e.g. 8 of 20 pigments at the better quality).
--- The game confirms each mix really reaches the tier. With concentration,
--- partial mixes are tried too: more spent on materials means less
--- concentration needed.
+-- The game confirms each mix really reaches the tier.
+--
+-- With concentration, more spent on materials means less concentration per
+-- craft, so more crafts from the same concentration. The tier and the
+-- concentration cost depend only on the total skill the better materials
+-- add, and MixForSkill gives the cheapest mix for any amount of skill, so
+-- instead of trying every combination Goldsmith samples SWEEP_POINTS
+-- amounts from none to everything, plus one unit short of each tier's mix
+-- (just under a threshold, where concentrating to the tier above is
+-- usually cheapest). PlanConcentration then picks among them.
 --
 -- Saved in addon.char.tierData[recipeID]:
 --   { qualities = { qualityID, ... } (lowest first),
@@ -30,6 +37,12 @@ local AH_CUT = 0.05
 -- 3-tier materials aren't used.
 
 local MAX_TIER_STEPS = 6
+local SWEEP_POINTS = 10
+
+-- GetTierRows results for the current frame, per character (the stats
+-- used), so the Overview's many questions in one refresh share the work.
+-- Cleared every frame and whenever tier data changes.
+local tierRowsCache, tierRowsFrame = {}, nil
 
 -- Quality materials from the recipe's schematic, in order
 local function QualitySlots(schematic)
@@ -263,19 +276,36 @@ function addon:RefreshTierData(recipeID)
         current = reached
     end
 
-    -- All best materials, and concentration on top of each mix (and half
-    -- of each mix: some materials, less concentration)
+    -- All best materials, and concentration on top of each mix
     local all = {}
     for i, s in ipairs(qslots) do all[i] = s.quantity end
     AddScenario(all, false)
     AddScenario(all, true)
     for _, mix in ipairs(mixes) do
         AddScenario(mix, true)
-        local half = {}
-        for slot, units in pairs(mix) do half[slot] = math.floor(units / 2) end
-        AddScenario(half, true)
+        -- One unit short of the mix: the most expensive upgrade it uses
+        local short = {}
+        for slot, units in pairs(mix) do short[slot] = units end
+        for i = #upgrades, 1, -1 do
+            local slot = upgrades[i].slot
+            if (short[slot] or 0) > 0 then
+                short[slot] = short[slot] - 1
+                break
+            end
+        end
+        AddScenario(short, true)
     end
 
+    -- Concentration sweep across everything the better materials can add
+    -- (see the top of this file)
+    local maxExtra = 0
+    for _, u in ipairs(upgrades) do maxExtra = maxExtra + u.max * u.skillPerUnit end
+    for k = 1, SWEEP_POINTS - 1 do
+        local mix = MixForSkill(maxExtra * k / SWEEP_POINTS)
+        if mix then AddScenario(mix, true) end
+    end
+
+    wipe(tierRowsCache)
     addon.char.tierData[recipeID] = {
         qualities = qualities,
         outputs = outputs,
@@ -400,7 +430,8 @@ end
 --   { tier, tierCount, itemID, scenario, mix, concentrate, concentration
 --     (expected per craft), cost, partial, price, priceSource, priceAge,
 --     profit, margin, demand, demandSource, concentrationValue, scenarios }
-function addon:GetTierRows(recipe)
+-- Rows are shared within a frame (see tierRowsCache); don't change them.
+local function BuildTierRows(recipe)
     local td = addon:StatsChar().tierData[recipe.recipeID]
     if not td then return nil end
 
@@ -484,6 +515,26 @@ function addon:GetTierRows(recipe)
     return rows
 end
 
+function addon:GetTierRows(recipe)
+    local now = GetTime()
+    if tierRowsFrame ~= now then
+        wipe(tierRowsCache)
+        tierRowsFrame = now
+    end
+    local char = addon:StatsChar()
+    local byChar = tierRowsCache[char]
+    if not byChar then
+        byChar = {}
+        tierRowsCache[char] = byChar
+    end
+    local rows = byChar[recipe.recipeID]
+    if rows == nil then
+        rows = BuildTierRows(recipe) or false
+        byChar[recipe.recipeID] = rows
+    end
+    return rows or nil
+end
+
 -- Concentration budget
 --
 -- Your current concentration for a profession, read from its currency.
@@ -503,66 +554,190 @@ function addon:GetConcentration(profession)
     return current, max, minutesToFull
 end
 
--- The best way to spend `budget` concentration on a profession's crafts:
--- most gold per concentration point first, as many crafts as the budget
--- allows (capped at about one day of the item's sales), then the next.
--- Only crafts that make a profit with concentration are used, and only
--- those accept(recipe, row) allows, if given.
--- Returns { { recipe, row, crafts, points, gain, profit } }, points used,
--- and total extra profit from concentrating.
+-- The best way to spend `budget` concentration on a profession's crafts.
+--
+-- Every way of concentrating on every craft is an option: each tier, and
+-- each material mix the sweep in RefreshTierData found (richer mixes cost
+-- more in materials but less concentration). Only options that make a
+-- profit with concentration are used, and only those accept(recipe, row)
+-- allows, if given. Each item is capped at about a day of its sales.
+--
+-- 1. Fill: most extra gold per concentration point first, as many crafts
+--    as fit, then the next. For a budget that runs out, this is what earns
+--    the most.
+-- 2. Improve: whole crafts leave concentration over (700 left and 343 per
+--    craft makes 2 and wastes 14). Repeatedly make the single change that
+--    earns the most: add a craft that fits, or switch one craft to another
+--    mix of the same recipe (e.g. richer, freeing concentration for one
+--    more craft; or pricier but earning more, when an item's sales cap is
+--    what's limiting). Stops when nothing earns more. Small searches, so
+--    no stutter.
+--
+-- Starting a craft needs its full concentration cost; ingenuity refunds
+-- some afterwards, so the points counted are the expected cost.
+-- Returns { { recipe, row, tierCount, crafts, points, gain, profit } }
+-- (most gain first), points used, and total extra profit from
+-- concentrating.
+local MAX_IMPROVEMENTS = 30
+local MAX_CRAFTS_TRIED = 200
+
 function addon:PlanConcentration(profession, budget, accept)
     -- Only recipes that spend this concentration (each expansion's version
     -- of a profession has its own)
     local currencyID = GoldsmithDB.concentrationCurrency and GoldsmithDB.concentrationCurrency[profession]
-    local candidates = {}
+    local found, caps = {}, {}
     for _, recipe in pairs(GoldsmithDB.recipes) do
         local stats = addon:StatsChar().recipeStats[recipe.recipeID]
         if recipe.profession == profession and stats and stats.concentrationCurrencyID == currencyID then
-            local best
             local rows = addon:GetTierRows(recipe) or {}
-            for _, row in ipairs(rows) do
-                if row.concentrate and row.concentration > 0 and row.concentrationValue
-                    and row.concentrationValue > 0 and row.profit and row.profit > 0
-                    and (not best or row.concentrationValue > best.concentrationValue) then
-                    best = row
+            for _, e in ipairs(rows[1] and rows[1].scenarios or {}) do
+                if e.concentrate and e.concentration > 0 and e.concentrationValue and e.concentrationValue > 0
+                    and e.profit and e.profit > 0 and (not accept or accept(recipe, e)) then
+                    -- One cap per item made (each tier is its own item)
+                    local capKey = e.itemID or (recipe.recipeID .. ":" .. e.tier)
+                    if caps[capKey] == nil then
+                        local demand = e.demand or (e.itemID and addon:GetDemand(e.itemID, recipe.outputName))
+                        caps[capKey] = (demand and e.outputPerCraft > 0)
+                            and math.max(math.floor(demand / e.outputPerCraft), 1) or math.huge
+                    end
+                    found[capKey] = found[capKey] or {}
+                    table.insert(found[capKey], {
+                        recipe = recipe, row = e, tierCount = e.tierCount, capKey = capKey,
+                        full = e.scenario.concentration, points = e.concentration,
+                        gain = e.concentrationValue * e.concentration,
+                    })
                 end
-            end
-            -- Also check tiers only reachable with concentration that
-            -- GetTierRows didn't pick (it prefers no-concentration ways)
-            for _, e in ipairs(best and best.scenarios or {}) do
-                if e.concentrate and e.concentrationValue and e.concentrationValue > best.concentrationValue
-                    and e.profit and e.profit > 0 then
-                    best = e
-                end
-            end
-            if best and (not accept or accept(recipe, best)) then
-                table.insert(candidates, { recipe = recipe, row = best, tierCount = rows[1] and rows[1].tierCount })
             end
         end
     end
-    table.sort(candidates, function(a, b) return a.row.concentrationValue > b.row.concentrationValue end)
 
-    local plan, remaining, totalGain = {}, budget, 0
-    for _, c in ipairs(candidates) do
-        local perCraft = c.row.concentration
-        local crafts = math.floor(remaining / perCraft)
-        if c.row.demand and c.row.outputPerCraft and c.row.outputPerCraft > 0 then
-            crafts = math.min(crafts, math.max(math.floor(c.row.demand / c.row.outputPerCraft), 1))
+    -- Drop mixes never worth using: another mix of the same item costs no
+    -- more concentration and earns at least as much per craft
+    local options, byRecipe = {}, {}
+    for _, list in pairs(found) do
+        table.sort(list, function(a, b)
+            if a.full ~= b.full then return a.full < b.full end
+            return a.gain > b.gain
+        end)
+        local bestGain = -math.huge
+        for _, o in ipairs(list) do
+            if o.gain > bestGain then
+                bestGain = o.gain
+                table.insert(options, o)
+                byRecipe[o.recipe] = byRecipe[o.recipe] or {}
+                table.insert(byRecipe[o.recipe], o)
+            end
         end
-        if crafts > 0 then
-            local points = crafts * perCraft
-            local gain = c.row.concentrationValue * points
-            table.insert(plan, {
-                recipe = c.recipe, row = c.row, tierCount = c.tierCount,
-                crafts = crafts, points = points, gain = gain,
-                profit = c.row.profit * c.row.outputPerCraft * crafts,
-            })
-            remaining = remaining - points
-            totalGain = totalGain + gain
-        end
-        if remaining <= 0 then break end
     end
-    return plan, budget - remaining, totalGain
+
+    local counts, used, left = {}, {}, budget
+    local function Room(capKey, adjust)
+        return caps[capKey] - (used[capKey] or 0) - (adjust or 0)
+    end
+    local function Crafts(option, n)
+        counts[option] = (counts[option] or 0) + n
+        used[option.capKey] = (used[option.capKey] or 0) + n
+        left = left - n * option.points
+    end
+    -- How many crafts of an option fit in `amount` concentration
+    local function Fit(option, amount)
+        if amount < option.full then return 0 end
+        return math.floor((amount - option.full) / option.points) + 1
+    end
+
+    -- 1. Fill by gold per point
+    table.sort(options, function(a, b) return a.gain / a.points > b.gain / b.points end)
+    for _, o in ipairs(options) do
+        local n = math.min(Room(o.capKey), Fit(o, left))
+        if n > 0 then Crafts(o, n) end
+    end
+
+    -- 2. Improve
+    local byGain = {}
+    for _, o in ipairs(options) do table.insert(byGain, o) end
+    table.sort(byGain, function(a, b) return a.gain > b.gain end)
+    local minFull = math.huge
+    for _, o in ipairs(options) do minFull = math.min(minFull, o.full) end
+
+    -- The option of another recipe than `skip` earning the most per craft
+    -- that fits in `amount`
+    local function BestAdd(amount, skip)
+        if amount < minFull then return nil end
+        for _, o in ipairs(byGain) do
+            if o.recipe ~= skip and amount >= o.full and Room(o.capKey) > 0 then return o end
+        end
+    end
+
+    -- A recipe's crafts now: points used, extra gold, and crafts per item
+    local function RecipeUse(recipe)
+        local points, gain, perItem = 0, 0, {}
+        for _, o in ipairs(byRecipe[recipe]) do
+            local n = counts[o] or 0
+            points = points + n * o.points
+            gain = gain + n * o.gain
+            perItem[o.capKey] = (perItem[o.capKey] or 0) + n
+        end
+        return points, gain, perItem
+    end
+
+    for _ = 1, MAX_IMPROVEMENTS do
+        local bestValue, bestMove = 1, nil -- at least 1 copper better
+        local add = BestAdd(left)
+        if add and add.gain > bestValue then
+            bestValue, bestMove = add.gain, { add = add }
+        end
+        -- Re-plan one recipe: its concentration plus what's left, split
+        -- between up to two of its mixes (i of a, then j of b), then the
+        -- best craft of another recipe that fits in what remains
+        for recipe, list in pairs(byRecipe) do
+            local points, gain, own = RecipeUse(recipe)
+            if points > 0 then
+                local amount = points + left
+                for _, a in ipairs(list) do
+                    local roomA = Room(a.capKey) + (own[a.capKey] or 0)
+                    for i = 0, math.min(roomA, Fit(a, amount), MAX_CRAFTS_TRIED) do
+                        local afterA = amount - i * a.points
+                        for _, b in ipairs(list) do
+                            local j = 0
+                            if b ~= a then
+                                local roomB = Room(b.capKey) + (own[b.capKey] or 0) - (b.capKey == a.capKey and i or 0)
+                                j = math.max(math.min(roomB, Fit(b, afterA)), 0)
+                            end
+                            local extra = BestAdd(afterA - j * b.points, recipe)
+                            local total = i * a.gain + j * b.gain - gain + (extra and extra.gain or 0)
+                            if total > bestValue then
+                                bestValue = total
+                                bestMove = { recipe = recipe, a = a, i = i, b = b, j = j, add = extra }
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        if not bestMove then break end
+        if bestMove.recipe then
+            for _, o in ipairs(byRecipe[bestMove.recipe]) do
+                if (counts[o] or 0) > 0 then Crafts(o, -counts[o]) end
+            end
+            if bestMove.i > 0 then Crafts(bestMove.a, bestMove.i) end
+            if bestMove.j > 0 then Crafts(bestMove.b, bestMove.j) end
+        end
+        if bestMove.add then Crafts(bestMove.add, 1) end
+    end
+
+    local plan, totalGain = {}, 0
+    for o, n in pairs(counts) do
+        if n > 0 then
+            table.insert(plan, {
+                recipe = o.recipe, row = o.row, tierCount = o.tierCount,
+                crafts = n, points = n * o.points, gain = n * o.gain,
+                profit = o.row.profit * o.row.outputPerCraft * n,
+            })
+            totalGain = totalGain + n * o.gain
+        end
+    end
+    table.sort(plan, function(a, b) return a.gain > b.gain end)
+    return plan, budget - left, totalGain
 end
 
 -- Inline quality icon for a tier, e.g. the silver/gold icon

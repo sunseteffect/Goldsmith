@@ -169,6 +169,9 @@ local function ConcentrationAction(conc)
                 tooltip:AddDoubleLine(string.format("%dx %s", p.crafts,
                     ItemText(p.row.itemID, p.recipe.outputName, p.row.tier, p.tierCount)),
                     string.format("%d conc, %s", p.points, Signed(p.gain)), 0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
+                if p.row.description then
+                    tooltip:AddLine("    " .. p.row.description, 0.6, 0.6, 0.6, true)
+                end
             end
             tooltip:AddLine("Extra = profit on top of crafting the same thing without concentration.", 0.6, 0.6, 0.6, true)
             tooltip:AddLine("Click to plan it: materials and shopping list.", 0.37, 0.81, 0.48)

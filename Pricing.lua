@@ -1308,6 +1308,7 @@ end
 -- are recognised without clicking each one. Saves run in small batches to
 -- avoid a hitch, and each recipe is only tried once per session.
 local SCAN_BATCH = 20
+local FRAME_BUDGET_MS = 5
 local scanTimer = nil
 local scanning = false
 local triedThisSession = {}
@@ -1361,11 +1362,13 @@ local function ScanLearnedRecipes()
     local statsIndex = 1
     local i = 1
     local function Step()
-        -- Stats first: quick, and they update costs for recipes you have
-        for _ = 1, SCAN_BATCH do
-            local id = toStats[statsIndex]
-            if not id then break end
-            addon:RefreshRecipeStats(id)
+        -- Stats first: they update costs for recipes you have. Each one
+        -- also checks its tiers and material mixes, so work in slices of
+        -- FRAME_BUDGET_MS per frame rather than a fixed count, to keep the
+        -- game from stuttering.
+        local start = debugprofilestop()
+        while toStats[statsIndex] and debugprofilestop() - start < FRAME_BUDGET_MS do
+            addon:RefreshRecipeStats(toStats[statsIndex])
             statsIndex = statsIndex + 1
         end
         if toStats[statsIndex] then

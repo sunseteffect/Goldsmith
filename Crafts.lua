@@ -568,7 +568,7 @@ local function CreatePlanScreen(parent)
         local tierIcon = tierInfo and (" " .. addon:TierIconText(tierInfo.tier, tierInfo.tierCount)) or ""
         screen.title:SetText(addon:ProfessionIconText(recipe.profession) .. recipe.outputName .. tierIcon)
         local sub = {}
-        if p.concentrate then table.insert(sub, "with concentration") end
+        if p.concentrate then table.insert(sub, "with concentration, using the material mix that earns the most") end
         if p.charKey ~= addon.charKey then table.insert(sub, "on " .. CharName(p.charKey)) end
         if p.tier and not tierInfo then table.insert(sub, "this tier isn't reachable right now") end
         screen.subtitle:SetText(table.concat(sub, ", "))
@@ -746,8 +746,10 @@ local function CreateBudget(parent)
                 local tier = p.row.tier and (" " .. addon:TierIconText(p.row.tier, p.tierCount)) or ""
                 Line(tooltip, string.format("    %dx %s%s", p.crafts, p.recipe.outputName, tier),
                     string.format("%d conc, %s", p.points, Signed(p.gain)), "profit")
+                if p.row.description then Note(tooltip, "        " .. p.row.description) end
             end
         end
+        Note(tooltip, "Mixes of lower and higher quality materials are compared for each craft, to get the most gold from your concentration.", "gold")
         Note(tooltip, "Extra = profit on top of crafting the same thing without concentration. Each craft is capped at about a day of that item's sales.")
         if bar.target then Note(tooltip, "Click to plan the best use.", "profit") end
     end, "ANCHOR_TOP")
@@ -821,7 +823,9 @@ local function Create(parent)
     Explain(view.concSwitch, function(tooltip)
         tooltip:AddLine("Concentration", 1, 1, 1)
         Note(tooltip, "Adds the ways to craft with concentration: how much each uses (Conc) and the extra gold it earns per point (g/conc).")
-        Note(tooltip, "The bar at the bottom shows your concentration on all characters and the best way to spend it.")    end)
+        Note(tooltip, "The bar at the bottom shows your concentration on all characters and the best way to spend it.")
+        Note(tooltip, "Goldsmith tries mixes of lower and higher quality materials. Better materials cost more but need less concentration, so the same concentration can make more crafts. It picks the mix that earns the most.", "gold")
+    end)
     Explain(view.profitable, function(tooltip)
         tooltip:AddLine("Profitable only", 1, 1, 1)
         Note(tooltip, "Hides crafts that lose gold at current AH prices, and ones with no AH price yet.")
