@@ -81,15 +81,164 @@ function addon:CreateWindow()
     else
         frame:SetPoint("CENTER")
     end
-    frame:SetFrameStrata("HIGH")
+    -- The same layer as the game's own windows (the AH, professions, bags),
+    -- so they can go on top: whichever was clicked last is in front
+    -- (SetToplevel), and a game window that opens goes in front of Goldsmith
+    -- (see below)
+    frame:SetFrameStrata("MEDIUM")
     frame:SetToplevel(true)
     frame:SetClampedToScreen(true)
     frame:EnableMouse(true)
     frame:SetMovable(true)
     frame:Hide()
     UI.Style(frame, "window", "borderGold")
-    -- Escape closes it
-    table.insert(UISpecialFrames, "GoldsmithWindow")
+    -- Whether Goldsmith is in front of the game's windows. Drawing order
+    -- can't be read reliably (a lowered Goldsmith can share a frame level
+    -- with the AH), so it's tracked: opening or clicking Goldsmith puts it
+    -- in front; a game window opening or being clicked puts it behind.
+    local inFront = true
+
+    -- Opening Goldsmith puts it in front
+    frame:HookScript("OnShow", function(self)
+        self:Raise()
+        inFront = true
+    end)
+
+    -- A game window opening (the AH and Auctionator, a profession, mail, a
+    -- vendor, the bank, bags) goes in front of Goldsmith, which stays open
+    -- behind it; click Goldsmith to bring it back. Settings and Help sit on
+    -- a higher layer, so they close.
+    local function StepBack()
+        if not frame:IsShown() then return end
+        inFront = false
+        frame:Lower()
+        if GoldsmithSettings then GoldsmithSettings:Hide() end
+        if GoldsmithHelp then GoldsmithHelp:Hide() end
+    end
+    hooksecurefunc("ShowUIPanel", function(panel)
+        if panel and panel ~= frame then StepBack() end
+    end)
+    local stepBackEvents = CreateFrame("Frame")
+    for _, event in ipairs({ "AUCTION_HOUSE_SHOW", "TRADE_SKILL_SHOW", "MAIL_SHOW", "MERCHANT_SHOW",
+                             "BANKFRAME_OPENED" }) do
+        stepBackEvents:RegisterEvent(event)
+    end
+    stepBackEvents:SetScript("OnEvent", StepBack)
+    -- Bags aren't game panels, so watch them directly
+    local bags = { ContainerFrameCombinedBags }
+    for i = 1, NUM_TOTAL_EQUIPPED_BAG_SLOTS or 0 do table.insert(bags, _G["ContainerFrame" .. i]) end
+    for _, bag in pairs(bags) do bag:HookScript("OnShow", StepBack) end
+
+    -- Escape closes only what's in front: Settings or Help, else Goldsmith
+    -- if no game window is in front of it. Otherwise the key goes on to the
+    -- game, which closes its windows, and the next Escape closes Goldsmith.
+    -- (In UISpecialFrames the game's Escape would close everything at once.)
+    -- Addons can't hold on to keys in combat, so there it falls back to that.
+    -- Game windows that can be open with Goldsmith (some load only when
+    -- first opened, so they're looked up each time)
+    local GAME_WINDOWS = { "AuctionHouseFrame", "ProfessionsFrame", "MailFrame", "MerchantFrame",
+                           "BankFrame", "AccountBankPanel" }
+    local function GameWindows()
+        local list = {}
+        for _, name in ipairs(GAME_WINDOWS) do
+            if _G[name] then table.insert(list, _G[name]) end
+        end
+        for _, position in ipairs({ "left", "center", "right", "doublewide", "fullscreen" }) do
+            local panel = GetUIPanel and GetUIPanel(position)
+            if panel then table.insert(list, panel) end
+        end
+        for _, bag in pairs(bags) do table.insert(list, bag) end
+        return list
+    end
+    local function AnyGameWindowOpen()
+        for _, window in ipairs(GameWindows()) do
+            if window ~= frame and window:IsShown() then return true end
+        end
+        return false
+    end
+    local function InFront()
+        return inFront or not AnyGameWindowOpen()
+    end
+
+    -- A click on Goldsmith (or anything in it) brings it in front; a click
+    -- on an open game window puts it behind. Clicks on the game world and
+    -- other addons leave it as it was.
+    local function IsInside(f, ancestor)
+        while f do
+            if f == ancestor then return true end
+            f = f.GetParent and f:GetParent()
+        end
+        return false
+    end
+    local clicks = CreateFrame("Frame")
+    clicks:RegisterEvent("GLOBAL_MOUSE_DOWN")
+    clicks:SetScript("OnEvent", function()
+        if not frame:IsShown() then return end
+        local focus = (GetMouseFoci and GetMouseFoci()[1]) or (GetMouseFocus and GetMouseFocus())
+        if not focus then return end
+        if IsInside(focus, frame) then
+            inFront = true
+            return
+        end
+        for _, window in ipairs(GameWindows()) do
+            if window ~= frame and window:IsShown() and IsInside(focus, window) then
+                inFront = false
+                return
+            end
+        end
+    end)
+
+    -- Every key goes on to the game except an Escape Goldsmith used, and
+    -- that is let go again on the next frame, so Goldsmith never holds on to
+    -- the keyboard (it would swallow movement keys in combat, where it can't
+    -- be changed)
+    local function PassKeysOn()
+        if not InCombatLockdown() then frame:SetPropagateKeyboardInput(true) end
+    end
+    frame:SetScript("OnKeyDown", function(self, key)
+        if key ~= "ESCAPE" or InCombatLockdown() then return end
+        local handled = false
+        if GoldsmithHelp and GoldsmithHelp:IsShown() then
+            GoldsmithHelp:Hide(); handled = true
+        elseif GoldsmithSettings and GoldsmithSettings:IsShown() then
+            GoldsmithSettings:Hide(); handled = true
+        elseif InFront() then
+            self:Hide(); handled = true
+        end
+        if handled then
+            self:SetPropagateKeyboardInput(false)
+            C_Timer.After(0, PassKeysOn)
+        end
+    end)
+    frame:HookScript("OnShow", PassKeysOn)
+
+    -- Keyboard setup can't happen in combat (a /reload mid-fight); until
+    -- it's done, and in any fight, the game's Escape closes Goldsmith along
+    -- with everything else
+    local keysReady = false
+    local function SetUpKeys()
+        if keysReady or InCombatLockdown() then return end
+        frame:SetPropagateKeyboardInput(true)
+        frame:EnableKeyboard(true)
+        keysReady = true
+    end
+    local combat = CreateFrame("Frame")
+    combat:RegisterEvent("PLAYER_REGEN_DISABLED")
+    combat:RegisterEvent("PLAYER_REGEN_ENABLED")
+    combat:SetScript("OnEvent", function(_, event)
+        if event == "PLAYER_REGEN_DISABLED" then
+            if not tContains(UISpecialFrames, "GoldsmithWindow") then tinsert(UISpecialFrames, "GoldsmithWindow") end
+        else
+            tDeleteItem(UISpecialFrames, "GoldsmithWindow")
+            SetUpKeys()
+            PassKeysOn()
+        end
+    end)
+    if InCombatLockdown() then
+        tinsert(UISpecialFrames, "GoldsmithWindow")
+    else
+        SetUpKeys()
+    end
 
     -- Header: drag it to move the window
     local header = UI.Panel(frame, "header")
