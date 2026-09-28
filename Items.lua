@@ -628,12 +628,41 @@ local function Create(parent)
     landing:SetAllPoints()
     view.landing = landing
 
-    view.searchBox = UI.SearchBox(landing, 280, "Find an item", function(text)
+    view.searchBox = UI.SearchBox(landing, 280, "Find an item, or shift-click one", function(text)
         view.search = text
         view.list:ScrollToTop()
         addon.RefreshWindow()
     end)
     view.searchBox:SetPoint("TOPLEFT", 0, 0)
+
+    -- Shift-clicking an item (bags, AH, a link in chat) searches for it, the
+    -- way it would put a link in chat: when the search box has the cursor,
+    -- or when the Items tab is showing and chat isn't open. The game sends
+    -- shift-clicked links through the chat's insert function; Goldsmith
+    -- watches it (both the old and the newer name).
+    local function IsChatOpen()
+        local active = (ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow())
+            or (ChatFrameUtil and ChatFrameUtil.GetActiveWindow and ChatFrameUtil.GetActiveWindow())
+        return active ~= nil
+    end
+    local function OnInsertLink(link)
+        if type(link) ~= "string" or not link:find("|Hitem:") then return end
+        if not (addon.window and addon.window:IsShown()) then return end
+        local focused = view.searchBox:HasFocus()
+        if not focused and (GoldsmithDB.ui2.tab ~= "items" or IsChatOpen()) then return end
+        local name = C_Item.GetItemInfo(link) or link:match("%[(.-)%]")
+        if not name then return end
+        -- Crafted items' links carry a quality icon after the name
+        name = strtrim((name:gsub("|A.-|a", "")))
+        view.searchBox:SetText(name)
+        view.searchBox:ClearFocus()
+        view.search = name
+        view.page.item = nil
+        view.list:ScrollToTop()
+        addon:ShowTab("items")
+    end
+    if ChatEdit_InsertLink then hooksecurefunc("ChatEdit_InsertLink", OnInsertLink) end
+    if ChatFrameUtil and ChatFrameUtil.InsertLink then hooksecurefunc(ChatFrameUtil, "InsertLink", OnInsertLink) end
     view.inBags = UI.Checkbox(landing, "In my bags", function(checked)
         ui.itemsInBags = checked or nil
         view.list:ScrollToTop()
