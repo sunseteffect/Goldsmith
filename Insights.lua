@@ -347,4 +347,329 @@ function addon:GetProfessionBreakdown(rangeKey, concentration)
     return list
 end
 
+-- Items tab
+--
+-- AH sale mail only names the item, not its tier, so what you've earned is
+-- worked out per item name. Prices, stock and costs are per item (each
+-- quality tier is its own item); an item page can switch between tiers.
+
+local AH_CUT = 0.05
+local BOARD_SIZE = 6
+local MIN_SALES_FOR_ROI = 2    -- sales before an item's ROI is ranked
+local PRICE_DAYS = 30
+
+-- Every item Goldsmith knows: recipe outputs (each tier, from any
+-- character's tier data), materials (each quality) and anything you've
+-- bought. Returns byID[itemID] = { itemID, name, recipe, tier, tierCount,
+-- profession, material } and byName[name] = { itemID, ... } (lowest tier
+-- first).
+local indexFrame, indexByID, indexByName
+local function BuildItemIndex()
+    local byID, byName = {}, {}
+    local function Add(itemID, name, fields)
+        if not itemID or not name then return end
+        local item = byID[itemID]
+        if not item then
+            item = { itemID = itemID, name = name }
+            byID[itemID] = item
+            byName[name] = byName[name] or {}
+            table.insert(byName[name], itemID)
+        end
+        for k, v in pairs(fields) do
+            if item[k] == nil then item[k] = v end
+        end
+    end
+    for _, c in pairs(GoldsmithDB.characters) do
+        for recipeID, td in pairs(c.tierData) do
+            local recipe = GoldsmithDB.recipes[recipeID]
+            if recipe then
+                -- Gear shares one item ID across tiers, so it has no single tier
+                local shared = td.outputs[1] and td.outputs[#td.qualities]
+                    and td.outputs[1].itemID == td.outputs[#td.qualities].itemID
+                for tier, out in pairs(td.outputs or {}) do
+                    Add(out.itemID, recipe.outputName, {
+                        recipe = recipe, profession = recipe.profession,
+                        tier = not shared and tier or nil, tierCount = not shared and #td.qualities or nil,
+                    })
+                end
+            end
+        end
+    end
+    for _, recipe in pairs(GoldsmithDB.recipes) do
+        Add(recipe.outputItemID, recipe.outputName, { recipe = recipe, profession = recipe.profession })
+        for _, slot in ipairs(recipe.reagents) do
+            local ids = slot.itemIDs or {}
+            for i, itemID in ipairs(ids) do
+                Add(itemID, slot.names[i], {
+                    material = true, profession = GoldsmithDB.reagents[slot.names[i]],
+                    tier = #ids > 1 and i or nil, tierCount = #ids > 1 and #ids or nil,
+                })
+            end
+        end
+    end
+    for herbID, record in pairs(GoldsmithDB.milling) do
+        Add(herbID, record.name, { material = true, profession = GoldsmithDB.reagents[record.name] })
+    end
+    for _, e in ipairs(addon.ledger:getAll()) do
+        if e.type == "COST" and e.itemID then
+            Add(e.itemID, e.item, { profession = e.profession ~= "Unassigned" and e.profession or nil })
+        end
+    end
+    for _, ids in pairs(byName) do
+        table.sort(ids, function(a, b) return (byID[a].tier or 0) < (byID[b].tier or 0) end)
+    end
+    return byID, byName
+end
+
+-- Built at most once a frame; lists look items up row by row
+local function ItemIndex()
+    local now = GetTime()
+    if indexFrame ~= now then
+        indexByID, indexByName = BuildItemIndex()
+        indexFrame = now
+    end
+    return indexByID, indexByName
+end
+
+-- An item's quality tier and how many tiers it has, or nil
+function addon:GetItemTier(itemID)
+    local item = itemID and ItemIndex()[itemID]
+    if item then return item.tier, item.tierCount end
+end
+
+-- What you've sold of each item name: { [name] = { name, profession,
+-- units, sales, cost, deposits, profit, roi, salesCount, firstSale } }.
+-- Sales without cost data use today's estimate; if there's none they're
+-- left out of profit (as in the Overview's summary).
+local function SalesByItem(prof, since)
+    local items = {}
+    local function Item(e)
+        local item = items[e.item]
+        if not item then
+            item = { name = e.item, profession = e.profession, units = 0, sales = 0, cost = 0, costedSales = 0,
+                deposits = 0, salesCount = 0 }
+            items[e.item] = item
+        end
+        return item
+    end
+    for _, e in ipairs(addon.ledger:getAll()) do
+        if e.item and (prof == "All" or e.profession == prof) and (not since or e.timestamp >= since) then
+            if e.type == "REVENUE" then
+                local item = Item(e)
+                item.units = item.units + e.quantity
+                item.sales = item.sales + e.totalCopper
+                item.salesCount = item.salesCount + 1
+                item.firstSale = math.min(item.firstSale or e.timestamp, e.timestamp)
+                local cost = e.costBasis
+                if not cost then
+                    local unit = addon:GetUnitCostBasis(e.item)
+                    cost = unit and unit * e.quantity
+                end
+                if cost then
+                    item.cost = item.cost + cost
+                    item.costedSales = item.costedSales + e.totalCopper
+                end
+            elseif e.kind == "DEPOSIT" then
+                local item = Item(e)
+                item.deposits = item.deposits + e.totalCopper
+            end
+        end
+    end
+    for _, item in pairs(items) do
+        item.profit = item.costedSales - item.cost - item.deposits
+        item.roi = item.cost > 0 and (item.profit / item.cost * 100) or nil
+    end
+    return items
+end
+
+-- The Items tab's landing page: four leaderboards for a profession and
+-- date range key. Returns { profit, roi, fastest, held, days }; each list
+-- holds up to BOARD_SIZE { name, itemID (may be nil), value, ... }.
+function addon:GetItemBoards(prof, rangeKey)
+    local since = addon:DateRangeStart(rangeKey)
+    local _, byName = ItemIndex()
+    local sold = SalesByItem(prof, since)
+
+    local list = {}
+    for _, item in pairs(sold) do
+        item.itemID = byName[item.name] and byName[item.name][#byName[item.name]]
+        if item.salesCount > 0 then table.insert(list, item) end
+    end
+    -- Days the range covers: all time counts from your first sale
+    local first
+    for _, item in ipairs(list) do first = math.min(first or item.firstSale, item.firstSale) end
+    local days = addon:GetDateRange(rangeKey).days
+        or (first and math.max(math.ceil((time() - first) / 86400), 1)) or 1
+
+    local function Top(filter, key)
+        local out = {}
+        for _, item in ipairs(list) do
+            if filter(item) then table.insert(out, item) end
+        end
+        table.sort(out, function(a, b) return a[key] > b[key] end)
+        for i = #out, BOARD_SIZE + 1, -1 do out[i] = nil end
+        return out
+    end
+    for _, item in ipairs(list) do item.perDay = item.units / days end
+
+    local boards = {
+        days = days,
+        profit = Top(function(i) return i.profit > 0 end, "profit"),
+        roi = Top(function(i) return i.roi and i.roi > 0 and i.salesCount >= MIN_SALES_FOR_ROI end, "roi"),
+        fastest = Top(function() return true end, "perDay"),
+        held = {},
+    }
+    local stock = addon:GetStockValue(prof)
+    for i = 1, math.min(#stock.heldLong, BOARD_SIZE) do
+        local item = stock.heldLong[i]
+        table.insert(boards.held, {
+            name = item.name, itemID = item.itemID, count = item.count, value = item.value,
+            days = math.floor((time() - item.heldSince) / 86400),
+        })
+    end
+    return boards
+end
+
+-- Items whose name contains `text` (any case), for the search box: a row
+-- per tier. Returns up to `limit` { name, itemID, tier, profession, have,
+-- price, demand }, names A-Z, lowest tier first.
+function addon:SearchItems(text, prof, limit)
+    local byID, byName = ItemIndex()
+    local needle = text:lower()
+    local list = {}
+    for name, ids in pairs(byName) do
+        local profession = byID[ids[#ids]].profession
+        if name:lower():find(needle, 1, true) and (prof == "All" or profession == prof) then
+            for _, id in ipairs(ids) do
+                table.insert(list, {
+                    name = name, itemID = id, tier = byID[id].tier, profession = profession,
+                    have = (addon:GetStock(id)), price = addon:GetMarketPrice(id), demand = addon:GetDemand(id, name),
+                })
+            end
+        end
+    end
+    table.sort(list, function(a, b)
+        if a.name ~= b.name then return a.name < b.name end
+        return (a.tier or 0) < (b.tier or 0)
+    end)
+    for i = #list, limit + 1, -1 do list[i] = nil end
+    return list
+end
+
+-- Saved daily prices for the last `days` days (oldest first, days with no
+-- price skipped) and the usual range: the middle half of those prices
+-- (25th to 75th percentile). Returns points { day, value }, low, high.
+local function PriceSeries(itemID, days)
+    local history = GoldsmithDB.priceHistory[itemID] or {}
+    local points, values = {}, {}
+    for i = days - 1, 0, -1 do
+        local day = date("%Y-%m-%d", time() - i * 86400)
+        if history[day] then
+            table.insert(points, { day = day, value = history[day] })
+            table.insert(values, history[day])
+        end
+    end
+    if #values < 4 then return points end
+    table.sort(values)
+    local function At(p) return values[math.max(math.floor(#values * p + 0.5), 1)] end
+    return points, At(0.25), At(0.75)
+end
+
+-- Everything on an item's page. name is the item's name; itemID picks the
+-- tier (default: the tier you hold most of, else the highest).
+-- Returns { name, itemID, tier, tierCount, profession, recipe, material,
+--   tiers = { { itemID, tier, price, have } },
+--   price, priceSource, priceAge, priceText, insight (GetPriceInsight),
+--   historyDays, history = { { day, value } }, bandLow, bandHigh,
+--   demand, demandSource, saleRate, have, byCharacter, heldSince,
+--   crafted: charKey, estimated, partial, worst, stats, concentration,
+--            yours (nil if never crafted)
+--   bought:  paid, paidSource
+--   breakEven, breakEvenFrom ("yours", "paid" or "estimated"),
+--   earned = { units, sales, profit } (all time),
+--   activity = { { time, kind ("Sold", "Bought", "Posted", "Crafted"),
+--                 qty, gold (signed, or unit cost for crafts), partial } } }
+function addon:GetItemDetails(name, itemID)
+    local byID, byName = ItemIndex()
+    local ids = byName[name] or (itemID and { itemID }) or {}
+    if not itemID or not byID[itemID] then
+        if #ids > 0 then itemID = nil end
+        local most = 0
+        for _, id in ipairs(ids) do
+            local have = addon:GetStock(id)
+            if have > most then most, itemID = have, id end
+        end
+        itemID = itemID or ids[#ids]
+    end
+    local info = (itemID and byID[itemID]) or {}
+    local d = {
+        name = name, itemID = itemID, tier = info.tier, tierCount = info.tierCount,
+        recipe = info.recipe or addon:FindRecipeByOutput(name), material = info.material,
+        tiers = {},
+    }
+    d.profession = info.profession or (d.recipe and d.recipe.profession) or addon:GetProfessionForItemName(name)
+    for _, id in ipairs(ids) do
+        table.insert(d.tiers, { itemID = id, tier = byID[id] and byID[id].tier,
+            price = addon:GetMarketPrice(id), have = (addon:GetStock(id)) })
+    end
+
+    if itemID then
+        d.price, d.priceSource, d.priceAge = addon:GetMarketPriceInfo(itemID)
+        d.priceText = d.price and addon:PriceAgeText(itemID)
+        d.insight, d.historyDays = addon:GetPriceInsight(itemID)
+        d.history, d.bandLow, d.bandHigh = PriceSeries(itemID, PRICE_DAYS)
+        d.demand, d.demandSource = addon:GetDemand(itemID, name)
+        d.saleRate = addon:GetSaleRate(itemID)
+        d.have, d.byCharacter = addon:GetStock(itemID)
+        d.heldSince = d.have > 0 and HeldSince(itemID, d.have) or nil
+    else
+        d.history, d.have, d.byCharacter = {}, 0, {}
+    end
+
+    local recipe = d.recipe
+    if recipe then
+        d.charKey = addon:GetCrafter(recipe.recipeID) or addon.charKey
+        addon:WithCharacter(d.charKey, function()
+            local row
+            for _, t in ipairs(addon:GetTierRows(recipe) or {}) do
+                if t.tier == d.tier and (not row or (row.concentrate and not t.concentrate)) then row = t end
+            end
+            row = row or addon:GetRecipeProfit(recipe, itemID)
+            d.estimated, d.partial = row.cost, row.partial
+            d.worst = addon:GetWorstCaseCost(recipe, row)
+            d.concentration = row.concentrate and row.concentration or nil
+            d.stats = addon:StatsChar().recipeStats[recipe.recipeID]
+        end)
+        d.yours = itemID and addon:GetCraftedCost(itemID)
+    end
+    if not recipe or d.material then
+        d.paid, d.paidSource = addon:GetOwnCost(name)
+    end
+    local basis = d.yours or d.paid or d.estimated
+    d.breakEvenFrom = (d.yours and "yours") or (d.paid and "paid") or (d.estimated and "estimated")
+    d.breakEven = basis and basis / (1 - AH_CUT)
+
+    local sold = SalesByItem("All")[name]
+    d.earned = sold and { units = sold.units, sales = sold.sales, profit = sold.profit } or nil
+
+    d.activity = {}
+    local own = {}
+    for _, id in ipairs(ids) do own[id] = true end
+    for _, e in ipairs(addon.ledger:getAll()) do
+        if e.item == name or (e.itemID and own[e.itemID]) then
+            local kind = e.type == "REVENUE" and "Sold" or (e.kind == "DEPOSIT" and "Posted" or "Bought")
+            table.insert(d.activity, { time = e.timestamp, kind = kind, qty = e.quantity,
+                gold = e.type == "REVENUE" and e.totalCopper or -e.totalCopper })
+        end
+    end
+    for _, id in ipairs(ids) do
+        for _, lot in ipairs(GoldsmithDB.craftLots[id] or {}) do
+            table.insert(d.activity, { time = lot.time, kind = "Crafted", qty = lot.qty, gold = lot.unitCost,
+                partial = lot.partial, tier = byID[id] and byID[id].tier })
+        end
+    end
+    table.sort(d.activity, function(a, b) return a.time > b.time end)
+    return d
+end
+
 _G.Goldsmith = addon

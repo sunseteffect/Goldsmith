@@ -57,9 +57,10 @@ function UI.Text(parent, fontName, colorName, justify)
 end
 
 -- Hover tooltip. fill(tooltip, frame) adds the lines; nothing shows if it
--- adds none.
+-- adds none. Hooked, so a widget's own hover effects (e.g. a gold border)
+-- keep working; call it once per frame.
 function UI.SetTooltip(frame, fill, anchor)
-    frame:SetScript("OnEnter", function(self)
+    frame:HookScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, anchor or "ANCHOR_RIGHT")
         fill(GameTooltip, self)
         if GameTooltip:NumLines() > 0 then
@@ -68,7 +69,7 @@ function UI.SetTooltip(frame, fill, anchor)
             GameTooltip:Hide()
         end
     end)
-    frame:SetScript("OnLeave", GameTooltip_Hide)
+    frame:HookScript("OnLeave", GameTooltip_Hide)
 end
 
 -- A flat button. onClick(self, mouseButton).
@@ -316,9 +317,16 @@ end
 
 -- A line chart. The line is scaled between the lowest and highest values
 -- (not from zero), so changes in a large total stay visible.
+-- chart:SetData(points, opts): opts.band = { low, high, usual } shades the
+-- usual range and marks the usual value (e.g. an item's usual price).
 function UI.LineChart(parent)
     local chart = CreateFrame("Frame", nil, parent)
     chart.lines, chart.dots = {}, {}
+    chart.bandArea = chart:CreateTexture(nil, "BACKGROUND")
+    chart.bandArea:SetColorTexture(addon:Color("band"))
+    chart.bandLine = chart:CreateTexture(nil, "BORDER")
+    chart.bandLine:SetColorTexture(addon:Color("bandLine"))
+    chart.bandLine:SetHeight(1)
     chart.baseline = UI.Line(chart, "borderStrong")
     chart.baseline:SetHeight(1)
     chart.baseline:SetPoint("BOTTOMLEFT")
@@ -329,15 +337,34 @@ function UI.LineChart(parent)
         local w, h = chart:GetWidth(), chart:GetHeight()
         local n = #points
         HideFrom(chart.lines, 1); HideFrom(chart.dots, 1); HideFrom(chart.hovers, 1)
+        chart.bandArea:Hide(); chart.bandLine:Hide()
         if n == 0 or w <= 0 or h <= 0 then return end
 
         local minV, maxV = math.huge, -math.huge
         for _, p in ipairs(points) do
             minV, maxV = math.min(minV, p.value), math.max(maxV, p.value)
         end
+        local band = chart.band
+        if band then
+            minV, maxV = math.min(minV, band.low), math.max(maxV, band.high)
+        end
         local range = maxV - minV
         -- A flat line sits in the middle
         local function Y(v) return range > 0 and ((v - minV) / range * (h - 8) + 4) or h / 2 end
+
+        if band then
+            chart.bandArea:ClearAllPoints()
+            chart.bandArea:SetPoint("BOTTOMLEFT", chart, "BOTTOMLEFT", 0, Y(band.low))
+            chart.bandArea:SetPoint("BOTTOMRIGHT", chart, "BOTTOMRIGHT", 0, Y(band.low))
+            chart.bandArea:SetHeight(math.max(Y(band.high) - Y(band.low), 1))
+            chart.bandArea:Show()
+            if band.usual then
+                chart.bandLine:ClearAllPoints()
+                chart.bandLine:SetPoint("BOTTOMLEFT", chart, "BOTTOMLEFT", 0, Y(band.usual))
+                chart.bandLine:SetPoint("BOTTOMRIGHT", chart, "BOTTOMRIGHT", 0, Y(band.usual))
+                chart.bandLine:Show()
+            end
+        end
         local step = n > 1 and w / (n - 1) or 0
         local function X(i) return n > 1 and (i - 1) * step or w / 2 end
 
@@ -368,15 +395,18 @@ function UI.LineChart(parent)
             local hover = HoverColumn(chart, i)
             hover.point = p
             hover:ClearAllPoints()
-            local columnWidth = n > 1 and step or w
-            hover:SetPoint("TOPLEFT", chart, "TOPLEFT", math.max(X(i) - columnWidth / 2, 0), 0)
-            hover:SetSize(columnWidth, h)
+            -- Half a step either side of the point, kept inside the chart
+            local half = n > 1 and step / 2 or w / 2
+            local left, right = math.max(X(i) - half, 0), math.min(X(i) + half, w)
+            hover:SetPoint("TOPLEFT", chart, "TOPLEFT", left, 0)
+            hover:SetSize(math.max(right - left, 1), h)
             hover:Show()
         end
     end
 
-    function chart:SetData(points)
+    function chart:SetData(points, opts)
         chart.points = points
+        chart.band = opts and opts.band
         chart:Draw()
     end
     chart:SetScript("OnSizeChanged", function() chart:Draw() end)
@@ -463,6 +493,53 @@ function UI.NumberBox(parent, width, onChange)
     box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
     box:SetScript("OnEditFocusGained", function(self) self:SetBackdropBorderColor(addon:Color("gold")) end)
     box:SetScript("OnEditFocusLost", function(self) self:SetBackdropBorderColor(addon:Color("borderStrong")) end)
+    return box
+end
+
+-- A search box with a hint shown while it's empty. onChange(text) runs as
+-- it's typed; Escape clears it.
+function UI.SearchBox(parent, width, hint, onChange)
+    local box = CreateFrame("EditBox", nil, parent, "BackdropTemplate")
+    box:SetSize(width, 24)
+    UI.Style(box, "panelRaised", "borderStrong")
+    box:SetFontObject(addon:Font("body"))
+    box:SetTextInsets(10, 24, 0, 0)
+    box:SetAutoFocus(false)
+    box:SetMaxLetters(60)
+    box.hint = UI.Text(box, "small", "dim")
+    box.hint:SetPoint("LEFT", 10, 0)
+    box.hint:SetText(hint)
+    box.clear = UI.IconButton(box, 20, "x", "Clear", function()
+        box:SetText("")
+        box:ClearFocus()
+        onChange("")
+    end, { font = "small" })
+    box.clear:SetPoint("RIGHT", -2, 0)
+
+    local function Update()
+        local empty = box:GetText() == ""
+        box.hint:SetShown(empty and not box:HasFocus())
+        box.clear:SetShown(not empty)
+    end
+    box:SetScript("OnTextChanged", function(self, userInput)
+        Update()
+        if userInput then onChange(self:GetText()) end
+    end)
+    box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    box:SetScript("OnEscapePressed", function(self)
+        self:SetText("")
+        self:ClearFocus()
+        onChange("")
+    end)
+    box:SetScript("OnEditFocusGained", function(self)
+        self:SetBackdropBorderColor(addon:Color("gold"))
+        Update()
+    end)
+    box:SetScript("OnEditFocusLost", function(self)
+        self:SetBackdropBorderColor(addon:Color("borderStrong"))
+        Update()
+    end)
+    Update()
     return box
 end
 
@@ -662,6 +739,13 @@ function UI.List(parent, opts)
 
     function list:SetColumns(columns)
         list.columns = columns
+        list:Update()
+    end
+
+    -- Both at once, for a list that switches between kinds of items (the
+    -- old items would otherwise be drawn with the new columns)
+    function list:SetColumnsAndItems(columns, items)
+        list.columns, list.items = columns, items
         list:Update()
     end
 

@@ -275,6 +275,7 @@ local function CraftTooltip(tooltip, item)
     end
     tooltip:AddLine(" ")
     Note(tooltip, "Click to plan: materials, quantity, shopping list", "profit")
+    Note(tooltip, "Right-click for the item's page")
 end
 
 -- Planner
@@ -371,7 +372,7 @@ local function PlanTooltip(tooltip, node)
         Note(tooltip, string.format("Your choice (%s) costs %s more here", node.best.method,
             Money((node.best.unit - o.cheapest.unit) * node.need)), "warning")
     end
-    Note(tooltip, "Right-click to choose how to get it")
+    Note(tooltip, "Right-click to choose how to get it, click for its item page")
 end
 
 -- Right-click a material: pick how to get it. The choice applies to that
@@ -408,22 +409,36 @@ local function PlanMenu(node)
     end)
 end
 
--- The tier row being planned, with current prices. The same way of making
--- it (scenario) if it's still there, else the same tier with or without
--- concentration. Also looks at every combination, since the concentration
--- planner can pick one that isn't a Crafts row.
+-- The tier row being planned, with current prices: the same way of making
+-- it (scenario) if it's still there (the concentration planner can pick
+-- one that isn't a Crafts row), else the same tier with or without
+-- concentration as asked. When the tier can't be made that way, the other
+-- way is used and a note says why: some tiers are only reachable with
+-- concentration, and concentration adds nothing to a tier you already
+-- reach without it. Returns the row and the note (or nil).
 local function FindTierInfo(p)
     if not p.tier then return nil end
     local rows = addon:GetTierRows(p.recipe) or {}
+    if p.scenario then
+        for _, t in ipairs(rows) do
+            if t.scenario == p.scenario then return t end
+        end
+        for _, e in ipairs(rows[1] and rows[1].scenarios or {}) do
+            if e.scenario == p.scenario then return e end
+        end
+    end
+    local plain, concentrated
     for _, t in ipairs(rows) do
-        if t.scenario == p.scenario then return t end
+        if t.tier == p.tier then
+            if t.concentrate then concentrated = t else plain = t end
+        end
     end
-    for _, e in ipairs(rows[1] and rows[1].scenarios or {}) do
-        if e.scenario == p.scenario then return e end
+    if p.concentrate then
+        if concentrated then return concentrated end
+        return plain, plain and "you reach this tier without concentration"
     end
-    for _, t in ipairs(rows) do
-        if t.tier == p.tier and (t.concentrate == true) == p.concentrate then return t end
-    end
+    if plain then return plain end
+    return concentrated, concentrated and "this tier needs concentration"
 end
 
 -- Screen
@@ -464,6 +479,15 @@ local function CreatePlanScreen(parent)
     screen.back:SetPoint("TOPLEFT", 0, 0)
     screen.title = UI.Text(screen, "heading")
     screen.title:SetPoint("LEFT", screen.back, "RIGHT", 14, 0)
+    -- The title opens the item's page
+    local titleButton = CreateFrame("Button", nil, screen)
+    titleButton:SetAllPoints(screen.title)
+    titleButton:SetScript("OnClick", function()
+        if screen.plan then addon:OpenItem(screen.plan.recipe.outputName, screen.tierItemID) end
+    end)
+    UI.SetTooltip(titleButton, function(tooltip)
+        tooltip:AddLine("Click for the item's page", 1, 1, 1)
+    end)
     screen.subtitle = UI.Text(screen, "small", "muted")
     screen.subtitle:SetPoint("LEFT", screen.title, "RIGHT", 10, 0)
 
@@ -484,10 +508,26 @@ local function CreatePlanScreen(parent)
     end)
     screen.useHave:SetPoint("TOPRIGHT", 0, -44)
 
+    -- For crafts with tiers: plan the tier with or without concentration
+    screen.useConc = UI.Checkbox(screen, "Use concentration", function(checked)
+        local p = screen.plan
+        if not p then return end
+        p.concentrate = checked
+        p.scenario = nil -- the chosen mix belongs to the other way
+        screen:Update()
+    end)
+    screen.useConc:SetPoint("RIGHT", screen.useHave, "LEFT", -20, 0)
+    UI.SetTooltip(screen.useConc, function(tooltip)
+        tooltip:AddLine("Use concentration", 1, 1, 1)
+        tooltip:AddLine("Plan this tier with concentration, using the mix of material qualities that earns the most. Some tiers can only be reached with it.", 0.6, 0.6, 0.6, true)
+    end)
+
     screen.list = UI.List(screen, {
         fill = FillPlanRow,
         tooltip = PlanTooltip,
-        onClick = function(node, button) if button == "RightButton" then PlanMenu(node) end end,
+        onClick = function(node, button)
+            if button == "RightButton" then PlanMenu(node) else addon:OpenItem(node.name, node.itemID) end
+        end,
         empty = "Enter how many to make.",
     })
     screen.list:SetPoint("TOPLEFT", 0, -80)
@@ -564,11 +604,18 @@ local function CreatePlanScreen(parent)
         local recipe = p.recipe
         screen.useHave:SetChecked(ui.planUseOnHand ~= false)
 
-        local tierInfo = addon:WithCharacter(p.charKey, FindTierInfo, p)
+        local tierInfo, tierNote = addon:WithCharacter(p.charKey, FindTierInfo, p)
+        screen.tierItemID = tierInfo and tierInfo.itemID or recipe.outputItemID
         local tierIcon = tierInfo and (" " .. addon:TierIconText(tierInfo.tier, tierInfo.tierCount)) or ""
         screen.title:SetText(addon:ProfessionIconText(recipe.profession) .. recipe.outputName .. tierIcon)
+        -- The checkbox shows the way actually planned (a tier may need
+        -- concentration, or not benefit from it)
+        local concentrating = tierInfo and tierInfo.concentrate == true
+        screen.useConc:SetShown(p.tier ~= nil)
+        screen.useConc:SetChecked(concentrating)
         local sub = {}
-        if p.concentrate then table.insert(sub, "with concentration, using the material mix that earns the most") end
+        if concentrating then table.insert(sub, "with concentration, best mix of material qualities") end
+        if tierNote then table.insert(sub, tierNote) end
         if p.charKey ~= addon.charKey then table.insert(sub, "on " .. CharName(p.charKey)) end
         if p.tier and not tierInfo then table.insert(sub, "this tier isn't reachable right now") end
         screen.subtitle:SetText(table.concat(sub, ", "))
@@ -837,7 +884,11 @@ local function Create(parent)
         fill = FillCraftRow,
         tooltip = CraftTooltip,
         onClick = function(item, button)
-            if button == "LeftButton" then addon:OpenCraftPlan(item.recipe, item.info, item.charKey) end
+            if button == "LeftButton" then
+                addon:OpenCraftPlan(item.recipe, item.info, item.charKey)
+            else
+                addon:OpenItem(item.recipe.outputName, item.itemID)
+            end
         end,
         onSort = function(key)
             local current = GetSort()

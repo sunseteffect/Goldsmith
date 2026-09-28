@@ -21,3 +21,4 @@ UI.lua
 Window.lua
 Overview.lua
 Crafts.lua
+Items.lua

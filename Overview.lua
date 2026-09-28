@@ -119,6 +119,7 @@ local function FillStockTile(tile, stock, prof)
                     string.format("%d days", days), 0.9, 0.9, 0.9, 1, 0.6, 0.2)
             end
         end
+        tooltip:AddLine("Click to see everything you hold.", 0.37, 0.81, 0.48)
     end
 end
 
@@ -422,6 +423,14 @@ local function Create(parent)
         tile:SetWidth(TILE_WIDTH)
         tile:SetPoint("TOPLEFT", (i - 1) * (TILE_WIDTH + GAP), 0)
         view.tiles[i] = tile
+        -- Gold in stock opens what you hold on the Items tab
+        if i == 3 then
+            tile:SetScript("OnMouseUp", function(_, button)
+                if button == "LeftButton" then addon:OpenItems({ inBags = true }) end
+            end)
+            tile:HookScript("OnEnter", function(self) self:SetBackdropBorderColor(addon:Color("gold")) end)
+            tile:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("border")) end)
+        end
     end
 
     -- Do this next

@@ -41,6 +41,9 @@ addon.themes = {
             conc        = Hex("e8c25a"),
             warning     = Hex("e59a3a"),
             bar         = Hex("3f9e5a"),
+            band        = Hex("e8c25a", 0.10),
+            bandLine    = Hex("e8c25a", 0.35),
+            line        = Hex("b48be0"),
             barEmpty    = Hex("3a3b44"),
         },
         -- { file, size, flags, color }
