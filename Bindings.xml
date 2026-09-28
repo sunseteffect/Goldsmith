@@ -1,0 +1,6 @@
+<Bindings>
+    <!-- Options > Keybindings > AddOns > Goldsmith. The game loads this file itself. -->
+    <Binding name="GOLDSMITH_TOGGLE" header="GOLDSMITH" category="ADDONS">
+        Goldsmith:ToggleWindow()
+    </Binding>
+</Bindings>

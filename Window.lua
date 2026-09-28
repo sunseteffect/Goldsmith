@@ -244,6 +244,13 @@ function addon:CreateWindow()
         if frame:IsShown() then Refresh() else frame:Show() end
     end
 
+    -- Opens the window with the settings panel (the minimap button's
+    -- right-click)
+    function addon:ShowSettings()
+        frame:Show()
+        settings:Show()
+    end
+
     -- Other files call addon.Refresh when data changes. Data changes come in
     -- bursts (AH searches, bag updates), so the window refreshes once, half
     -- a second after the first of a burst.

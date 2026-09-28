@@ -9,6 +9,16 @@ local function Print(msg, ...)
     print("|cFF00FF00[Goldsmith]|r " .. string.format(msg, ...))
 end
 
+-- Ways to open the window besides /gsm: a key (Bindings.xml; these name it
+-- in Options > Keybindings > AddOns) and the addon compartment next to the
+-- minimap (## AddonCompartmentFunc in the TOC)
+BINDING_HEADER_GOLDSMITH = "Goldsmith"
+BINDING_NAME_GOLDSMITH_TOGGLE = "Show or hide Goldsmith"
+
+function Goldsmith_OnAddonCompartmentClick()
+    addon:ToggleWindow()
+end
+
 -- Called when the player confirms a commodity purchase on the AH.
 -- Snapshot gold now so the actual cost can be taken from the change in money.
 -- Every commodity purchase is recorded so average costs are available for any
@@ -379,6 +389,7 @@ function addon:Initialize()
 
     addon.ledger = addon:CreateLedger(GoldsmithDB)
     addon:CreateWindow()
+    addon:CreateMinimapButton()
     addon:ReassignProfessions()
 
     hooksecurefunc(C_AuctionHouse, "ConfirmCommoditiesPurchase", OnConfirmCommoditiesPurchase)

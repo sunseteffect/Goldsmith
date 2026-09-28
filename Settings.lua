@@ -8,12 +8,14 @@ local UI = addon.UI
 --   costMode    - "estimated" (from your stats) or "worst" (no procs)
 --   priceSource - "auto" (whichever is newer), "auctionator" or "tsm"
 --   minROI      - ROI (%) a craft needs to count as worth crafting
+--   showMinimap - the minimap button (Minimap.lua)
 -- Concentration in Crafts isn't here: the Crafts tab's switch remembers it.
 
 local DEFAULTS = {
     costMode = "estimated",
     priceSource = "auto",
     minROI = 15,
+    showMinimap = true,
 }
 
 function addon:Setting(key)
@@ -78,6 +80,11 @@ local HELP = {
         "Used by Profitable only on the Crafts tab and by Best crafts right now on the Overview.",
         "Higher leaves room for undercuts and slow sales; 15% is a good start.",
     },
+    showMinimap = {
+        "Minimap button",
+        "A gold coin on the edge of the minimap: click to show or hide Goldsmith, right-click for these settings, drag to move it.",
+        "Other ways to open Goldsmith: /gsm, a key (Options > Keybindings > AddOns > Goldsmith), or the addons button by the minimap.",
+    },
 }
 
 local function AddHelp(tooltip, key)
@@ -118,7 +125,7 @@ end
 
 function addon:CreateSettingsPanel(parent)
     local panel = CreateFrame("Frame", "GoldsmithSettings", parent, "BackdropTemplate")
-    panel:SetSize(WIDTH, 52 + 3 * ROW_HEIGHT + 20)
+    panel:SetSize(WIDTH, 52 + 4 * ROW_HEIGHT + 20)
     UI.Style(panel, "window", "borderGold")
     panel:SetFrameStrata("DIALOG")
     panel:EnableMouse(true)
@@ -156,6 +163,15 @@ function addon:CreateSettingsPanel(parent)
         end
     end)
 
+    rows.showMinimap = Row(panel, 4, "showMinimap", "Minimap button", "A coin by the minimap that opens Goldsmith.")
+    rows.showMinimap.control = UI.Checkbox(rows.showMinimap, "Show", function(checked)
+        addon:SetSetting("showMinimap", checked)
+        addon:UpdateMinimapButton()
+        panel:Update()
+    end)
+    rows.showMinimap.control:SetPoint("TOPRIGHT", 0, 0)
+    UI.SetTooltip(rows.showMinimap.control, function(tooltip) AddHelp(tooltip, "showMinimap") end, "ANCHOR_LEFT")
+
     local footer = UI.Text(panel, "label", "dim")
     footer:SetPoint("BOTTOMLEFT", 16, 12)
     footer:SetText("Saved for all your characters. Hover a setting for details.")
@@ -164,6 +180,7 @@ function addon:CreateSettingsPanel(parent)
         rows.costMode.control:SetLabel(LabelFor(COST_MODES, addon:Setting("costMode")))
         rows.priceSource.control:SetLabel(LabelFor(PRICE_SOURCES, addon:Setting("priceSource")))
         rows.minROI.control:SetLabel(ROILabel(addon:Setting("minROI")))
+        rows.showMinimap.control:SetChecked(addon:Setting("showMinimap"))
     end
     panel:SetScript("OnShow", function() panel:Update() end)
     return panel
