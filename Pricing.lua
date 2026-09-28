@@ -1315,8 +1315,11 @@ local function AddTooltipLines(tooltip, data)
     -- Short: craft cost and profit for something you craft, otherwise
     -- average cost and today's price against usual
     local recipe = addon:FindRecipeByOutput(name)
+    -- Craft lines use the stats of whoever makes it best, as the Crafts tab
+    -- does (see GetCrafter)
+    local crafter = recipe and (addon:GetCrafter(recipe.recipeID) or addon.charKey)
     if mode == "short" and recipe then
-        addon:AddRecipeTooltipLines(tooltip, recipe, data.id, false, true)
+        addon:WithCharacter(crafter, addon.AddRecipeTooltipLines, addon, tooltip, recipe, data.id, false, true)
         return
     end
     local short = mode == "short"
@@ -1363,7 +1366,13 @@ local function AddTooltipLines(tooltip, data)
     end
 
     if recipe then
-        addon:AddRecipeTooltipLines(tooltip, recipe, data.id, IsShiftKeyDown())
+        addon:WithCharacter(crafter, addon.AddRecipeTooltipLines, addon, tooltip, recipe, data.id, IsShiftKeyDown())
+        if crafter ~= addon.charKey then
+            local c = GoldsmithDB.characters[crafter]
+            local better = addon:BetterCrafterText(recipe.recipeID)
+            tooltip:AddLine(string.format("  Made on %s%s", c and c.name or crafter,
+                better and (", " .. better) or ""), 0.6, 0.6, 0.6)
+        end
     end
 end
 
@@ -1417,7 +1426,10 @@ function addon:AddRecipeTooltipLines(tooltip, recipe, itemID, showBreakdown, sho
         local parts = {}
         if s.multicraft > 0 then table.insert(parts, string.format("multicraft %.1f%%", s.multicraft)) end
         if s.resourcefulness > 0 then table.insert(parts, string.format("resourcefulness %.1f%%", s.resourcefulness)) end
-        tooltip:AddLine(string.format("  Your stats: %s - %.2f made per craft",
+        -- Whose stats: yours, or the crafter's (WithCharacter)
+        local statsChar = addon:StatsChar()
+        local whose = statsChar == addon.char and "Your stats" or ((statsChar.name or "Their") .. "'s stats")
+        tooltip:AddLine(string.format("  %s: %s - %.2f made per craft", whose,
             #parts > 0 and table.concat(parts, ", ") or "no multicraft or resourcefulness",
             outputPerCraft), 0.6, 0.6, 0.6)
     else

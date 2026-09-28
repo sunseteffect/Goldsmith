@@ -179,15 +179,21 @@ function addon:GetConcentrationOverview(prof)
     return result
 end
 
--- Who can craft a recipe: the logged-in character if it knows it,
--- otherwise the first character (by name) that does, or nil
-function addon:GetCrafter(recipeID)
-    if addon.char.knownRecipes[recipeID] then return addon.charKey end
-    local best
+-- Characters who know a recipe: you first, then by name. Characters left
+-- out in Settings only count when nobody else knows it.
+function addon:GetCrafters(recipeID)
+    local included, excluded = {}, {}
     for key, c in pairs(GoldsmithDB.characters) do
-        if c.knownRecipes[recipeID] and (not best or key < best) then best = key end
+        if c.knownRecipes[recipeID] then
+            table.insert(addon:IsCharacterIncluded(key) and included or excluded, key)
+        end
     end
-    return best
+    local list = #included > 0 and included or excluded
+    table.sort(list, function(a, b)
+        if (a == addon.charKey) ~= (b == addon.charKey) then return a == addon.charKey end
+        return a < b
+    end)
+    return list
 end
 local function CrafterFor(recipeID) return addon:GetCrafter(recipeID) end
 
@@ -232,6 +238,70 @@ local function BestPlainRow(recipe)
     return addon:GetRecipeProfit(recipe)
 end
 
+-- Who makes a recipe best without concentration: of the characters who
+-- know it, the one whose stats give the most profit (or, with no AH price,
+-- the lowest cost). Ties go to you, then by name. Worked out once per frame.
+-- Returns the crafter's key and { [charKey] = best plain row } for each
+-- character who knows it, or nil if nobody does.
+local crafterCache, crafterFrame = {}, nil
+
+local function Better(a, b)
+    if not b then return true end
+    if a.profit and b.profit then return a.profit > b.profit + 0.5 end
+    if a.cost and b.cost then return a.cost < b.cost - 0.5 end
+    return false
+end
+
+function addon:GetCrafterInfo(recipeID)
+    local now = GetTime()
+    if crafterFrame ~= now then
+        wipe(crafterCache)
+        crafterFrame = now
+    end
+    local cached = crafterCache[recipeID]
+    if cached then return cached.best, cached.rows end
+
+    local recipe = GoldsmithDB.recipes[recipeID]
+    local crafters = addon:GetCrafters(recipeID)
+    local best, bestRow, rows = crafters[1], nil, {}
+    if recipe and #crafters > 1 then
+        -- Sorted with you first, so a tie keeps you
+        for _, key in ipairs(crafters) do
+            local row = addon:WithCharacter(key, BestPlainRow, recipe)
+            rows[key] = row
+            if row and Better(row, bestRow) then best, bestRow = key, row end
+        end
+    end
+    crafterCache[recipeID] = { best = best, rows = rows }
+    return best, rows
+end
+
+-- The character who makes a recipe best (see GetCrafterInfo), or nil
+function addon:GetCrafter(recipeID)
+    return (addon:GetCrafterInfo(recipeID))
+end
+
+-- When someone else makes a recipe better than you and you know it too:
+-- their key, how much better per item, and "profit" (more profit) or
+-- "cost" (cheaper, when there's no AH price). Else nil.
+function addon:GetBetterCrafter(recipeID)
+    local best, rows = addon:GetCrafterInfo(recipeID)
+    if not best or best == addon.charKey then return nil end
+    local mine, theirs = rows[addon.charKey], rows[best]
+    if not (mine and theirs) then return nil end
+    if mine.profit and theirs.profit then return best, theirs.profit - mine.profit, "profit" end
+    if mine.cost and theirs.cost then return best, mine.cost - theirs.cost, "cost" end
+end
+
+-- "12.34g more profit each than you" / "12.34g cheaper each than you", or
+-- nil when you don't know the recipe or make it best yourself
+function addon:BetterCrafterText(recipeID)
+    local _, gain, kind = addon:GetBetterCrafter(recipeID)
+    if not gain or gain <= 0 then return nil end
+    return string.format(kind == "profit" and "%s more profit each than you" or "%s cheaper each than you",
+        addon:FormatMoney(gain))
+end
+
 -- The most profitable crafts right now, across professions and characters:
 -- an ROI of at least the "Worth crafting at" setting, worth recommending
 -- (IsRecommendable), with all material costs known. Most profit per item
@@ -271,13 +341,18 @@ function addon:GetBestCrafts(prof, count)
     return list
 end
 
--- Every craft for the Crafts tab, worked out with the stats of whoever
--- crafts it (see GetCrafter). Crafts with quality tiers get a row per
+-- Every craft for the Crafts tab. The ways without concentration are
+-- worked out with the stats of whoever makes it best (see GetCrafter); the
+-- ways with concentration get a row for each character who knows it, with
+-- their own stats, since each has their own concentration to spend.
+-- Crafts with quality tiers get a row per
 -- reachable tier (see GetTierRows), the rest a single row. Crafts that
 -- can't be listed on the AH (bind on pickup, warbound) are left out; items
 -- not in the game's cache yet are shown until their bind type loads.
 -- opts:
 --   concentration  - include the ways that use concentration
+--   onlyMine       - only recipes the logged-in character knows, all made
+--                    by them with their stats (not whoever makes it best)
 --   profitableOnly - only rows with a profit at current prices and an ROI
 --                    of at least the "Worth crafting at" setting (including
 --                    ones with unknown costs, whose profit is at most that)
@@ -289,30 +364,44 @@ function addon:GetCraftRows(prof, opts)
     local list = {}
     for recipeID, recipe in pairs(GoldsmithDB.recipes) do
         if (prof == "All" or recipe.profession == prof)
+            and (not opts.onlyMine or addon.char.knownRecipes[recipeID])
             and addon:CanAuction(recipe.outputItemID) ~= false
             and (not opts.showExpansion or opts.showExpansion(addon:GetRecipeExpansion(recipe))) then
-            local charKey = CrafterFor(recipeID) or addon.charKey
-            local rows = addon:WithCharacter(charKey, function()
-                local tierRows = addon:GetTierRows(recipe)
-                if not tierRows or #tierRows == 0 then tierRows = { addon:GetRecipeProfit(recipe) } end
-                local shown = {}
-                for _, row in ipairs(tierRows) do
-                    if opts.concentration or not row.concentrate then
-                        table.insert(shown, ApplyCostMode(recipe, row))
+            local charKey = opts.onlyMine and addon.charKey or CrafterFor(recipeID) or addon.charKey
+            -- Rows for one character: the plain ways or the concentration ways
+            local function RowsFor(key, concentrate)
+                return addon:WithCharacter(key, function()
+                    local tierRows = addon:GetTierRows(recipe)
+                    if not tierRows or #tierRows == 0 then tierRows = { addon:GetRecipeProfit(recipe) } end
+                    local shown = {}
+                    for _, row in ipairs(tierRows) do
+                        if (row.concentrate and true or false) == concentrate then
+                            table.insert(shown, ApplyCostMode(recipe, row))
+                        end
                     end
+                    return shown
+                end)
+            end
+            local sets = { { key = charKey, rows = RowsFor(charKey, false) } }
+            if opts.concentration then
+                local crafters = opts.onlyMine and { charKey } or addon:GetCrafters(recipeID)
+                if #crafters == 0 then crafters = { charKey } end
+                for _, key in ipairs(crafters) do
+                    table.insert(sets, { key = key, rows = RowsFor(key, true) })
                 end
-                return shown
-            end)
+            end
             local minROI = addon:Setting("minROI")
-            for _, info in ipairs(rows) do
-                if not opts.profitableOnly
-                    or (info.profit and info.profit > 0 and (not info.margin or info.margin >= minROI)) then
-                    table.insert(list, {
-                        key = addon:CraftKey(recipeID, info),
-                        recipe = recipe, info = info, tier = info.tier, charKey = charKey,
-                        itemID = info.itemID or recipe.outputItemID,
-                        whyNot = addon:WhyNotRecommended(recipe, info),
-                    })
+            for _, set in ipairs(sets) do
+                for _, info in ipairs(set.rows) do
+                    if not opts.profitableOnly
+                        or (info.profit and info.profit > 0 and (not info.margin or info.margin >= minROI)) then
+                        table.insert(list, {
+                            key = addon:CraftKey(recipeID, info),
+                            recipe = recipe, info = info, tier = info.tier, charKey = set.key,
+                            itemID = info.itemID or recipe.outputItemID,
+                            whyNot = addon:WhyNotRecommended(recipe, info),
+                        })
+                    end
                 end
             end
         end

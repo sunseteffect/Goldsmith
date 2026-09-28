@@ -133,17 +133,45 @@ local function SortItems(items)
         if (va == nil) ~= (vb == nil) then return va ~= nil end
         if a.recipe.outputName ~= b.recipe.outputName then return a.recipe.outputName < b.recipe.outputName end
         if (a.tier or 0) ~= (b.tier or 0) then return (a.tier or 0) < (b.tier or 0) end
-        -- Same tier: the way without concentration first
-        return (not a.info.concentrate) and (b.info.concentrate == true)
+        -- Same tier: the way without concentration first, then you, then
+        -- other characters by name
+        if (a.info.concentrate and true or false) ~= (b.info.concentrate and true or false) then
+            return not a.info.concentrate
+        end
+        if (a.charKey == addon.charKey) ~= (b.charKey == addon.charKey) then return a.charKey == addon.charKey end
+        return (a.charKey or "") < (b.charKey or "")
     end)
 end
 
 -- Crafts list: rows and hover
 
+-- Rows are tall enough for the crafter's name under the item's
+local ROW_HEIGHT = 32
+local WHO_INDENT = 18
+
 local function FillCraftRow(row, item)
     local info, cells = item.info, row.cells
     cells.item:SetText(ItemText(item))
     if item.whyNot then cells.item:SetTextColor(addon:Color("muted")) end
+
+    -- Who makes it, when it isn't you: a second line, indented under the
+    -- name. The list places the name in the middle of the row each time, so
+    -- it's moved up here when there's a second line.
+    if not row.who then
+        row.who = UI.Text(row, "label", "dim")
+        row.who:SetWordWrap(false)
+    end
+    if item.charKey ~= addon.charKey then
+        local _, _, _, x = cells.item:GetPoint(1)
+        cells.item:SetPoint("LEFT", row, "LEFT", x, 7)
+        row.who:ClearAllPoints()
+        row.who:SetPoint("TOPLEFT", cells.item, "BOTTOMLEFT", WHO_INDENT, -2)
+        row.who:SetWidth(cells.item:GetWidth() - WHO_INDENT)
+        row.who:SetText((info.concentrate and "concentration on " or "on ") .. CharName(item.charKey))
+        row.who:Show()
+    else
+        row.who:Hide()
+    end
 
     cells.cost:SetText(Money(info.cost) .. (info.partial and "+" or ""))
     if info.price then
@@ -228,8 +256,13 @@ end
 local function CraftTooltip(tooltip, item)
     local info, recipe = item.info, item.recipe
     tooltip:AddLine(ItemText(item), 1, 1, 1)
-    if item.charKey ~= addon.charKey then
-        Note(tooltip, "Crafted on " .. CharName(item.charKey) .. ", using their stats.")
+    if item.charKey ~= addon.charKey and info.concentrate then
+        Note(tooltip, "With " .. CharName(item.charKey) .. "'s concentration and stats.")
+    elseif item.charKey ~= addon.charKey then
+        -- Made by whoever makes it best; say by how much when you know it too
+        local better = addon:BetterCrafterText(recipe.recipeID)
+        Note(tooltip, "Crafted on " .. CharName(item.charKey) .. ", using their stats"
+            .. (better and (": " .. better .. ".") or "."))
     end
     if item.tier then
         Line(tooltip, "How", (info.description or "") .. (info.concentrate and " + concentration" or ""))
@@ -1005,6 +1038,13 @@ local function Create(parent)
     end)
     view.profitable:SetPoint("LEFT", view.expansion, "RIGHT", 16, 0)
 
+    -- Only what the character you're on can make, with their own stats
+    view.onlyMine = UI.Checkbox(list, "Only " .. (addon.char.name or "me"), function(checked)
+        ui.craftsOnlyMine = checked or nil
+        addon.RefreshWindow()
+    end)
+    view.onlyMine:SetPoint("LEFT", view.profitable, "RIGHT", 16, 0)
+
     -- "Showing: Best crafts right now (5)  x" after following a link from
     -- the Overview; click to show everything again
     view.focusChip = UI.Button(list, "", 260, 24, function()
@@ -1014,7 +1054,8 @@ local function Create(parent)
     UI.Style(view.focusChip, "highlight", "borderGold")
     view.focusChip:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderGold")) end)
     view.focusChip.label:SetTextColor(addon:Color("gold"))
-    view.focusChip:SetPoint("LEFT", view.profitable, "RIGHT", 16, 0)
+    -- In place of the two checkboxes, which don't apply while it's showing
+    view.focusChip:SetPoint("LEFT", view.expansion, "RIGHT", 16, 0)
 
     view.concSwitch = UI.Switch(list, "Concentration", function(on)
         ui.craftsConcentration = on or nil
@@ -1046,10 +1087,16 @@ local function Create(parent)
             or "Hides crafts that lose gold at current AH prices, and ones with no AH price yet.")
         Note(tooltip, "Change the ROI under Settings: Worth crafting at.")
     end)
+    Explain(view.onlyMine, function(tooltip)
+        tooltip:AddLine(view.onlyMine.label and view.onlyMine.label:GetText() or "Only this character", 1, 1, 1)
+        Note(tooltip, "Shows only the crafts the character you're logged in on knows, costed with their own stats, even where another character makes it better.")
+        Note(tooltip, "Untick to see every character's crafts, each made by whoever makes it best.")
+    end)
     view.count = UI.Text(list, "label", "dim", "RIGHT")
     view.count:SetPoint("RIGHT", view.concSwitch, "LEFT", -12, 0)
 
     view.list = UI.List(list, {
+        rowHeight = ROW_HEIGHT,
         fill = FillCraftRow,
         tooltip = CraftTooltip,
         onClick = function(item, button)
@@ -1116,14 +1163,18 @@ local function Refresh(v, state)
     SIMPLE_COLUMNS[2].label, CONC_COLUMNS[2].label = costLabel, costLabel
     v.concSwitch:SetOn(concOn)
     v.profitable:SetChecked(ui.profitableOnly == true)
+    v.onlyMine:SetChecked(ui.craftsOnlyMine == true)
     v.expansion:SetLabel(ExpansionLabel())
 
     -- Following a link from the Overview shows just those crafts, whatever
     -- the filters say
     local focus = v.focus
+    v.profitable:SetShown(not focus)
+    v.onlyMine:SetShown(not focus)
     local items = addon:GetCraftRows(state.profession, {
         concentration = concOn,
         profitableOnly = not focus and ui.profitableOnly,
+        onlyMine = not focus and ui.craftsOnlyMine,
         showExpansion = not focus and IsExpansionShown or nil,
     })
     if focus then
@@ -1147,7 +1198,9 @@ local function Refresh(v, state)
     elseif focus then
         v.list:SetEmptyText("Those crafts aren't worth it any more. Click the button above to see everything.")
     else
-        v.list:SetEmptyText("No crafts match. Try All expansions, turn off Profitable only, or pick All professions at the top.")
+        v.list:SetEmptyText(ui.craftsOnlyMine
+            and "No crafts match. This character may not know these recipes: untick Only " .. (addon.char.name or "me") .. ", try All expansions, or turn off Profitable only."
+            or "No crafts match. Try All expansions, turn off Profitable only, or pick All professions at the top.")
     end
     v.list:SetItems(items)
     v.count:SetText(string.format("%d craft%s", #items, #items == 1 and "" or "s"))
