@@ -46,7 +46,7 @@ local function PrintSummary()
     for itemID, qty in pairs(session.summaryOutputs) do
         table.insert(parts, string.format("%d %s", qty, C_Item.GetItemNameByID(itemID) or ("item " .. itemID)))
     end
-    Print("Milled %d %s: %s", session.summaryMilled, session.herbName,
+    addon:Notify("info", "Milled %d %s: %s", session.summaryMilled, session.herbName,
         #parts > 0 and table.concat(parts, ", ") or "nothing yet")
 
     session.summaryMilled = 0

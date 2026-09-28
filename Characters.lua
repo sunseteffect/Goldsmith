@@ -96,12 +96,25 @@ local function MigrateAccountData()
     Print("Moved your crafting stats to %s. Each character now keeps its own.", owner)
 end
 
--- Professions and skill levels of the logged-in character
+-- Archaeology and Fishing (by skill line) make nothing, so they aren't
+-- kept as professions. Their names in the game's language are remembered in
+-- GoldsmithDB.nonCrafting.
+local NON_CRAFTING_SKILL_LINES = { [794] = true, [356] = true }
+
+function addon:IsCraftingProfession(name)
+    return not GoldsmithDB.nonCrafting[name]
+end
+
+-- Professions and skill levels of the logged-in character. pairs, not
+-- ipairs: GetProfessions() returns nil for a slot not learned.
 local function UpdateProfessions()
     local c = addon.char
-    for _, index in ipairs({ GetProfessions() }) do
-        local name, icon, skill, maxSkill = GetProfessionInfo(index)
-        if name then
+    for _, index in pairs({ GetProfessions() }) do
+        local name, icon, skill, maxSkill, _, _, skillLine = GetProfessionInfo(index)
+        if name and NON_CRAFTING_SKILL_LINES[skillLine] then
+            GoldsmithDB.nonCrafting[name] = true
+            c.professions[name] = nil
+        elseif name then
             c.professions[name] = { icon = icon, skill = skill, maxSkill = maxSkill }
         end
     end
@@ -208,13 +221,13 @@ local function SnapshotStock()
     end
 end
 
--- An item's stock across the account.
--- Returns the total and a list of { key, name, count } (the warband bank
--- has key "warband"), largest first.
+-- An item's stock across the account, leaving out characters excluded in
+-- Settings. Returns the total and a list of { key, name, count } (the
+-- warband bank has key "warband"), largest first.
 function addon:GetStock(itemID)
     local list, total = {}, 0
     for key, c in pairs(GoldsmithDB.characters) do
-        local count = c.stock[itemID]
+        local count = addon:IsCharacterIncluded(key) and c.stock[itemID]
         if count and count > 0 then
             table.insert(list, { key = key, name = c.name, count = count })
             total = total + count
@@ -302,8 +315,9 @@ end
 
 -- Account gold
 --
--- Gold across all characters plus the warband bank, at the end of each of
--- the last `days` days (oldest first). A character's gold on a day without
+-- Gold across all characters (except those excluded in Settings) plus the
+-- warband bank, at the end of each of the last `days` days (oldest first).
+-- A character's gold on a day without
 -- a record is its most recent earlier record; before its first record it
 -- counts as nothing. Returns { { day, copper } }.
 local function ValueOn(history, day)
@@ -321,21 +335,44 @@ function addon:GetAccountGoldHistory(days)
     for i = days - 1, 0, -1 do
         local day = date("%Y-%m-%d", time() - i * 86400)
         local total = ValueOn(GoldsmithDB.warbandGold, day)
-        for _, c in pairs(GoldsmithDB.characters) do
-            total = total + ValueOn(c.gold, day)
+        for key, c in pairs(GoldsmithDB.characters) do
+            if addon:IsCharacterIncluded(key) then total = total + ValueOn(c.gold, day) end
         end
         table.insert(list, { day = day, copper = total })
     end
     return list
 end
 
-local function UpdateAll()
+-- loggingOut: the game reports 0 gold while logging out or reloading, so
+-- gold isn't saved then (PLAYER_MONEY and login keep it up to date)
+local function UpdateAll(loggingOut)
     local c = addon.char
     c.lastSeen = time()
     c.class = select(2, UnitClass("player"))
     UpdateProfessions()
     SnapshotConcentration()
-    RecordGold()
+    if not loggingOut then RecordGold() end
+end
+
+-- Versions before 2.1 saved that 0 at every logout. Dropping the zeros lets
+-- each day carry the last real amount forward instead.
+local function RepairLogoutGold()
+    if GoldsmithDB.logoutGoldRepaired then return end
+    for _, c in pairs(GoldsmithDB.characters) do
+        local lastDay
+        for day, copper in pairs(c.gold) do
+            if copper == 0 then
+                c.gold[day] = nil
+            elseif not lastDay or day > lastDay then
+                lastDay = day
+            end
+        end
+        if c.money == 0 then c.money = lastDay and c.gold[lastDay] or nil end
+    end
+    for day, copper in pairs(GoldsmithDB.warbandGold) do
+        if copper == 0 then GoldsmithDB.warbandGold[day] = nil end
+    end
+    GoldsmithDB.logoutGoldRepaired = true
 end
 
 -- Whose stats to use
@@ -501,6 +538,14 @@ function addon:InitializeCharacters()
         EnsureFields(c)
     end
 
+    -- Older versions kept Archaeology and Fishing as professions; drop them
+    -- from every character, alts included
+    GoldsmithDB.nonCrafting = GoldsmithDB.nonCrafting or { Archaeology = true, Fishing = true }
+    for _, c in pairs(GoldsmithDB.characters) do
+        for name in pairs(GoldsmithDB.nonCrafting) do c.professions[name] = nil end
+    end
+    RepairLogoutGold()
+
     local frame = CreateFrame("Frame")
     frame:RegisterEvent("PLAYER_ENTERING_WORLD")
     frame:RegisterEvent("SKILL_LINES_CHANGED")
@@ -523,9 +568,10 @@ function addon:InitializeCharacters()
         end
 
         if event == "PLAYER_LOGOUT" then
+            -- No stock snapshot here: bags read as empty while logging out.
+            -- Login and bag changes keep stock up to date.
             FlushGoldTime()
-            UpdateAll()
-            SnapshotStock()
+            UpdateAll(true)
         elseif event == "PLAYER_MONEY" then
             RecordGold()
         elseif event == "BAG_UPDATE_DELAYED" then

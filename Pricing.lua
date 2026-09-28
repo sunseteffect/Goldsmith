@@ -416,6 +416,17 @@ function addon:FormatSaleRate(rate)
     return string.format("%.0f%%", rate * 100)
 end
 
+-- List columns marked tsm = true only ever have data from TSM (sale rate),
+-- so without TSM they're left out rather than shown empty
+function addon:AvailableColumns(columns)
+    if addon:HasTSM() then return columns end
+    local list = {}
+    for _, col in ipairs(columns) do
+        if not col.tsm then table.insert(list, col) end
+    end
+    return list
+end
+
 -- Expansions
 
 -- Expansion an item comes from (0 = Classic), or nil if not cached yet.
@@ -553,7 +564,7 @@ local function SaveRecipe(recipeID, quiet, attempt, profession)
                 GoldsmithDB.pendingEnchants[recipeID] = { name = schematic.name, profession = profession }
             end
         elseif not quiet then
-            Print("Couldn't save recipe %s: the game didn't report what it makes.", schematic.name or recipeID)
+            addon:Notify("info", "Couldn't save recipe %s: the game didn't report what it makes.", schematic.name or recipeID)
         end
         return
     end
@@ -631,7 +642,7 @@ local function SaveRecipe(recipeID, quiet, attempt, profession)
     addon:RefreshRecipeStats(recipeID)
 
     if isNew and not quiet then
-        Print("Saved recipe: %s", outputName)
+        addon:Notify("info", "Saved recipe: %s", outputName)
     end
     if isNew and addon.Refresh then
         addon.Refresh()
@@ -671,7 +682,7 @@ function addon:MatchEnchantScrolls()
         end
     end
     if matched > 0 then
-        Print("Found scrolls for %d enchant%s. See the Crafts tab in /gsm.", matched, matched == 1 and "" or "s")
+        addon:Notify("info", "Found scrolls for %d enchant%s. See the Crafts tab in /gsm.", matched, matched == 1 and "" or "s")
     end
 end
 
@@ -1295,9 +1306,20 @@ end
 local function AddTooltipLines(tooltip, data)
     if tooltip ~= GameTooltip and tooltip ~= ItemRefTooltip then return end
     if not addon.ledger or not data or not data.id then return end
+    local mode = addon:Setting("tooltips")
+    if mode == "off" then return end
 
     local name = C_Item.GetItemNameByID(data.id)
     if not name then return end
+
+    -- Short: craft cost and profit for something you craft, otherwise
+    -- average cost and today's price against usual
+    local recipe = addon:FindRecipeByOutput(name)
+    if mode == "short" and recipe then
+        addon:AddRecipeTooltipLines(tooltip, recipe, data.id, false, true)
+        return
+    end
+    local short = mode == "short"
 
     local avg, qty = addon:GetAverageCost(name)
     if avg then
@@ -1305,7 +1327,7 @@ local function AddTooltipLines(tooltip, data)
             string.format("%s (%d bought)", FormatGold(avg), qty), 1, 1, 1, 1, 1, 1)
     end
 
-    addon:AddMillingTooltipLines(tooltip, data.id, name)
+    if not short then addon:AddMillingTooltipLines(tooltip, data.id, name) end
 
     -- Today's price vs its usual price, once there's enough history
     local insight = addon:GetPriceInsight(data.id)
@@ -1317,6 +1339,7 @@ local function AddTooltipLines(tooltip, data)
             string.format("%+.0f%% (usual %s, %d days)", pct, FormatGold(insight.usual), insight.days),
             1, 1, 1, r, g, b)
     end
+    if short then return end
 
     -- What the ones you crafted cost you (this exact quality), from your
     -- latest crafts of it
@@ -1339,7 +1362,6 @@ local function AddTooltipLines(tooltip, data)
             FormatGold(unitCost / (1 - AH_CUT)) .. (partial and "+" or ""), 1, 1, 1, 1, 1, 1)
     end
 
-    local recipe = addon:FindRecipeByOutput(name)
     if recipe then
         addon:AddRecipeTooltipLines(tooltip, recipe, data.id, IsShiftKeyDown())
     end
@@ -1353,8 +1375,9 @@ local function FormatQuantity(q)
 end
 
 -- Craft cost, profit and (optionally) the per-material breakdown. Shared by
--- item tooltips and the Crafts tab.
-function addon:AddRecipeTooltipLines(tooltip, recipe, itemID, showBreakdown)
+-- item tooltips and the Crafts tab. short: only the cost and profit lines
+-- (the Short item tooltip setting).
+function addon:AddRecipeTooltipLines(tooltip, recipe, itemID, showBreakdown, short)
     local info = addon:GetRecipeProfit(recipe, itemID)
 
     local costText = FormatGold(info.cost) .. (info.partial and "+" or "") .. " each"
@@ -1374,8 +1397,9 @@ function addon:AddRecipeTooltipLines(tooltip, recipe, itemID, showBreakdown)
         -- Unknown costs can only lower the profit, so it's an upper bound
         local label = info.partial and "|cFF00FF00Goldsmith|r profit (at most)" or "|cFF00FF00Goldsmith|r profit"
         tooltip:AddDoubleLine(label, profitText, 1, 1, 1, r, g, b)
-        tooltip:AddLine("  AH price " .. info.priceAgeText, 0.6, 0.6, 0.6)
+        if not short then tooltip:AddLine("  AH price " .. info.priceAgeText, 0.6, 0.6, 0.6) end
     end
+    if short then return end
 
     if info.demand then
         tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r sold per day",
@@ -1508,7 +1532,7 @@ local function ScanLearnedRecipes()
                     if addon.Refresh then addon.Refresh() end
                     local added = CountRecipes() - before
                     if added > 0 then
-                        Print("Saved %d learned recipes. See the Crafts tab in /gsm.", added)
+                        addon:Notify("info", "Saved %d learned recipes. See the Crafts tab in /gsm.", added)
                         addon:ReassignProfessions()
                     end
                 end)

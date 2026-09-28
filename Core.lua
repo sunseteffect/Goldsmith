@@ -51,7 +51,7 @@ function addon:RecordPurchase()
 
     local prof = addon:GetProfessionForItemName(p.name) or "Unassigned"
     addon.ledger:addCost(prof, p.name, p.quantity, spent, "PURCHASE", p.itemID)
-    Print("Bought %s x%d for %.2fg (%.2fg each)",
+    addon:Notify("money", "Bought %s x%d for %.2fg (%.2fg each)",
         p.name, p.quantity, spent / 10000, (spent / p.quantity) / 10000)
 
     if addon.Refresh then
@@ -87,7 +87,7 @@ local function OnBuyMerchantItem(index, quantity)
     local total = math.floor(price / stackCount * units + 0.5)
 
     addon.ledger:addCost(prof, name, units, total, "PURCHASE", GetMerchantItemID(index))
-    Print("Bought %s x%d from a vendor for %.2fg", name, units, total / 10000)
+    addon:Notify("money", "Bought %s x%d from a vendor for %.2fg", name, units, total / 10000)
 
     if addon.Refresh then
         addon.Refresh()
@@ -113,15 +113,15 @@ local function RecordSale(sale)
         costBasis and costSource)
 
     if prof == "Unassigned" then
-        Print("Sold %s x%d for %.2fg after AH cut, incl. deposit refund (not a tracked item, saved as Unassigned)",
+        addon:Notify("money", "Sold %s x%d for %.2fg after AH cut, incl. deposit refund (not a tracked item, saved as Unassigned)",
             sale.itemName, sale.count, sale.net / 10000)
     else
-        Print("Sold %s x%d for %.2fg after AH cut, incl. deposit refund (%.2fg each)",
+        addon:Notify("money", "Sold %s x%d for %.2fg after AH cut, incl. deposit refund (%.2fg each)",
             sale.itemName, sale.count, sale.net / 10000, (sale.net / sale.count) / 10000)
     end
     if costBasis then
         local profit = sale.net - costBasis
-        Print("  Cost you %.2fg, profit %s%.2fg%s", costBasis / 10000,
+        addon:Notify("money", "  Cost you %.2fg, profit %s%.2fg%s", costBasis / 10000,
             profit >= 0 and "+" or "-", math.abs(profit) / 10000, partial and " (at most)" or "")
     end
 end
@@ -237,7 +237,7 @@ local function RecordDeposit()
 
     local prof = addon:GetProfessionForItemName(post.name) or "Unassigned"
     addon.ledger:addCost(prof, post.name, post.quantity, post.deposit, "DEPOSIT")
-    Print("Posted %s x%d, deposit %.2fg", post.name, post.quantity, post.deposit / 10000)
+    addon:Notify("money", "Posted %s x%d, deposit %.2fg", post.name, post.quantity, post.deposit / 10000)
 
     if addon.Refresh then
         addon.Refresh()
@@ -249,7 +249,7 @@ end
 function addon:GetProfessions()
     local seen = { Inscription = true }
     local function add(prof)
-        if type(prof) == "string" and prof ~= "Unassigned" then
+        if type(prof) == "string" and prof ~= "Unassigned" and addon:IsCraftingProfession(prof) then
             seen[prof] = true
         end
     end
@@ -370,6 +370,11 @@ end)
 function addon:Initialize()
     if not GoldsmithDB then
         GoldsmithDB = {}
+        -- First time on this account: say how to open it, once login spam
+        -- has scrolled past
+        C_Timer.After(8, function()
+            Print("Welcome! Type /gsm or click the gold coin on the minimap to open Goldsmith. Its Overview shows how to get started.")
+        end)
     end
 
     GoldsmithDB.products = GoldsmithDB.products or {}
@@ -390,6 +395,13 @@ function addon:Initialize()
     addon.ledger = addon:CreateLedger(GoldsmithDB)
     addon:CreateWindow()
     addon:CreateMinimapButton()
+    -- Items assigned to Archaeology or Fishing (older versions offered them)
+    -- go back to Unassigned; ReassignProfessions moves their entries too
+    for name, prof in pairs(GoldsmithDB.products) do
+        if type(prof) == "string" and not addon:IsCraftingProfession(prof) then
+            GoldsmithDB.products[name] = "Unassigned"
+        end
+    end
     addon:ReassignProfessions()
 
     hooksecurefunc(C_AuctionHouse, "ConfirmCommoditiesPurchase", OnConfirmCommoditiesPurchase)
@@ -449,6 +461,7 @@ local function PrintHelp()
     print("  /gsm milling - show your milling yields and pigment costs")
     print("  /gsm chars - list your characters, professions and concentration")
     print("  /gsm data - check the numbers behind the window")
+    print("  /gsm setup - show the getting started checklist again")
     print("  /gsm reset - delete all transactions")
     print("  Right-click an entry on the History tab to delete it.")
 end
@@ -485,6 +498,8 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:ListCharacters()
     elseif cmd == "data" then
         addon:ListData()
+    elseif cmd == "setup" then
+        addon:ShowSetup()
     elseif cmd == "stats" then
         addon:DumpCraftingStats()
     elseif cmd == "reset" then

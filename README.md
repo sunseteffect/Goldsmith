@@ -13,7 +13,13 @@ A World of Warcraft addon for crafting profitability: what to craft, how to get 
 
 ## Requirements
 - Auctionator or TSM for AH prices
-- TSM (optional) for region sales per day
+
+## Recommended
+- TSM, alongside Auctionator. It adds:
+  - Region sales per day for every item (without it, Sold/day comes from your own sales only)
+  - Sale rate: the share of listings that actually sell (the column is hidden without TSM)
+  - Outlier protection: a listing far above or below the usual price is replaced by TSM's market value
+  - Prices between Auctionator scans, updated about hourly by the TSM app
 
 ## Usage
 `/gsm` opens the window. `/gsm help` lists commands.

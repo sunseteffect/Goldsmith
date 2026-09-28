@@ -91,7 +91,8 @@ local function FillStockTile(tile, stock, prof)
     local held = #stock.heldLong
     if held > 0 then
         tile:Set("Gold in stock", Money(stock.value), "text",
-            string.format("%s, %d item%s held 7+ days", scope, held, held == 1 and "" or "s"), "warning")
+            string.format("%s, %d item%s held %d+ days", scope, held, held == 1 and "" or "s",
+                addon:Setting("heldDays")), "warning")
     else
         tile:Set("Gold in stock", Money(stock.value), "text",
             #stock.items > 0 and (scope .. ", all characters") or "nothing tracked in your bags yet")
@@ -112,7 +113,7 @@ local function FillStockTile(tile, stock, prof)
         end
         if held > 0 then
             tooltip:AddLine(" ")
-            tooltip:AddLine("Held 7+ days", 1, 0.6, 0.2)
+            tooltip:AddLine(string.format("Held %d+ days", addon:Setting("heldDays")), 1, 0.6, 0.2)
             for i = 1, math.min(held, 6) do
                 local item = stock.heldLong[i]
                 local days = math.floor((time() - item.heldSince) / 86400)
@@ -233,13 +234,13 @@ local function CraftsAction(crafts, prof)
     }
 end
 
-local DEAL_THRESHOLD = -0.10
-
+-- How far below usual counts as cheap is a setting (dealPercent)
 local function DealsAction(prof)
     local deals, earliest, minDays = addon:GetDeals(prof)
     local cheap = {}
+    local threshold = -addon:Setting("dealPercent") / 100
     for _, d in ipairs(deals) do
-        if d.diff <= DEAL_THRESHOLD then table.insert(cheap, d) end
+        if d.diff <= threshold then table.insert(cheap, d) end
     end
     if #deals == 0 then
         return {
@@ -260,6 +261,8 @@ local function DealsAction(prof)
         detail = table.concat(parts, "   ") .. " vs usual",
         tooltip = function(tooltip)
             tooltip:AddLine("Cheap materials today", 1, 1, 1)
+            tooltip:AddLine(string.format("%d%% or more below their usual price (Settings > Cheap materials)",
+                addon:Setting("dealPercent")), 0.6, 0.6, 0.6, true)
             for i = 1, math.min(#cheap, 8) do
                 local d = cheap[i]
                 tooltip:AddDoubleLine(d.name, string.format("%s (usually %s)", Money(d.now), Money(d.usual)),
@@ -414,6 +417,155 @@ local function CreateProfessionCell(parent, i)
     return cell
 end
 
+-- Getting started
+--
+-- Until Goldsmith has prices and recipes, "Do this next" is a checklist of
+-- the steps that get it there, each ticked off from data Goldsmith already
+-- collects. Once it has been shown it stays, all ticked, until it's closed,
+-- so finishing the last step doesn't make it vanish mid-read. An account
+-- that already has everything never sees it. /gsm setup brings it back.
+
+-- Gathering professions have no recipes to load
+local NO_RECIPES = { [182] = true, [393] = true }   -- Herbalism, Skinning
+local READY_ICON = "Interface\\RaidFrame\\ReadyCheck-Ready"
+local WAITING_ICON = "Interface\\RaidFrame\\ReadyCheck-Waiting"
+
+local function HasAuctionator()
+    return Auctionator and Auctionator.API and Auctionator.API.v1 and true or false
+end
+
+-- This character's crafting professions, in the order the game lists them,
+-- and which of them have recipes loaded
+local function CraftingProfessions()
+    local loaded = {}
+    for recipeID in pairs(addon.char.knownRecipes) do
+        local recipe = GoldsmithDB.recipes[recipeID]
+        if recipe then loaded[recipe.profession] = true end
+    end
+    -- Only the two main professions: not cooking, fishing or archaeology.
+    -- Either can be nil (not learned).
+    local list = {}
+    local first, second = GetProfessions()
+    for _, index in pairs({ first, second }) do
+        local name, _, _, _, _, _, skillLine = GetProfessionInfo(index)
+        if name and not NO_RECIPES[skillLine] then
+            table.insert(list, { name = name, loaded = loaded[name] })
+        end
+    end
+    table.sort(list, function(a, b) return a.name < b.name end)
+    return list
+end
+
+-- { { done, title, detail } } for each step
+local function SetupSteps()
+    local steps = {}
+    local hasTSM = addon:HasTSM()
+    local hasAuctionator = HasAuctionator()
+
+    -- What TSM adds, for anyone without it
+    local tsmTip = " Optional: TSM adds region sales per day, sale rates and a check on odd prices."
+    if hasAuctionator or hasTSM then
+        table.insert(steps, { true, "Price addon found",
+            "Using " .. ((hasAuctionator and hasTSM) and "Auctionator and TSM" or hasAuctionator and "Auctionator" or "TSM") .. "."
+            .. (hasTSM and "" or tsmTip) })
+    else
+        table.insert(steps, { false, "Install Auctionator",
+            "Goldsmith reads AH prices from Auctionator (free, on CurseForge) or TSM. Install one and log in again." .. tsmTip })
+    end
+
+    local professions = CraftingProfessions()
+    local missing, done = {}, {}
+    for _, p in ipairs(professions) do
+        table.insert(p.loaded and done or missing, p.name)
+    end
+    if #professions == 0 then
+        local any = next(GoldsmithDB.recipes) ~= nil
+        table.insert(steps, { any, "Load your recipes", any and "Recipes loaded on another character."
+            or "This character has no crafting profession. Log in on one that does and open its professions." })
+    elseif #missing > 0 then
+        table.insert(steps, { false, "Open " .. table.concat(missing, " and "),
+            "Open each profession once (press K) so Goldsmith can load your recipes and crafting stats. Wait for the chat message." })
+    else
+        table.insert(steps, { true, "Recipes loaded",
+            table.concat(done, " and ") .. ". Open the professions on your other crafters too." })
+    end
+
+    if GoldsmithDB.lastPriceUpdate or hasTSM then
+        table.insert(steps, { true, "AH prices in",
+            GoldsmithDB.lastPriceUpdate and "Auctionator has prices. Scan again whenever you're at the AH." or "Using TSM's prices." })
+    else
+        table.insert(steps, { false, "Scan the auction house",
+            "Open the AH and run Auctionator's Full Scan on its Auctionator tab (or search for your materials)." })
+    end
+    return steps
+end
+
+-- /gsm setup
+function addon:ShowSetup()
+    GoldsmithDB.setupDone = nil
+    GoldsmithDB.setupShown = true
+    addon:ShowTab("overview")
+end
+
+local function CreateSetup(panel)
+    local setup = CreateFrame("Frame", nil, panel)
+    setup:SetPoint("TOPLEFT", 0, -40)
+    setup:SetPoint("BOTTOMRIGHT")
+    setup.rows = {}
+    local above
+    for i = 1, 3 do
+        local row = {}
+        row.icon = setup:CreateTexture(nil, "ARTWORK")
+        row.icon:SetSize(18, 18)
+        row.title = UI.Text(setup, "body", "text")
+        row.title:SetPoint("LEFT", row.icon, "RIGHT", 8, 0)
+        row.title:SetPoint("RIGHT", -16, 0)
+        row.detail = UI.Text(setup, "small", "muted")
+        row.detail:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -4)
+        row.detail:SetPoint("RIGHT", -16, 0)
+        row.detail:SetWordWrap(true)
+        if above then
+            row.icon:SetPoint("TOPLEFT", above.detail, "BOTTOMLEFT", -26, -14)
+        else
+            row.icon:SetPoint("TOPLEFT", 16, -6)
+        end
+        setup.rows[i] = row
+        above = row
+    end
+
+    setup.keyButton = UI.Button(setup, "Set key", 90, 22, function() addon:OpenKeybindings() end)
+    setup.keyButton:SetPoint("BOTTOMRIGHT", -16, 14)
+    setup.keyNote = UI.Text(setup, "small", "muted")
+    setup.keyNote:SetPoint("LEFT", 16, 0)
+    setup.keyNote:SetPoint("RIGHT", setup.keyButton, "LEFT", -10, 0)
+    setup.keyNote:SetPoint("BOTTOM", setup.keyButton, "BOTTOM", 0, 5)
+
+    setup.close = UI.IconButton(panel, 22, "X", "Hide getting started (/gsm setup shows it again)", function()
+        GoldsmithDB.setupDone = true
+        addon.RefreshWindow()
+    end, { font = "body" })
+    setup.close:SetPoint("TOPRIGHT", -10, -10)
+    return setup
+end
+
+-- Fills the checklist; returns true when every step is done
+local function FillSetup(setup)
+    local steps = SetupSteps()
+    local allDone = true
+    for i, row in ipairs(setup.rows) do
+        local done, title, detail = unpack(steps[i])
+        allDone = allDone and done
+        row.icon:SetTexture(done and READY_ICON or WAITING_ICON)
+        row.title:SetText(title)
+        row.title:SetTextColor(addon:Color(done and "muted" or "text"))
+        row.detail:SetText(detail)
+    end
+    local key = addon:ToggleKeyText()
+    setup.keyNote:SetText(key and ("Goldsmith opens with " .. key .. ".") or "Tip: open Goldsmith with a key.")
+    setup.keyButton:SetLabel(key and "Change key" or "Set key")
+    return allDone
+end
+
 -- View
 
 local function Create(parent)
@@ -439,9 +591,8 @@ local function Create(parent)
     local actions = UI.Panel(parent)
     actions:SetPoint("TOPLEFT", 0, MIDDLE_TOP)
     actions:SetSize(HALF_WIDTH, MIDDLE_HEIGHT)
-    local actionsTitle = UI.Text(actions, "heading")
-    actionsTitle:SetPoint("TOPLEFT", 16, -16)
-    actionsTitle:SetText("Do this next")
+    view.actionsTitle = UI.Text(actions, "heading")
+    view.actionsTitle:SetPoint("TOPLEFT", 16, -16)
     view.actionRows = {}
     for i = 1, ACTION_COUNT do
         view.actionRows[i] = CreateActionRow(actions, i)
@@ -451,6 +602,7 @@ local function Create(parent)
     view.actionsEmpty:SetWidth(HALF_WIDTH - 60)
     view.actionsEmpty:SetWordWrap(true)
     view.actionsEmpty:SetText("Nothing to do yet. Open your professions to load recipes, and scan the AH with Auctionator for prices.")
+    view.setup = CreateSetup(actions)
 
     -- Chart
     local chartPanel = UI.Panel(parent)
@@ -517,6 +669,22 @@ local function Refresh(view, state)
     FillStockTile(view.tiles[3], stock, prof)
     FillConcentrationTile(view.tiles[4], conc)
 
+    -- Getting started, until it's closed
+    local inSetup, allDone = false, false
+    if not GoldsmithDB.setupDone then
+        allDone = FillSetup(view.setup)
+        if allDone and not GoldsmithDB.setupShown then
+            GoldsmithDB.setupDone = true
+        else
+            inSetup = true
+            GoldsmithDB.setupShown = true
+        end
+    end
+    view.setup:SetShown(inSetup)
+    view.setup.close:SetShown(inSetup)
+    view.actionsTitle:SetText(not inSetup and "Do this next"
+        or allDone and "Getting started: all done, close this with X" or "Getting started")
+
     -- Do this next
     local list = {}
     local concAction = ConcentrationAction(conc)
@@ -527,7 +695,7 @@ local function Refresh(view, state)
     if dealsAction then table.insert(list, dealsAction) end
     local top = -44
     for i, row in ipairs(view.actionRows) do
-        if list[i] then
+        if list[i] and not inSetup then
             FillActionRow(row, list[i])
             row:SetPoint("TOPLEFT", 16, top)
             top = top - row:GetHeight() - ACTION_ROW_GAP
@@ -535,7 +703,7 @@ local function Refresh(view, state)
             row:Hide()
         end
     end
-    view.actionsEmpty:SetShown(#list == 0)
+    view.actionsEmpty:SetShown(#list == 0 and not inSetup)
 
     -- Chart
     local index = GoldsmithDB.ui2.chart or 1

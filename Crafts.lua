@@ -29,7 +29,7 @@ local SIMPLE_COLUMNS = {
     { key = "profit", label = "Profit", width = 84, justify = "RIGHT" },
     { key = "margin", label = "ROI", width = 56, justify = "RIGHT" },
     { key = "demand", label = "Sold/day", width = 70, justify = "RIGHT" },
-    { key = "saleRate", label = "Sale rate", width = 64, justify = "RIGHT" },
+    { key = "saleRate", label = "Sale rate", width = 64, justify = "RIGHT", tsm = true },
 }
 local CONC_COLUMNS = {
     { key = "item", label = "Item" },
@@ -40,7 +40,7 @@ local CONC_COLUMNS = {
     { key = "conc", label = "Conc", width = 50, justify = "RIGHT" },
     { key = "gpc", label = "g/conc", width = 60, justify = "RIGHT" },
     { key = "demand", label = "Sold/day", width = 70, justify = "RIGHT" },
-    { key = "saleRate", label = "Sale rate", width = 64, justify = "RIGHT" },
+    { key = "saleRate", label = "Sale rate", width = 64, justify = "RIGHT", tsm = true },
 }
 
 -- The tier goes before the name, so a long name cut short never hides it
@@ -196,8 +196,11 @@ local function FillCraftRow(row, item)
         cells.demand:SetTextColor(addon:Color("muted"))
     end
 
-    cells.saleRate:SetText(addon:FormatSaleRate(info.saleRate))
-    cells.saleRate:SetTextColor(addon:Color(info.saleRate and "text" or "dim"))
+    -- Not there without TSM (see AvailableColumns)
+    if cells.saleRate then
+        cells.saleRate:SetText(addon:FormatSaleRate(info.saleRate))
+        cells.saleRate:SetTextColor(addon:Color(info.saleRate and "text" or "dim"))
+    end
 end
 
 local LABEL, VALUE = { 0.8, 0.8, 0.8 }, { 1, 1, 1 }
@@ -1138,7 +1141,7 @@ local function Refresh(v, state)
 
     local sort = GetSort()
     v.list:SetSort(sort.key, sort.descending)
-    v.list:SetColumns(concOn and CONC_COLUMNS or SIMPLE_COLUMNS)
+    v.list:SetColumns(addon:AvailableColumns(concOn and CONC_COLUMNS or SIMPLE_COLUMNS))
     if next(GoldsmithDB.recipes) == nil then
         v.list:SetEmptyText("No recipes yet. Open your professions so Goldsmith can load them.")
     elseif focus then

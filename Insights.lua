@@ -7,7 +7,7 @@ local addon = _G.Goldsmith or {}
 -- function takes a profession ("All" for every one) and works across all
 -- your characters, using each character's own stats.
 
-local HELD_TOO_LONG_DAYS = 7
+-- Days unsold before a crafted item is held too long is a setting (heldDays)
 local AH_CUT = 0.05
 -- The ROI a craft needs to count as worth doing is a setting (minROI)
 local MIN_DEMAND = 1           -- sold per day
@@ -88,7 +88,7 @@ end
 -- there's no cost.
 -- Returns { value, items = { { itemID, name, count, unitValue, value,
 -- crafted, heldSince, byCharacter } } (most valuable first),
--- heldLong = crafted items held HELD_TOO_LONG_DAYS or more, heldLongValue }.
+-- heldLong = crafted items held the heldDays setting or more, heldLongValue }.
 function addon:GetStockValue(prof)
     local outputs = GetOutputRecipes()
     local materials = addon:GetTrackedMaterials()
@@ -99,7 +99,7 @@ function addon:GetStockValue(prof)
     for itemID in pairs(GoldsmithDB.warbandStock) do ids[itemID] = true end
 
     local result = { value = 0, items = {}, heldLong = {}, heldLongValue = 0 }
-    local cutoff = time() - HELD_TOO_LONG_DAYS * 86400
+    local cutoff = time() - addon:Setting("heldDays") * 86400
     for itemID in pairs(ids) do
         local recipe = outputs[itemID]
         local name = materials[itemID] or (recipe and recipe.outputName) or C_Item.GetItemNameByID(itemID)
@@ -144,7 +144,9 @@ end
 function addon:GetConcentrationOverview(prof)
     local result = { current = 0, max = 0, gain = 0, rows = {} }
     for _, entry in ipairs(addon:GetCharacters()) do
-        for profession in pairs(entry.data.professions) do
+        -- Characters excluded in Settings have no professions here
+        local professions = addon:IsCharacterIncluded(entry.key) and entry.data.professions or {}
+        for profession in pairs(professions) do
             if prof == "All" or profession == prof then
                 local current, max, minutesToFull, updated
                 if entry.key == addon.charKey then

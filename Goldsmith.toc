@@ -3,9 +3,9 @@
 ## Notes: Crafting profitability analyzer
 ## Author: You
 ## SavedVariables: GoldsmithDB
-## OptionalDeps: Auctionator
-## Version: 2.0
-## IconTexture: Interface\Icons\INV_Misc_Coin_01
+## OptionalDeps: Auctionator, TradeSkillMaster
+## Version: 2.1
+## IconTexture: Interface\AddOns\Goldsmith\Media\Icon
 ## AddonCompartmentFunc: Goldsmith_OnAddonCompartmentClick
 
 Core.lua

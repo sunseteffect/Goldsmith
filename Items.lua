@@ -4,7 +4,7 @@ local UI = addon.UI
 -- Items tab
 --
 -- "Tell me everything about this one item." Opens on four leaderboards
--- (most profit earned, best ROI, fastest sellers, held 7+ days). The search
+-- (most profit earned, best ROI, fastest sellers, held too long). The search
 -- box finds any item Goldsmith knows; "In my bags" lists everything you
 -- hold on every character (it replaces v1's Stock tab). Clicking an item
 -- opens its page: price now and usually, a 30-day price chart, sold per
@@ -17,7 +17,6 @@ local GAP = 12
 local TOP_HEIGHT = 26
 local BOARD_ROWS = 6
 local SEARCH_LIMIT = 100
-local HELD_TOO_LONG_DAYS = 7
 local STALE_PRICE_DAYS = 3
 local ACTIVITY_ROWS = 11
 local TIER_ROWS = 5
@@ -89,8 +88,12 @@ local BOARDS = {
         end,
     },
     {
-        key = "held", title = "Held 7+ days",
-        empty = "Nothing you crafted has sat unsold for 7 days.",
+        -- Functions: the number of days is a setting (heldDays)
+        key = "held",
+        title = function() return string.format("Held %d+ days", addon:Setting("heldDays")) end,
+        empty = function()
+            return string.format("Nothing you crafted has sat unsold for %d days.", addon:Setting("heldDays"))
+        end,
         value = function(i) return Plural(i.days, "day"), "warning" end,
         tooltip = function(tooltip, i)
             tooltip:AddDoubleLine("You have", tostring(i.count), 0.8, 0.8, 0.8, 1, 1, 1)
@@ -100,19 +103,24 @@ local BOARDS = {
     },
 }
 
+-- A board's title or empty text: a string, or a function for text that
+-- follows a setting
+local function BoardText(value)
+    if type(value) == "function" then return value() end
+    return value
+end
+
 local function CreateBoard(parent, def)
     local board = UI.Panel(parent)
     board.def = def
     board.title = UI.Text(board, "heading")
     board.title:SetPoint("TOPLEFT", 16, -14)
-    board.title:SetText(def.title)
     board.subtitle = UI.Text(board, "label", "dim")
     board.subtitle:SetPoint("LEFT", board.title, "RIGHT", 10, -1)
     board.empty = UI.Text(board, "small", "muted")
     board.empty:SetPoint("TOPLEFT", 16, -46)
     board.empty:SetPoint("RIGHT", -16, 0)
     board.empty:SetWordWrap(true)
-    board.empty:SetText(def.empty)
     board.rows = {}
     for i = 1, BOARD_ROWS do
         local row = CreateFrame("Button", nil, board)
@@ -140,6 +148,8 @@ local function CreateBoard(parent, def)
     end
 
     function board:Set(items, subtitle)
+        board.title:SetText(BoardText(def.title))
+        board.empty:SetText(BoardText(def.empty))
         board.subtitle:SetText(subtitle or "")
         for i, row in ipairs(board.rows) do
             local item = items[i]
@@ -167,16 +177,100 @@ local SEARCH_COLUMNS = {
     { key = "have", label = "You have", width = 70, justify = "RIGHT" },
     { key = "price", label = "AH price", width = 90, justify = "RIGHT" },
     { key = "demand", label = "Sold/day", width = 70, justify = "RIGHT" },
+    { key = "saleRate", label = "Sale rate", width = 64, justify = "RIGHT", tsm = true },
 }
 
 local STOCK_COLUMNS = {
     { key = "item", label = "Item" },
-    { key = "have", label = "Have", width = 60, justify = "RIGHT" },
+    { key = "have", label = "Have", width = 56, justify = "RIGHT" },
     { key = "each", label = "Each", width = 84, justify = "RIGHT" },
     { key = "value", label = "Value", width = 90, justify = "RIGHT" },
-    { key = "held", label = "Held", width = 70, justify = "RIGHT" },
+    { key = "held", label = "Held", width = 64, justify = "RIGHT" },
     { key = "price", label = "AH price", width = 90, justify = "RIGHT" },
+    { key = "demand", label = "Sold/day", width = 70, justify = "RIGHT" },
+    { key = "saleRate", label = "Sale rate", width = 64, justify = "RIGHT", tsm = true },
 }
+
+-- Sold per day and sale rate for list rows, looked up once per refresh
+-- so sorting by them doesn't ask TSM again for every comparison
+local function AddSales(items)
+    for _, item in ipairs(items) do
+        if item.demand == nil then item.demand = addon:GetDemand(item.itemID, item.name) end
+        item.saleRate = addon:GetSaleRate(item.itemID)
+    end
+end
+
+local function FillSalesCells(c, item)
+    c.demand:SetText(addon:FormatDemand(item.demand))
+    c.demand:SetTextColor(addon:Color(item.demand and "text" or "dim"))
+    -- Not there without TSM (see AvailableColumns)
+    if c.saleRate then
+        c.saleRate:SetText(addon:FormatSaleRate(item.saleRate))
+        c.saleRate:SetTextColor(addon:Color(item.saleRate and "text" or "dim"))
+    end
+end
+
+-- Sorting, as on the Crafts tab: clicking a header sorts by it, clicking
+-- again reverses. Each column starts the most useful way round; rows with no
+-- value go last. In my bags starts most valuable first; search results
+-- start best match first (no column).
+local SORTS = {
+    stock = {
+        item  = { firstDescending = false, value = function(i) return i.name end },
+        have  = { firstDescending = true,  value = function(i) return i.count end },
+        each  = { firstDescending = true,  value = function(i) return i.unitValue end },
+        value = { firstDescending = true,  value = function(i) return i.value end },
+        -- Held longest first: the oldest date
+        held  = { firstDescending = false, value = function(i) return i.heldSince end },
+        price = { firstDescending = true,  value = function(i) return addon:GetMarketPrice(i.itemID) end },
+        demand   = { firstDescending = true, value = function(i) return i.demand end },
+        saleRate = { firstDescending = true, value = function(i) return i.saleRate end },
+    },
+    search = {
+        item       = { firstDescending = false, value = function(i) return i.name end },
+        profession = { firstDescending = false, value = function(i) return i.profession end },
+        have       = { firstDescending = true,  value = function(i) return i.have > 0 and i.have or nil end },
+        price      = { firstDescending = true,  value = function(i) return i.price end },
+        demand     = { firstDescending = true,  value = function(i) return i.demand end },
+        saleRate   = { firstDescending = true,  value = function(i) return i.saleRate end },
+    },
+}
+local DEFAULT_SORTS = { stock = { key = "value", descending = true } }
+
+-- The sort for a list ("stock" or "search"), or nil for its own order
+local function GetSort(mode)
+    local sort = GoldsmithDB.ui2.itemSorts and GoldsmithDB.ui2.itemSorts[mode]
+    if sort and SORTS[mode][sort.key] then return sort end
+    return DEFAULT_SORTS[mode]
+end
+
+local function SetSort(mode, key)
+    local ui = GoldsmithDB.ui2
+    ui.itemSorts = ui.itemSorts or {}
+    local current = GetSort(mode)
+    if current and current.key == key then
+        ui.itemSorts[mode] = { key = key, descending = not current.descending }
+    else
+        ui.itemSorts[mode] = { key = key, descending = SORTS[mode][key].firstDescending }
+    end
+end
+
+local function SortItems(items, mode)
+    local sort = GetSort(mode)
+    if not sort then return end
+    local getValue = SORTS[mode][sort.key].value
+    local values = {}
+    for _, item in ipairs(items) do values[item] = getValue(item) or false end
+    table.sort(items, function(a, b)
+        local va, vb = values[a], values[b]
+        if va and vb and va ~= vb then
+            if sort.descending then return va > vb end
+            return va < vb
+        end
+        if (va == false) ~= (vb == false) then return vb == false end
+        return a.name < b.name
+    end)
+end
 
 local function FillSearchRow(row, item)
     local c = row.cells
@@ -186,7 +280,7 @@ local function FillSearchRow(row, item)
     c.have:SetText(item.have > 0 and tostring(item.have) or "-")
     if item.have == 0 then c.have:SetTextColor(addon:Color("dim")) end
     c.price:SetText(item.price and Money(item.price) or "-")
-    c.demand:SetText(addon:FormatDemand(item.demand))
+    FillSalesCells(c, item)
 end
 
 local function FillStockRow(row, item)
@@ -198,7 +292,7 @@ local function FillStockRow(row, item)
     if item.heldSince then
         local days = DaysSince(item.heldSince)
         c.held:SetText(Plural(days, "day"))
-        if days >= HELD_TOO_LONG_DAYS then c.held:SetTextColor(addon:Color("warning")) end
+        if days >= addon:Setting("heldDays") then c.held:SetTextColor(addon:Color("warning")) end
     else
         c.held:SetText("-")
         c.held:SetTextColor(addon:Color("dim"))
@@ -206,6 +300,7 @@ local function FillStockRow(row, item)
     local price = addon:GetMarketPrice(item.itemID)
     c.price:SetText(price and Money(price) or "-")
     c.price:SetTextColor(addon:Color("muted"))
+    FillSalesCells(c, item)
 end
 
 local function StockTooltip(tooltip, item)
@@ -469,7 +564,7 @@ local function CreatePage(parent)
         local heldNote = heldDays and ("held " .. Plural(heldDays, "day"))
             or (d.have > 0 and "all characters" or "none on any character")
         t[4]:Set("You have", tostring(d.have), d.have > 0 and "text" or "dim", heldNote,
-            heldDays and heldDays >= HELD_TOO_LONG_DAYS and "warning" or "muted")
+            heldDays and heldDays >= addon:Setting("heldDays") and "warning" or "muted")
         t[4].tooltip = function(tooltip)
             tooltip:AddLine("You have", 1, 1, 1)
             for _, entry in ipairs(d.byCharacter or {}) do
@@ -700,6 +795,11 @@ local function Create(parent)
             end
         end,
         onClick = function(item) addon:OpenItem(item.name, item.itemID) end,
+        onSort = function(key)
+            SetSort(view.listMode, key)
+            view.list:ScrollToTop()
+            addon.RefreshWindow()
+        end,
     })
     view.list:SetPoint("TOPLEFT", 0, -(TOP_HEIGHT + GAP))
     view.list:SetPoint("BOTTOMRIGHT", 0, 22)
@@ -761,18 +861,27 @@ local function Refresh(v, state)
             end
         end
         v.listMode = "stock"
+        AddSales(items)
+        SortItems(items, "stock")
+        local sort = GetSort("stock")
+        v.list:SetSort(sort.key, sort.descending)
         v.list:SetEmptyText(search ~= "" and "Nothing you hold matches." or "Nothing tracked in your bags yet.")
-        v.list:SetColumnsAndItems(STOCK_COLUMNS, items)
+        v.list:SetColumnsAndItems(addon:AvailableColumns(STOCK_COLUMNS), items)
         v.footer:SetText(string.format("%s in %s, all characters and the warband bank", Money(value), Plural(#items, "item")))
-        v.note:SetText("Most valuable first")
+        v.note:SetText("Click a column to sort")
     else
         local results = addon:SearchItems(search, state.profession, SEARCH_LIMIT)
         v.listMode = "search"
+        AddSales(results)
+        SortItems(results, "search")
+        local sort = GetSort("search")
+        v.list:SetSort(sort and sort.key, sort and sort.descending)
         v.list:SetEmptyText("No items match. Goldsmith knows the items in your saved recipes, their materials and what you've bought.")
-        v.list:SetColumnsAndItems(SEARCH_COLUMNS, results)
+        v.list:SetColumnsAndItems(addon:AvailableColumns(SEARCH_COLUMNS), results)
         v.footer:SetText(#results >= SEARCH_LIMIT and string.format("First %d matches. Type more to narrow it down.", SEARCH_LIMIT)
             or (#results == 1 and "1 match" or (#results .. " matches")))
-        v.note:SetText(state.profession ~= "All" and ("Only " .. state.profession) or "")
+        v.note:SetText(state.profession ~= "All" and ("Only " .. state.profession .. ", click a column to sort")
+            or "Click a column to sort")
     end
 end
 

@@ -8,6 +8,13 @@ local UI = addon.UI
 --   costMode    - "estimated" (from your stats) or "worst" (no procs)
 --   priceSource - "auto" (whichever is newer), "auctionator" or "tsm"
 --   minROI      - ROI (%) a craft needs to count as worth crafting
+--   dealPercent - how far below its usual price a material counts as cheap
+--   heldDays    - days unsold before a crafted item is held too long
+--   tooltips    - Goldsmith lines in item tooltips: "full", "short" or "off"
+--   chat        - chat messages: "all", "money" (sales, purchases,
+--                 deposits) or "off"
+--   excluded    - { [charKey] = true } for characters left out of stock,
+--                 concentration and the Overview
 --   showMinimap - the minimap button (Minimap.lua)
 -- Concentration in Crafts isn't here: the Crafts tab's switch remembers it.
 
@@ -15,6 +22,10 @@ local DEFAULTS = {
     costMode = "estimated",
     priceSource = "auto",
     minROI = 15,
+    dealPercent = 10,
+    heldDays = 7,
+    tooltips = "full",
+    chat = "all",
     showMinimap = true,
 }
 
@@ -31,25 +42,96 @@ function addon:SetSetting(key, value)
     if addon.Refresh then addon.Refresh() end
 end
 
+-- False for a character left out in Settings
+function addon:IsCharacterIncluded(charKey)
+    local excluded = addon:Setting("excluded")
+    return not (excluded and excluded[charKey])
+end
+
+local function SetCharacterIncluded(charKey, included)
+    GoldsmithDB.settings = GoldsmithDB.settings or {}
+    GoldsmithDB.settings.excluded = GoldsmithDB.settings.excluded or {}
+    GoldsmithDB.settings.excluded[charKey] = (not included) or nil
+    if addon.Refresh then addon.Refresh() end
+end
+
+-- Chat messages Goldsmith prints by itself (not answers to /gsm commands).
+-- kind is "money" (a sale, purchase or deposit) or "info" (anything else).
+function addon:Notify(kind, msg, ...)
+    local chat = addon:Setting("chat")
+    if chat == "off" or (chat == "money" and kind ~= "money") then return end
+    print("|cFF00FF00[Goldsmith]|r " .. string.format(msg, ...))
+end
+
+-- Keybinding
+
+-- The key that opens Goldsmith ("CTRL-G"), or nil if none is set
+function addon:ToggleKeyText()
+    local key = GetBindingKey("GOLDSMITH_TOGGLE")
+    return key and GetBindingText(key)
+end
+
+-- Opens the game's Keybindings page. Goldsmith closes so it isn't in the
+-- way; the new key brings it back.
+function addon:OpenKeybindings()
+    local ok = Settings and Settings.OpenToCategory and Settings.KEYBINDINGS_CATEGORY_ID
+        and pcall(Settings.OpenToCategory, Settings.KEYBINDINGS_CATEGORY_ID)
+    if not ok then
+        print("|cFF00FF00[Goldsmith]|r Set a key in Options > Keybindings > AddOns > Goldsmith.")
+        return
+    end
+    if addon.window then addon.window:Hide() end
+    print("|cFF00FF00[Goldsmith]|r Scroll down to AddOns > Goldsmith and pick a key for \"Show or hide Goldsmith\".")
+end
+
 -- Panel
 
-local WIDTH = 400
+local COLUMN_WIDTH = 400
+local WIDTH = 2 * COLUMN_WIDTH + 16
 local ROW_HEIGHT = 74
+local ROWS_TOP = -78
 
-local COST_MODES = {
-    { value = "estimated", label = "Estimated (recommended)" },
-    { value = "worst", label = "Worst case" },
+local CHOICES = {
+    costMode = {
+        { value = "estimated", label = "Estimated (recommended)" },
+        { value = "worst", label = "Worst case" },
+    },
+    priceSource = {
+        { value = "auto", label = "Automatic (recommended)" },
+        { value = "auctionator", label = "Prefer Auctionator" },
+        { value = "tsm", label = "Prefer TSM" },
+    },
+    minROI = {},
+    dealPercent = {},
+    heldDays = {},
+    tooltips = {
+        { value = "full", label = "Full (recommended)" },
+        { value = "short", label = "Short" },
+        { value = "off", label = "Off" },
+    },
+    chat = {
+        { value = "all", label = "Everything (recommended)" },
+        { value = "money", label = "Sales and purchases" },
+        { value = "off", label = "Off" },
+    },
 }
-local PRICE_SOURCES = {
-    { value = "auto", label = "Automatic (recommended)" },
-    { value = "auctionator", label = "Prefer Auctionator" },
-    { value = "tsm", label = "Prefer TSM" },
-}
-local ROI_CHOICES = { 0, 5, 10, 15, 20, 30, 50 }
-
-local function ROILabel(value)
-    if value == 0 then return "Any profit" end
-    return string.format("%d%%%s", value, value == DEFAULTS.minROI and " (recommended)" or "")
+for _, value in ipairs({ 0, 5, 10, 15, 20, 30, 50 }) do
+    table.insert(CHOICES.minROI, { value = value,
+        label = value == 0 and "Any profit" or string.format("%d%%", value) })
+end
+for _, value in ipairs({ 5, 10, 15, 20, 25 }) do
+    table.insert(CHOICES.dealPercent, { value = value, label = string.format("%d%% below usual", value) })
+end
+for _, value in ipairs({ 3, 5, 7, 14, 21, 30 }) do
+    table.insert(CHOICES.heldDays, { value = value, label = string.format("%d days", value) })
+end
+-- Mark the defaults
+for key, list in pairs(CHOICES) do
+    for _, c in ipairs(list) do
+        if c.value == DEFAULTS[key] and not c.label:find("recommended") then
+            c.label = c.label .. " (recommended)"
+        end
+    end
 end
 
 local function LabelFor(choices, value)
@@ -80,10 +162,42 @@ local HELP = {
         "Used by Profitable only on the Crafts tab and by Best crafts right now on the Overview.",
         "Higher leaves room for undercuts and slow sales; 15% is a good start.",
     },
+    dealPercent = {
+        "Cheap materials",
+        "How far below its usual price a material has to be for the Overview's Cheap materials today.",
+        "The usual price is the middle of the prices saved each day Auctionator scans, so it needs a few days of history.",
+    },
+    heldDays = {
+        "Held too long",
+        "How many days a crafted item can sit unsold before Goldsmith flags it: the Overview's Gold in stock, the Items tab's Held board and the Held column turn orange.",
+        "Slow-selling gear might want 14 or more; fast consumables less.",
+    },
+    tooltips = {
+        "Item tooltips",
+        "Full: everything Goldsmith knows about the item, such as your average cost, how today's price compares, what yours cost to make, break-even, and craft cost and profit with your stats.",
+        "Short: craft cost and profit for things you craft, otherwise your average cost and today's price against usual.",
+        "Off: no Goldsmith lines. Everything is still on the item's page in /gsm.",
+    },
+    chat = {
+        "Chat messages",
+        "Everything: each sale, purchase and AH deposit, saved recipes and milling results.",
+        "Sales and purchases: only messages about money (sales with their profit, purchases, deposits).",
+        "Off: none. Everything is still recorded; see the History tab. Answers to /gsm commands always show.",
+    },
+    characters = {
+        "Characters",
+        "Untick a character to leave it out of Gold in stock, concentration, total gold and the Overview: a bank alt, or one you've stopped playing.",
+        "Its sales and purchases still count, and Goldsmith keeps recording it while you play it.",
+    },
     showMinimap = {
         "Minimap button",
         "A gold coin on the edge of the minimap: click to show or hide Goldsmith, right-click for these settings, drag to move it.",
         "Other ways to open Goldsmith: /gsm, a key (Options > Keybindings > AddOns > Goldsmith), or the addons button by the minimap.",
+    },
+    keybind = {
+        "Key to open Goldsmith",
+        "Set key opens the game's Keybindings. Goldsmith is under AddOns, near the bottom: click the box next to Show or hide Goldsmith and press the key you want.",
+        "Goldsmith closes while you do it; press your new key to bring it back.",
     },
 }
 
@@ -97,18 +211,17 @@ end
 
 -- A setting row: name and a one-line description on the left, the control
 -- on the right; hovering anywhere on the row explains it in full
-local function Row(panel, index, key, title, description)
+-- (placed by panel:Update, which skips rows that don't apply)
+local function Row(panel, key, title, description)
     local row = CreateFrame("Frame", nil, panel)
-    row:SetPoint("TOPLEFT", 16, -52 - (index - 1) * ROW_HEIGHT)
-    row:SetPoint("RIGHT", panel, "RIGHT", -16, 0)
-    row:SetHeight(ROW_HEIGHT - 8)
+    row:SetSize(COLUMN_WIDTH - 32, ROW_HEIGHT - 8)
     row:EnableMouse(true)
     row.title = UI.Text(row, "body", "text")
     row.title:SetPoint("TOPLEFT", 0, -4)
     row.title:SetText(title)
     row.description = UI.Text(row, "small", "muted")
     row.description:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -5)
-    row.description:SetWidth(WIDTH - 32 - 180)
+    row.description:SetWidth(COLUMN_WIDTH - 32 - 180)
     row.description:SetWordWrap(true)
     row.description:SetMaxLines(3)
     row.description:SetText(description)
@@ -123,9 +236,33 @@ local function Dropdown(row, key, build)
     return dropdown
 end
 
+-- A row whose dropdown picks one of CHOICES[key]
+local function ChoiceRow(panel, key, title, description)
+    local row = Row(panel, key, title, description)
+    row.control = Dropdown(row, key, function(root)
+        for _, c in ipairs(CHOICES[key]) do
+            root:CreateRadio(c.label, function() return addon:Setting(key) == c.value end,
+                function() addon:SetSetting(key, c.value); panel:Update() end)
+        end
+    end)
+    function row:Update() row.control:SetLabel(LabelFor(CHOICES[key], addon:Setting(key))) end
+    return row
+end
+
+local function CharacterLabel(entry)
+    local c = entry.data
+    local realm = c.realm ~= GetRealmName() and (" (" .. (c.realm or "?") .. ")") or ""
+    return (c.name or entry.key) .. realm .. (entry.key == addon.charKey and ", you" or "")
+end
+
+local COLUMNS = {
+    { title = "Crafting and prices", rows = { "costMode", "priceSource", "minROI", "dealPercent", "heldDays" } },
+    { title = "Display", rows = { "tooltips", "chat", "characters", "showMinimap", "keybind" } },
+}
+
 function addon:CreateSettingsPanel(parent)
     local panel = CreateFrame("Frame", "GoldsmithSettings", parent, "BackdropTemplate")
-    panel:SetSize(WIDTH, 52 + 4 * ROW_HEIGHT + 20)
+    panel:SetWidth(WIDTH)
     UI.Style(panel, "window", "borderGold")
     panel:SetFrameStrata("DIALOG")
     panel:EnableMouse(true)
@@ -137,33 +274,49 @@ function addon:CreateSettingsPanel(parent)
     local close = UI.IconButton(panel, 26, "X", "Close", function() panel:Hide() end, { hoverColor = "loss" })
     close:SetPoint("TOPRIGHT", -8, -8)
 
+    for i, column in ipairs(COLUMNS) do
+        local heading = UI.Text(panel, "label", "dim")
+        heading:SetPoint("TOPLEFT", 16 + (i - 1) * COLUMN_WIDTH, -50)
+        heading:SetText(column.title:upper())
+    end
+
+    -- A gold bar between the columns, from the headings to above the footer
+    local divider = UI.Line(panel, "borderGold")
+    divider:SetWidth(2)
+    divider:SetPoint("TOPLEFT", COLUMN_WIDTH - 1, -46)
+    divider:SetPoint("BOTTOMLEFT", COLUMN_WIDTH - 1, 44)
+
     local rows = {}
 
-    rows.costMode = Row(panel, 1, "costMode", "Show cost as", "Estimated uses your stats; worst case assumes no procs.")
-    rows.costMode.control = Dropdown(rows.costMode, "costMode", function(root)
-        for _, c in ipairs(COST_MODES) do
-            root:CreateRadio(c.label, function() return addon:Setting("costMode") == c.value end,
-                function() addon:SetSetting("costMode", c.value); panel:Update() end)
+    rows.costMode = ChoiceRow(panel, "costMode", "Show cost as", "Estimated uses your stats; worst case assumes no procs.")
+    rows.priceSource = ChoiceRow(panel, "priceSource", "Price source", "Where AH prices come from when both Auctionator and TSM have one.")
+    rows.minROI = ChoiceRow(panel, "minROI", "Worth crafting at", "The ROI a craft needs for Profitable only and Best crafts.")
+    rows.dealPercent = ChoiceRow(panel, "dealPercent", "Cheap materials", "How far below usual a material's price counts as cheap.")
+    rows.heldDays = ChoiceRow(panel, "heldDays", "Held too long", "Days unsold before a crafted item is flagged.")
+    rows.tooltips = ChoiceRow(panel, "tooltips", "Item tooltips", "Goldsmith's lines in the game's item tooltips.")
+    rows.chat = ChoiceRow(panel, "chat", "Chat messages", "What Goldsmith says in chat as things happen.")
+
+    rows.characters = Row(panel, "characters", "Characters", "Which characters count toward stock, concentration and the Overview.")
+    rows.characters.control = Dropdown(rows.characters, "characters", function(root)
+        for _, entry in ipairs(addon:GetCharacters()) do
+            root:CreateCheckbox(CharacterLabel(entry),
+                function() return addon:IsCharacterIncluded(entry.key) end,
+                function()
+                    SetCharacterIncluded(entry.key, not addon:IsCharacterIncluded(entry.key))
+                    panel:Update()
+                end)
         end
     end)
-
-    rows.priceSource = Row(panel, 2, "priceSource", "Price source", "Where AH prices come from when both Auctionator and TSM have one.")
-    rows.priceSource.control = Dropdown(rows.priceSource, "priceSource", function(root)
-        for _, c in ipairs(PRICE_SOURCES) do
-            root:CreateRadio(c.label, function() return addon:Setting("priceSource") == c.value end,
-                function() addon:SetSetting("priceSource", c.value); panel:Update() end)
+    function rows.characters:Update()
+        local total, included = 0, 0
+        for _, entry in ipairs(addon:GetCharacters()) do
+            total = total + 1
+            if addon:IsCharacterIncluded(entry.key) then included = included + 1 end
         end
-    end)
+        self.control:SetLabel(included == total and "All characters" or string.format("%d of %d characters", included, total))
+    end
 
-    rows.minROI = Row(panel, 3, "minROI", "Worth crafting at", "The ROI a craft needs for Profitable only and Best crafts.")
-    rows.minROI.control = Dropdown(rows.minROI, "minROI", function(root)
-        for _, value in ipairs(ROI_CHOICES) do
-            root:CreateRadio(ROILabel(value), function() return addon:Setting("minROI") == value end,
-                function() addon:SetSetting("minROI", value); panel:Update() end)
-        end
-    end)
-
-    rows.showMinimap = Row(panel, 4, "showMinimap", "Minimap button", "A coin by the minimap that opens Goldsmith.")
+    rows.showMinimap = Row(panel, "showMinimap", "Minimap button", "A coin by the minimap that opens Goldsmith.")
     rows.showMinimap.control = UI.Checkbox(rows.showMinimap, "Show", function(checked)
         addon:SetSetting("showMinimap", checked)
         addon:UpdateMinimapButton()
@@ -171,18 +324,135 @@ function addon:CreateSettingsPanel(parent)
     end)
     rows.showMinimap.control:SetPoint("TOPRIGHT", 0, 0)
     UI.SetTooltip(rows.showMinimap.control, function(tooltip) AddHelp(tooltip, "showMinimap") end, "ANCHOR_LEFT")
+    function rows.showMinimap:Update() self.control:SetChecked(addon:Setting("showMinimap")) end
+
+    rows.keybind = Row(panel, "keybind", "Key to open Goldsmith", "")
+    rows.keybind.control = UI.Button(rows.keybind, "Set key", 170, 24, function() addon:OpenKeybindings() end)
+    rows.keybind.control:SetPoint("TOPRIGHT", 0, 0)
+    UI.SetTooltip(rows.keybind.control, function(tooltip) AddHelp(tooltip, "keybind") end, "ANCHOR_LEFT")
+    function rows.keybind:Update()
+        local key = addon:ToggleKeyText()
+        self.description:SetText(key and ("Opens with " .. key .. ".") or "No key set yet.")
+        self.control:SetLabel(key and "Change key" or "Set key")
+    end
+
+    local help = addon:CreateHelpPanel(parent, panel)
+    local helpButton = UI.Button(panel, "Help", 80, 24, function()
+        panel:Hide()
+        help:Show()
+    end)
+    helpButton:SetPoint("BOTTOMRIGHT", -16, 10)
+    UI.SetTooltip(helpButton, function(tooltip)
+        tooltip:AddLine("Help", 1, 1, 1)
+        tooltip:AddLine("How to get started, what each tab is for, and the /gsm commands.", 0.8, 0.8, 0.8, true)
+    end, "ANCHOR_LEFT")
 
     local footer = UI.Text(panel, "label", "dim")
-    footer:SetPoint("BOTTOMLEFT", 16, 12)
+    footer:SetPoint("BOTTOMLEFT", 16, 16)
     footer:SetText("Saved for all your characters. Hover a setting for details.")
 
     function panel:Update()
-        rows.costMode.control:SetLabel(LabelFor(COST_MODES, addon:Setting("costMode")))
-        rows.priceSource.control:SetLabel(LabelFor(PRICE_SOURCES, addon:Setting("priceSource")))
-        rows.minROI.control:SetLabel(ROILabel(addon:Setting("minROI")))
-        rows.showMinimap.control:SetChecked(addon:Setting("showMinimap"))
+        for _, row in pairs(rows) do row:Update() end
+
+        -- Price source only matters with both price addons installed. Laid
+        -- out here rather than once: TSM can finish loading after Goldsmith.
+        local hasAuctionator = Auctionator and Auctionator.API and Auctionator.API.v1
+        rows.priceSource:SetShown(hasAuctionator and addon:HasTSM() and true or false)
+        local lowest = ROWS_TOP
+        for i, column in ipairs(COLUMNS) do
+            local top = ROWS_TOP
+            for _, key in ipairs(column.rows) do
+                local row = rows[key]
+                if row:IsShown() then
+                    row:ClearAllPoints()
+                    row:SetPoint("TOPLEFT", 16 + (i - 1) * COLUMN_WIDTH, top)
+                    top = top - ROW_HEIGHT
+                end
+            end
+            lowest = math.min(lowest, top)
+        end
+        panel:SetHeight(-lowest + 40)
     end
     panel:SetScript("OnShow", function() panel:Update() end)
+    return panel
+end
+
+-- Help
+--
+-- What a new player needs, inside the game: WoW can't open a web page, so
+-- a link to the README would only be text to copy.
+
+local HELP_WIDTH = 560
+
+local HELP_SECTIONS = {
+    { "Getting started",
+      "Open each profession once on every crafter (press K) so Goldsmith loads its recipes and crafting stats. Scan the AH with Auctionator for prices. From then on, purchases, sales, crafts and AH deposits are recorded by themselves." },
+    { "Opening Goldsmith",
+      "/gsm, the gold coin on the minimap, the addons button by the minimap, or a key of your own (Settings > Key to open Goldsmith)." },
+    { "The tabs",
+      "Overview: how you're doing and what to do next. Crafts: every recipe you know with its cost, profit and ROI; click one for a shopping plan. Items: any item's page, and In my bags for everything you hold. History: every purchase, sale, craft and deposit; right-click an entry to fix it." },
+    { "Item tooltips",
+      "Show your cost, profit and break-even price. Hold Shift for each material's cost. Settings > Item tooltips makes them shorter or turns them off." },
+    { "Recommended: TSM",
+      "Goldsmith works with Auctionator alone. TSM alongside it adds region sales per day, sale rates, a check on listings far from the usual price, and prices between Auctionator scans." },
+    { "Commands",
+      "/gsm help lists them all. Handy ones: /gsm chars (your characters and concentration), /gsm recipes, /gsm milling, /gsm setup (the getting started checklist)." },
+}
+
+function addon:CreateHelpPanel(parent, settings)
+    local panel = CreateFrame("Frame", "GoldsmithHelp", parent, "BackdropTemplate")
+    panel:SetWidth(HELP_WIDTH)
+    panel:SetPoint("TOPRIGHT", settings, "TOPRIGHT")
+    UI.Style(panel, "window", "borderGold")
+    panel:SetFrameStrata("DIALOG")
+    panel:EnableMouse(true)
+    panel:Hide()
+
+    local title = UI.Text(panel, "heading")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Help")
+    local close = UI.IconButton(panel, 26, "X", "Close", function() panel:Hide() end, { hoverColor = "loss" })
+    close:SetPoint("TOPRIGHT", -8, -8)
+
+    local above
+    local texts = {}
+    for _, section in ipairs(HELP_SECTIONS) do
+        local heading = UI.Text(panel, "body", "text")
+        if above then
+            heading:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -14)
+        else
+            heading:SetPoint("TOPLEFT", 16, -50)
+        end
+        heading:SetText(section[1])
+        local text = UI.Text(panel, "small", "muted")
+        text:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -4)
+        text:SetWidth(HELP_WIDTH - 32)
+        text:SetWordWrap(true)
+        text:SetSpacing(2)
+        text:SetText(section[2])
+        table.insert(texts, heading)
+        table.insert(texts, text)
+        above = text
+    end
+
+    local setupButton = UI.Button(panel, "Show getting started", 160, 24, function()
+        panel:Hide()
+        addon:ShowSetup()
+    end)
+    setupButton:SetPoint("BOTTOMLEFT", 16, 12)
+    local back = UI.Button(panel, "Back to settings", 130, 24, function()
+        panel:Hide()
+        settings:Show()
+    end)
+    back:SetPoint("BOTTOMRIGHT", -16, 12)
+
+    -- Tall enough for the text, however it wrapped: the title, each
+    -- heading and paragraph with the gaps between them, and the buttons
+    panel:SetScript("OnShow", function()
+        local height = 50 + 52 + (#HELP_SECTIONS - 1) * 14 + #HELP_SECTIONS * 4
+        for _, fs in ipairs(texts) do height = height + fs:GetStringHeight() end
+        panel:SetHeight(height)
+    end)
     return panel
 end
 

@@ -110,8 +110,13 @@ function addon:CreateWindow()
     end
     MakeDragHandle(header)
 
+    -- Logo mark (hammer and ingot, Media\Logo.tga) beside the name
+    local logo = header:CreateTexture(nil, "ARTWORK")
+    logo:SetSize(30, 30)
+    logo:SetTexture("Interface\\AddOns\\Goldsmith\\Media\\Logo")
+    logo:SetPoint("LEFT", 14, 0)
     local title = UI.Text(header, "title")
-    title:SetPoint("LEFT", 18, 0)
+    title:SetPoint("LEFT", logo, "RIGHT", 8, 0)
     title:SetText("GOLDSMITH")
 
     local Refresh -- defined below
@@ -144,11 +149,15 @@ function addon:CreateWindow()
 
     local settings = addon:CreateSettingsPanel(frame)
     settings:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -(HEADER_HEIGHT + 4))
-    local settingsButton = UI.Button(header, "Settings", 80, 24, function() settings:SetShown(not settings:IsShown()) end)
+    local settingsButton = UI.Button(header, "Settings", 80, 24, function()
+        -- Help sits in the same spot (Settings > Help)
+        if GoldsmithHelp then GoldsmithHelp:Hide() end
+        settings:SetShown(not settings:IsShown())
+    end)
     settingsButton:SetPoint("RIGHT", closeButton, "LEFT", -8, 0)
     UI.SetTooltip(settingsButton, function(tooltip)
         tooltip:AddLine("Settings", 1, 1, 1)
-        tooltip:AddLine("Which cost to show, where prices come from, and the ROI a craft needs to be worth it.", 0.8, 0.8, 0.8, true)
+        tooltip:AddLine("Costs, prices and thresholds, item tooltips, chat messages, which characters count, and Help.", 0.8, 0.8, 0.8, true)
     end, "ANCHOR_BOTTOM")
 
     local priceText = UI.Text(header, "small", "muted", "RIGHT")
