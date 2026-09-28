@@ -395,6 +395,39 @@ function addon:GetWorstCaseCost(recipe, info)
     return (addon:GetRecipeCost(recipe, true))
 end
 
+-- Crafting from Goldsmith: the materials list to give the game for a
+-- scenario's mix of qualities (nil scenario: all lowest quality), built
+-- the same way as the lists the game was asked about, from the recipe's
+-- schematic (the profession must be open). Only quality materials go in
+-- it; the game adds the fixed ones itself.
+-- Returns the list and what one craft needs of every material, quality and
+-- fixed ({ [itemID] = quantity }), or nil.
+function addon:GetCraftReagents(recipeID, scenario)
+    local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+    if not ok or not schematic then return nil end
+    local qslots = QualitySlots(schematic)
+    local highUnits = {}
+    for i, s in ipairs(qslots) do
+        if scenario and scenario.mix then
+            highUnits[i] = scenario.mix[s.low] or 0
+        elseif scenario and scenario.mats == "high" then
+            highUnits[i] = s.quantity
+        end
+    end
+    local list = BuildList(qslots, highUnits)
+    local needs = {}
+    for _, entry in ipairs(list) do
+        needs[entry.reagent.itemID] = (needs[entry.reagent.itemID] or 0) + entry.quantity
+    end
+    for _, slot in ipairs(schematic.reagentSlotSchematics or {}) do
+        local only = slot.reagents and #slot.reagents == 1 and slot.reagents[1].itemID
+        if slot.required and only then
+            needs[only] = (needs[only] or 0) + slot.quantityRequired
+        end
+    end
+    return list, needs
+end
+
 -- Plain description of a scenario's materials, e.g. "cheapest materials",
 -- "best materials", or "8 better Powder Pigment, 2 better Sanguithorn Pigment"
 function addon:DescribeMix(recipe, scenario)

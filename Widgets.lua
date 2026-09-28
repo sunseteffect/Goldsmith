@@ -491,8 +491,18 @@ function UI.NumberBox(parent, width, onChange)
     end)
     box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
     box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    box:SetScript("OnEditFocusGained", function(self) self:SetBackdropBorderColor(addon:Color("gold")) end)
-    box:SetScript("OnEditFocusLost", function(self) self:SetBackdropBorderColor(addon:Color("borderStrong")) end)
+    -- Clicking in selects the whole number, so typing replaces it (1 then 2
+    -- gives 2, not 12). Again next frame: the click that gave focus can
+    -- move the cursor after this runs.
+    box:SetScript("OnEditFocusGained", function(self)
+        self:SetBackdropBorderColor(addon:Color("gold"))
+        self:HighlightText()
+        C_Timer.After(0, function() if self:HasFocus() then self:HighlightText() end end)
+    end)
+    box:SetScript("OnEditFocusLost", function(self)
+        self:SetBackdropBorderColor(addon:Color("borderStrong"))
+        self:HighlightText(0, 0)
+    end)
     return box
 end
 

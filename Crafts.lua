@@ -478,6 +478,110 @@ function addon:OpenCraftPlan(recipe, info, charKey, quantity)
     addon:ShowTab("crafts")
 end
 
+-- Crafting from the planner
+--
+-- The Craft button crafts the plan: its tier's mix of material qualities,
+-- with concentration if the plan uses it, as many crafts as the plan says.
+-- The game only crafts with the profession open, so until then the button
+-- opens it at this recipe. Everything is checked first; if something's
+-- missing the button stays off and its hover says why. Enchant scrolls
+-- aren't crafted from here: they need a vellum passed as the target.
+
+local function ProfessionOpen(recipe)
+    if not (ProfessionsFrame and ProfessionsFrame:IsShown()) then return false end
+    local info = C_TradeSkillUI.GetBaseProfessionInfo and C_TradeSkillUI.GetBaseProfessionInfo()
+    return info ~= nil and info.professionName == recipe.profession
+end
+
+local function MaterialName(itemID)
+    local tier, tierCount = addon:GetItemTier(itemID)
+    return (tier and (addon:TierIconText(tier, tierCount) .. " ") or "")
+        .. (C_Item.GetItemNameByID(itemID) or ("item " .. itemID))
+end
+
+-- What the Craft button can do for a plan. Returns { label, enabled,
+-- open (opens the profession instead), blockers (why it can't), notes,
+-- crafts, reagents, concentrate, points }.
+local function CraftState(p, tierInfo, plan)
+    local recipe = p.recipe
+    local state = { label = "Craft", blockers = {}, notes = {} }
+    if GoldsmithDB.scrollOutputs[recipe.recipeID] then
+        table.insert(state.blockers, "Enchant scrolls need a vellum as their target, so craft them in the profession window for now.")
+        return state
+    end
+    local learned = addon:KnowsRecipe(recipe.recipeID)
+    if not learned and ProfessionOpen(recipe) then
+        local info = C_TradeSkillUI.GetRecipeInfo(recipe.recipeID)
+        learned = info and info.learned
+    end
+    if not learned then
+        local c = GoldsmithDB.characters[p.charKey]
+        table.insert(state.blockers, string.format("Log in on %s to craft this.",
+            c and p.charKey ~= addon.charKey and c.name or "a character who knows it"))
+        return state
+    end
+    if not ProfessionOpen(recipe) then
+        state.label, state.enabled, state.open = "Open " .. recipe.profession, true, true
+        table.insert(state.notes, "Opens " .. recipe.profession .. " at this recipe. The game only crafts with the profession open.")
+        return state
+    end
+
+    if C_TradeSkillUI.GetRecipeRequirements then
+        local ok, requirements = pcall(C_TradeSkillUI.GetRecipeRequirements, recipe.recipeID)
+        for _, r in ipairs(ok and requirements or {}) do
+            if not r.met then table.insert(state.blockers, "Needs " .. (r.name or "something") .. " nearby.") end
+        end
+    end
+
+    local reagents, needs = addon:GetCraftReagents(recipe.recipeID, tierInfo and tierInfo.scenario)
+    if not reagents then
+        table.insert(state.blockers, "The game didn't give this recipe's materials. Try closing and reopening the profession.")
+        return state
+    end
+    state.reagents = reagents
+    local crafts = plan.crafts
+
+    -- Concentration: the full cost is needed to start each craft;
+    -- ingenuity refunds some afterwards (the expected cost)
+    state.concentrate = tierInfo and tierInfo.concentrate == true
+    if state.concentrate then
+        local current = addon:GetConcentration(recipe.profession) or 0
+        local full = tierInfo.scenario and tierInfo.scenario.concentration or tierInfo.concentration
+        local expected = math.max(tierInfo.concentration or full, 1)
+        local affordable = current >= full and (math.floor((current - full) / expected) + 1) or 0
+        if affordable == 0 then
+            table.insert(state.blockers, string.format("Not enough concentration: %d to start, you have %d.", full, current))
+        elseif affordable < crafts then
+            table.insert(state.notes, string.format("Concentration for %d of the %d crafts.", affordable, crafts))
+            crafts = affordable
+        end
+        state.points = crafts * expected
+    end
+
+    -- Materials: enough to start each craft (resourcefulness may give some
+    -- back along the way, so you may get further than this)
+    local missing = {}
+    for itemID, per in pairs(needs) do
+        local have = C_Item.GetItemCount(itemID, true, false, true, true) or 0
+        local possible = math.floor(have / per)
+        if possible == 0 then
+            table.insert(missing, string.format("%d %s", per - have, MaterialName(itemID)))
+        elseif possible < crafts then
+            table.insert(state.notes, string.format("Materials for %d crafts: %s runs out.", possible, MaterialName(itemID)))
+            crafts = possible
+        end
+    end
+    if #missing > 0 then
+        table.insert(state.blockers, "Missing for one craft: " .. table.concat(missing, ", ")
+            .. ". Send the shopping list to Auctionator.")
+    end
+
+    state.crafts = crafts
+    state.enabled = #state.blockers == 0 and crafts > 0
+    state.label = string.format("Craft %d", crafts)
+    return state
+end
+
 local function CreatePlanScreen(parent)
     local ui = GoldsmithDB.ui2
     ui.planQty = ui.planQty or {}
@@ -587,6 +691,52 @@ local function CreatePlanScreen(parent)
     end)
     screen.shop:SetPoint("BOTTOMRIGHT", -14, 12)
 
+    -- Craft (or open the profession first); see CraftState
+    screen.craft = UI.Button(summary, "Craft", 170, 28, function()
+        local state, p = screen.craftState, screen.plan
+        if not (state and state.enabled and p) then return end
+        if state.open then
+            if C_TradeSkillUI.OpenRecipe then
+                C_TradeSkillUI.OpenRecipe(p.recipe.recipeID)
+            else
+                print("|cFF00FF00[Goldsmith]|r Open " .. p.recipe.profession .. ", then click Craft.")
+            end
+            return
+        end
+        -- CraftRecipe(recipeID, count, reagents, recipeLevel, orderID, concentrate)
+        C_TradeSkillUI.CraftRecipe(p.recipe.recipeID, state.crafts, state.reagents, nil, nil, state.concentrate)
+    end)
+    screen.craft:SetPoint("BOTTOMRIGHT", screen.shop, "TOPRIGHT", 0, 8)
+    UI.Style(screen.craft, "highlight", "borderGold")
+    screen.craft.label:SetTextColor(addon:Color("gold"))
+    screen.craft:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderGold")) end)
+    UI.SetTooltip(screen.craft, function(tooltip)
+        local state = screen.craftState
+        if not state then return end
+        tooltip:AddLine(state.open and state.label or "Craft from Goldsmith", 1, 1, 1)
+        if state.reagents and #state.reagents > 0 then
+            tooltip:AddLine("Uses the plan's mix of material qualities:", 0.8, 0.8, 0.8)
+            for _, entry in ipairs(state.reagents) do
+                tooltip:AddDoubleLine("    " .. MaterialName(entry.reagent.itemID), entry.quantity .. " per craft",
+                    0.9, 0.9, 0.9, 1, 1, 1)
+            end
+        end
+        if state.concentrate and state.points then
+            local r, g, b = addon:Color("conc")
+            tooltip:AddLine(string.format("With concentration: about %d in all.", state.points), r, g, b, true)
+        end
+        for _, line in ipairs(state.notes) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
+        for _, line in ipairs(state.blockers) do tooltip:AddLine(line, 1, 0.6, 0.2, true) end
+    end, "ANCHOR_TOP")
+
+    local function SetCraftState(state)
+        screen.craftState = state
+        screen.craft:SetLabel(state and state.label or "Craft")
+        local enabled = state ~= nil and state.enabled == true
+        screen.craft:SetEnabled(enabled)
+        screen.craft:SetAlpha(enabled and 1 or 0.5)
+    end
+
     local function ClearSummary(message)
         for _, f in ipairs({ screen.cost, screen.sells, screen.profit }) do
             f.value:SetText("-")
@@ -598,6 +748,7 @@ local function CreatePlanScreen(parent)
         screen.vendorLine:SetText("")
         screen.shop:Disable()
         screen.shop:SetAlpha(0.5)
+        SetCraftState(nil)
     end
 
     function screen:Open(p, quantity)
@@ -721,6 +872,7 @@ local function CreatePlanScreen(parent)
 
         screen.shop:SetEnabled(#plan.buyAH > 0)
         screen.shop:SetAlpha(#plan.buyAH > 0 and 1 or 0.5)
+        SetCraftState(CraftState(p, tierInfo, plan))
     end
 
     return screen
@@ -1012,5 +1164,23 @@ local function Refresh(v, state)
 end
 
 addon:RegisterView("crafts", { create = Create, refresh = Refresh })
+
+-- Keep the planner's Craft button current while it's showing: the
+-- profession opening or closing, bags changing as you craft or buy,
+-- concentration being spent. A short wait lets the profession window
+-- finish opening, and groups bursts of bag updates.
+local craftEvents = CreateFrame("Frame")
+for _, event in ipairs({ "TRADE_SKILL_SHOW", "TRADE_SKILL_CLOSE", "BAG_UPDATE_DELAYED", "CURRENCY_DISPLAY_UPDATE" }) do
+    craftEvents:RegisterEvent(event)
+end
+local craftUpdatePending = false
+craftEvents:SetScript("OnEvent", function()
+    if craftUpdatePending or not (view and view.plan and view.plan:IsVisible() and view.plan.plan) then return end
+    craftUpdatePending = true
+    C_Timer.After(0.3, function()
+        craftUpdatePending = false
+        if view.plan:IsVisible() and view.plan.plan then view.plan:Update() end
+    end)
+end)
 
 _G.Goldsmith = addon
