@@ -5,7 +5,7 @@
 ## SavedVariables: GoldsmithDB
 ## OptionalDeps: Auctionator, TradeSkillMaster
 ## Version: 2.1
-## IconTexture: Interface\AddOns\Goldsmith\Media\Icon
+## IconTexture: Interface\AddOns\Goldsmith\Media\Logo
 ## AddonCompartmentFunc: Goldsmith_OnAddonCompartmentClick
 
 Core.lua
