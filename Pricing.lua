@@ -762,6 +762,18 @@ local CRAFT_LOG_SIZE = 100
 local currentCraftRecipeID = nil
 local currentEnchantTarget = nil   -- item ID of the vellum an enchant went on
 local currentCraftReagents = nil   -- the materials list the game was given (qualities used)
+local currentCraftIsOrder = false  -- crafting for a crafting order (patron or player)
+
+-- Whether a craft is for a crafting order: the game passes the order's ID
+-- to the craft, and reports the order you've claimed (checked against the
+-- recipe, in case you craft something else while holding one). Order
+-- crafts go to the customer, so they aren't stock or a cost of yours.
+local function IsOrderCraft(recipeID, orderID)
+    if type(orderID) == "number" and orderID > 0 then return true end
+    if not (C_CraftingOrders and C_CraftingOrders.GetClaimedOrder) then return false end
+    local ok, order = pcall(C_CraftingOrders.GetClaimedOrder)
+    return ok and type(order) == "table" and order.spellID == recipeID
+end
 
 -- Item ID of a material resourcefulness returned. The game nests it in a
 -- reagent table ({ reagent = { itemID = ... }, quantity = n }); older
@@ -851,7 +863,8 @@ local function OnCraftResult(resultData)
         end
     end
 
-    addon:RecordCraftLot(recipe, resultData, currentCraftReagents)
+    -- Order crafts still teach the proc sizes above; only the lot differs
+    addon:RecordCraftLot(recipe, resultData, currentCraftReagents, currentCraftIsOrder)
 end
 
 -- Crafted lots
@@ -864,8 +877,36 @@ end
 -- the last CRAFT_LOT_LIMIT crafts. Concentration isn't a gold cost, so it
 -- isn't included.
 local CRAFT_LOT_LIMIT = 30
+local ORDER_CRAFT_LIMIT = 100
 
-function addon:RecordCraftLot(recipe, resultData, usedReagents)
+-- Crafts for crafting orders go to GoldsmithDB.orderCrafts instead
+-- ({ time, qty, unitCost, partial, name, itemID }, the last
+-- ORDER_CRAFT_LIMIT): the item went to the customer, so it isn't stock and
+-- mustn't count toward what yours cost you. Kept for History.
+local function AddOrderCraft(lot)
+    table.insert(GoldsmithDB.orderCrafts, lot)
+    while #GoldsmithDB.orderCrafts > ORDER_CRAFT_LIMIT do
+        table.remove(GoldsmithDB.orderCrafts, 1)
+    end
+end
+
+-- Moves a craft recorded before orders were recognised to the order crafts
+-- (History's right-click "This was a crafting order")
+function addon:MarkCraftAsOrder(itemID, lot)
+    local lots = GoldsmithDB.craftLots[itemID] or {}
+    for i, l in ipairs(lots) do
+        if l == lot then
+            table.remove(lots, i)
+            if #lots == 0 then GoldsmithDB.craftLots[itemID] = nil end
+            lot.itemID = itemID
+            AddOrderCraft(lot)
+            break
+        end
+    end
+    if addon.Refresh then addon.Refresh() end
+end
+
+function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder)
     local made = resultData.quantity or 0
     if made <= 0 then return end
     -- Multicraft extras: the game reports them separately. If the quantity
@@ -924,12 +965,18 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents)
         end
     end
 
-    local lots = GoldsmithDB.craftLots[resultData.itemID] or {}
-    GoldsmithDB.craftLots[resultData.itemID] = lots
-    table.insert(lots, {
+    local lot = {
         time = time(), qty = made, unitCost = cost / made,
         partial = not complete, name = recipe.outputName,
-    })
+    }
+    if isOrder then
+        lot.itemID = resultData.itemID
+        AddOrderCraft(lot)
+        return
+    end
+    local lots = GoldsmithDB.craftLots[resultData.itemID] or {}
+    GoldsmithDB.craftLots[resultData.itemID] = lots
+    table.insert(lots, lot)
     while #lots > CRAFT_LOT_LIMIT do
         table.remove(lots, 1)
     end
@@ -1116,21 +1163,45 @@ end
 -- the craft cost for things you make, otherwise what you paid or milled.
 -- Returns cost per unit and whether it's partial (some material costs
 -- unknown), or nil if there's no cost data at all.
+-- Also returns where the cost came from: "free" (marked as loot or a
+-- reward), "crafted" (your crafts of it), "estimated" (the recipe at
+-- today's prices: you didn't craft these while Goldsmith was watching) or
+-- "paid" (what you paid or milled).
 function addon:GetUnitCostBasis(itemName, units)
+    if GoldsmithDB.freeItems and GoldsmithDB.freeItems[itemName] then
+        return 0, false, "free"
+    end
     -- Items you crafted: what your latest crafts actually cost
     local crafted, _, craftedPartial = addon:GetCraftedCostByName(itemName, units)
     if crafted then
-        return crafted, craftedPartial
+        return crafted, craftedPartial, "crafted"
     end
     local recipe = addon:FindRecipeByOutput(itemName)
     if recipe then
         local cost, missing = addon:GetRecipeCost(recipe)
-        return cost, #missing > 0
+        return cost, #missing > 0, "estimated"
     end
     local own = addon:GetOwnCost(itemName)
     if own then
-        return own, false
+        return own, false, "paid"
     end
+end
+
+-- Items you got for free (loot, quest and event rewards): selling them
+-- costs you nothing, so the whole sale is profit. Marking one also sets
+-- its sales recorded without a cost to 0; unmarking undoes that.
+function addon:SetFreeItem(itemName, free)
+    GoldsmithDB.freeItems[itemName] = free or nil
+    for _, e in ipairs(addon.ledger:getAll()) do
+        if e.type == "REVENUE" and e.item == itemName then
+            if free and not e.costBasis then
+                e.costBasis, e.costSource = 0, "free"
+            elseif not free and e.costSource == "free" then
+                e.costBasis, e.costSource = nil, nil
+            end
+        end
+    end
+    if addon.Refresh then addon.Refresh() end
 end
 
 function addon:FindRecipeByOutput(itemName)
@@ -1582,15 +1653,19 @@ function addon:InitializePricing()
 
     GoldsmithDB.craftLog = GoldsmithDB.craftLog or {}
     GoldsmithDB.craftLots = GoldsmithDB.craftLots or {}
+    GoldsmithDB.orderCrafts = GoldsmithDB.orderCrafts or {}
+    GoldsmithDB.freeItems = GoldsmithDB.freeItems or {}
     -- Recipes saved before recipeID was stored in them
     for recipeID, recipe in pairs(GoldsmithDB.recipes) do
         recipe.recipeID = recipeID
     end
 
-    hooksecurefunc(C_TradeSkillUI, "CraftRecipe", function(recipeID, _, craftingReagents)
+    -- CraftRecipe(recipeID, count, reagents, recipeLevel, orderID, concentrate)
+    hooksecurefunc(C_TradeSkillUI, "CraftRecipe", function(recipeID, _, craftingReagents, _, orderID)
         currentCraftRecipeID = recipeID
         currentEnchantTarget = nil
         currentCraftReagents = craftingReagents
+        currentCraftIsOrder = IsOrderCraft(recipeID, orderID)
         SaveRecipe(recipeID, false)
     end)
     hooksecurefunc(C_TradeSkillUI, "CraftSalvage", function()
@@ -1602,6 +1677,7 @@ function addon:InitializePricing()
         hooksecurefunc(C_TradeSkillUI, "CraftEnchant", function(recipeID, _, craftingReagents, itemTarget)
             currentCraftReagents = craftingReagents
             currentCraftRecipeID = recipeID
+            currentCraftIsOrder = IsOrderCraft(recipeID)
             currentEnchantTarget = itemTarget and C_Item.DoesItemExist(itemTarget)
                 and C_Item.GetItemID(itemTarget) or nil
             -- Enchanting gear doesn't make a scroll; only a vellum does

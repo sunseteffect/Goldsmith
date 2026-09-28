@@ -672,4 +672,121 @@ function addon:GetItemDetails(name, itemID)
     return d
 end
 
+-- History tab
+--
+-- Every sale, purchase and AH deposit from the ledger, plus crafts from the
+-- craft lots (the last 30 crafts of each item; they're kept for costs, so
+-- they can't be deleted here, and don't record who crafted them).
+-- filters: prof ("All" or one), since (a time or nil), kind ("Sale",
+-- "Purchase", "Deposit", "Craft" or nil for all), character ("Name-Realm"
+-- or nil), item (a name or nil).
+-- Crafts for crafting orders (GoldsmithDB.orderCrafts) are "Order" rows.
+-- Returns rows newest first: { kind, time, item, itemID, qty, gold (signed;
+-- nil for crafts), profit, costSource (sales: see GetUnitCostBasis, or
+-- "today" for today's estimate), profitEstimated, cost (crafts: per item),
+-- partial, profession, character (key), entry (the ledger entry), lot
+-- (crafts) }, and totals { gold in, gold out }.
+function addon:GetHistory(filters)
+    local rows, totals = {}, { goldIn = 0, goldOut = 0 }
+    local estimates = {}
+    local function Estimate(name)
+        if estimates[name] == nil then estimates[name] = addon:GetUnitCostBasis(name) or false end
+        return estimates[name] or nil
+    end
+    -- Sales saved before sales kept their cost's source: a crafted item
+    -- sold before Goldsmith saw you craft it had its cost estimated
+    local firstCraft, recipes = {}, {}
+    for _, lots in pairs(GoldsmithDB.craftLots) do
+        for _, lot in ipairs(lots) do
+            if lot.name then firstCraft[lot.name] = math.min(firstCraft[lot.name] or lot.time, lot.time) end
+        end
+    end
+    local function WasEstimated(e)
+        if recipes[e.item] == nil then recipes[e.item] = addon:FindRecipeByOutput(e.item) ~= nil end
+        return recipes[e.item] and not (firstCraft[e.item] and firstCraft[e.item] <= e.timestamp)
+    end
+    local function Keep(kind, t, item, profession, character)
+        return (not filters.kind or filters.kind == kind)
+            and (not filters.since or t >= filters.since)
+            and (not filters.item or filters.item == item)
+            and (filters.prof == "All" or profession == filters.prof)
+            and (not filters.character or filters.character == character)
+    end
+
+    for _, e in ipairs(addon.ledger:getAll()) do
+        local kind = e.type == "REVENUE" and "Sale" or (e.kind == "DEPOSIT" and "Deposit" or "Purchase")
+        local character = e.character and e.realm and (e.character .. "-" .. e.realm)
+        if Keep(kind, e.timestamp, e.item, e.profession, character) then
+            local row = {
+                kind = kind, time = e.timestamp, item = e.item, itemID = e.itemID, qty = e.quantity,
+                gold = kind == "Sale" and e.totalCopper or -e.totalCopper,
+                profession = e.profession, character = character, entry = e,
+            }
+            if kind == "Sale" then
+                local cost = e.costBasis
+                if cost then
+                    row.partial = e.costPartial
+                    row.costSource = e.costSource or (WasEstimated(e) and "estimated") or nil
+                else
+                    local unit = Estimate(e.item)
+                    cost = unit and unit * e.quantity
+                    row.costSource = cost and "today"
+                end
+                row.profitEstimated = row.costSource == "estimated" or row.costSource == "today"
+                row.cost = cost
+                row.profit = cost and (e.totalCopper - cost)
+                totals.goldIn = totals.goldIn + e.totalCopper
+            else
+                totals.goldOut = totals.goldOut + e.totalCopper
+            end
+            table.insert(rows, row)
+        end
+    end
+
+    -- Crafts have no character, so they only show for all characters
+    if not filters.character then
+        for itemID, lots in pairs(GoldsmithDB.craftLots) do
+            for _, lot in ipairs(lots) do
+                local recipe = lot.name and addon:FindRecipeByOutput(lot.name)
+                local profession = recipe and recipe.profession or addon:GetProfessionForItemName(lot.name or "")
+                if lot.name and Keep("Craft", lot.time, lot.name, profession, nil) then
+                    table.insert(rows, {
+                        kind = "Craft", time = lot.time, item = lot.name, itemID = itemID, qty = lot.qty,
+                        cost = lot.unitCost, partial = lot.partial, profession = profession, lot = lot,
+                    })
+                end
+            end
+        end
+        for _, lot in ipairs(GoldsmithDB.orderCrafts or {}) do
+            local recipe = lot.name and addon:FindRecipeByOutput(lot.name)
+            local profession = recipe and recipe.profession or addon:GetProfessionForItemName(lot.name or "")
+            if lot.name and Keep("Order", lot.time, lot.name, profession, nil) then
+                table.insert(rows, {
+                    kind = "Order", time = lot.time, item = lot.name, itemID = lot.itemID, qty = lot.qty,
+                    cost = lot.unitCost, partial = lot.partial, profession = profession, lot = lot,
+                })
+            end
+        end
+    end
+    table.sort(rows, function(a, b) return a.time > b.time end)
+    return rows, totals
+end
+
+-- Characters with ledger entries, for History's filter: { { key, name } }
+-- by name
+function addon:GetHistoryCharacters()
+    local seen, list = {}, {}
+    for _, e in ipairs(addon.ledger:getAll()) do
+        if e.character and e.realm then
+            local key = e.character .. "-" .. e.realm
+            if not seen[key] then
+                seen[key] = true
+                table.insert(list, { key = key, name = e.character })
+            end
+        end
+    end
+    table.sort(list, function(a, b) return a.name < b.name end)
+    return list
+end
+
 _G.Goldsmith = addon

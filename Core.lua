@@ -97,9 +97,10 @@ local function RecordSale(sale)
 
     -- Snapshot what the items cost you now, so the sale's profit doesn't
     -- shift later as material prices change
-    local unitCost, partial = addon:GetUnitCostBasis(sale.itemName, sale.count)
+    local unitCost, partial, costSource = addon:GetUnitCostBasis(sale.itemName, sale.count)
     local costBasis = unitCost and math.floor(unitCost * sale.count + 0.5)
-    addon.ledger:addRevenue(prof, sale.itemName, sale.count, sale.net, costBasis, partial, sale.depositRefund)
+    addon.ledger:addRevenue(prof, sale.itemName, sale.count, sale.net, costBasis, partial, sale.depositRefund,
+        costBasis and costSource)
 
     if prof == "Unassigned" then
         Print("Sold %s x%d for %.2fg after AH cut, incl. deposit refund (not a tracked item, saved as Unassigned)",
@@ -293,10 +294,15 @@ function addon:ProfessionIconText(prof)
 end
 
 -- Assign every entry for an item to a profession, now and in future.
+-- "Unassigned" takes it out of every profession.
 function addon:AssignItem(itemName, prof)
     GoldsmithDB.products[itemName] = prof
     addon:ReassignProfessions()
-    Print("%s is now tracked as %s.", itemName, prof)
+    if prof == "Unassigned" then
+        Print("%s is no longer counted under a profession.", itemName)
+    else
+        Print("%s is now tracked as %s.", itemName, prof)
+    end
 end
 
 -- Work out each entry's profession again from the current item lists.

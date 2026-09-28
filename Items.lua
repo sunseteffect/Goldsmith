@@ -381,8 +381,17 @@ local function CreatePage(parent)
         row.detail:SetPoint("RIGHT", row.gold, "LEFT", -6, 0)
         page.activityRows[i] = row
     end
-    page.more = UI.Text(activity, "label", "dim")
-    page.more:SetPoint("BOTTOMLEFT", 16, 12)
+    -- A link to this item's full history
+    page.moreButton = CreateFrame("Button", nil, activity)
+    page.moreButton:SetPoint("BOTTOMLEFT", 16, 10)
+    page.moreButton:SetSize(240, 16)
+    page.more = UI.Text(page.moreButton, "small", "gold")
+    page.more:SetPoint("LEFT")
+    page.moreButton:SetScript("OnClick", function()
+        if page.details then addon:OpenHistory({ item = page.details.name }) end
+    end)
+    page.moreButton:SetScript("OnEnter", function() page.more:SetTextColor(addon:Color("text")) end)
+    page.moreButton:SetScript("OnLeave", function() page.more:SetTextColor(addon:Color("gold")) end)
 
     function page:Fill()
         local d = addon:GetItemDetails(page.item.name, page.item.itemID)
@@ -596,7 +605,9 @@ local function CreatePage(parent)
             page.activityRows[1].detail:Show()
         end
         page.more:SetText(#d.activity > ACTIVITY_ROWS
-            and string.format("and %d older (see History)", #d.activity - ACTIVITY_ROWS) or "")
+            and string.format("and %d older: see all in History  >", #d.activity - ACTIVITY_ROWS)
+            or "See all in History  >")
+        page.moreButton:SetShown(#d.activity > 0)
     end
 
     return page

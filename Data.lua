@@ -69,10 +69,12 @@ function addon:CreateLedger(store)
         -- costBasis is what the sold items cost you (at sale time), if known;
         -- costPartial means some of their material costs were unknown
         -- depositRefund is the deposit returned inside this sale's amount
-        addRevenue = function(self, prof, item, qty, totalCopper, costBasis, costPartial, depositRefund)
+        -- costSource says where costBasis came from (see GetUnitCostBasis)
+        addRevenue = function(self, prof, item, qty, totalCopper, costBasis, costPartial, depositRefund, costSource)
             table.insert(entries, {
                 costBasis = costBasis,
                 costPartial = costPartial,
+                costSource = costSource,
                 depositRefund = depositRefund,
                 id = store.nextId,
                 type = "REVENUE",
