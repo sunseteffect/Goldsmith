@@ -363,6 +363,8 @@ function addon:Initialize()
     end
 
     GoldsmithDB.products = GoldsmithDB.products or {}
+    -- Left from v1's window; still holds the planner's Buy/Craft/Mill choices
+    GoldsmithDB.ui = GoldsmithDB.ui or {}
     LearnProfessionIcons()
     -- Profession data may not be ready this early in login; try again shortly
     C_Timer.After(5, function()
@@ -376,7 +378,6 @@ function addon:Initialize()
     addon:InitializeQuality()
 
     addon.ledger = addon:CreateLedger(GoldsmithDB)
-    addon:CreateMainFrame()
     addon:CreateWindow()
     addon:ReassignProfessions()
 
@@ -430,16 +431,15 @@ end
 local function PrintHelp()
     Print("Commands:")
     print("  /gsm - show or hide the window")
-    print("  /gsm old - show or hide the v1 window (until v2 is finished)")
     print("  /gsm add [item] - track a crafted item (shift-click it or type its name)")
     print("  /gsm remove [item] - stop tracking a crafted item")
     print("  /gsm list - show tracked crafted items")
     print("  /gsm recipes - show saved recipes and their material cost")
     print("  /gsm milling - show your milling yields and pigment costs")
     print("  /gsm chars - list your characters, professions and concentration")
-    print("  /gsm data - check the numbers behind the new window")
+    print("  /gsm data - check the numbers behind the window")
     print("  /gsm reset - delete all transactions")
-    print("  Right-click a row in the log to delete that entry.")
+    print("  Right-click an entry on the History tab to delete it.")
 end
 
 SLASH_GOLDSMITH1 = "/goldsmith"
@@ -474,25 +474,12 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:ListCharacters()
     elseif cmd == "data" then
         addon:ListData()
-    elseif cmd == "old" then
-        addon:ToggleMainFrame()
     elseif cmd == "stats" then
         addon:DumpCraftingStats()
     elseif cmd == "reset" then
         StaticPopup_Show("GOLDSMITH_RESET")
     else
         PrintHelp()
-    end
-end
-
-function addon:ToggleMainFrame()
-    if not addon.mainFrame then return end
-    if addon.mainFrame:IsShown() then
-        addon.mainFrame:Hide()
-    else
-        -- Shown first: addon.Refresh only refreshes the v1 window while it's open
-        addon.mainFrame:Show()
-        addon.Refresh()
     end
 end
 

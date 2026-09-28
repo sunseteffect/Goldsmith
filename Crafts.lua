@@ -43,9 +43,10 @@ local CONC_COLUMNS = {
     { key = "saleRate", label = "Sale rate", width = 64, justify = "RIGHT" },
 }
 
+-- The tier goes before the name, so a long name cut short never hides it
 local function ItemText(item)
-    local tier = item.tier and (" " .. addon:TierIconText(item.tier, item.info.tierCount)) or ""
-    return addon:ProfessionIconText(item.recipe.profession) .. item.recipe.outputName .. tier
+    local tier = item.tier and (addon:TierIconText(item.tier, item.info.tierCount) .. " ") or ""
+    return addon:ProfessionIconText(item.recipe.profession) .. tier .. item.recipe.outputName
 end
 
 local function CharName(charKey)
@@ -71,11 +72,12 @@ local function SetExpansionShown(expansionID, shown)
 end
 
 -- Expansions with at least one saved (sellable) recipe, newest first; the
--- current expansion is always offered
+-- current expansion is always offered. By the recipe's expansion, not the
+-- item's (see GetRecipeExpansion).
 local function GetRecipeExpansions()
     local seen, list = {}, {}
     for _, recipe in pairs(GoldsmithDB.recipes) do
-        local expansionID = addon:GetItemExpansion(recipe.outputItemID)
+        local expansionID = addon:GetRecipeExpansion(recipe)
         if expansionID and not seen[expansionID] and addon:CanAuction(recipe.outputItemID) ~= false then
             seen[expansionID] = true
             table.insert(list, expansionID)
@@ -211,7 +213,8 @@ local function Note(tooltip, text, colorName)
 end
 
 local function StatsText(stats)
-    if not stats then return "Base recipe numbers. Open the profession to use your stats." end
+    -- Recipes from before Dragonflight have no crafting stats at all
+    if not stats then return "Base recipe numbers: older recipes have no multicraft or resourcefulness. For newer ones, open the profession." end
     local parts = {}
     if stats.multicraft > 0 then table.insert(parts, string.format("multicraft %.1f%%", stats.multicraft)) end
     if stats.resourcefulness > 0 then table.insert(parts, string.format("resourcefulness %.1f%%", stats.resourcefulness)) end
@@ -230,11 +233,18 @@ local function CraftTooltip(tooltip, item)
     end
 
     tooltip:AddLine(" ")
-    Line(tooltip, "Cost (estimated)", Money(info.cost) .. (info.partial and "+" or ""), "gold")
     local stats = GoldsmithDB.characters[item.charKey] and GoldsmithDB.characters[item.charKey].recipeStats[recipe.recipeID]
-    Note(tooltip, StatsText(stats))
-    local worst = addon:WithCharacter(item.charKey, addon.GetWorstCaseCost, addon, recipe, info)
-    if worst then Line(tooltip, "Worst case (no procs)", Money(worst)) end
+    if info.costMode == "worst" then
+        -- "Show cost as: Worst case" (Settings)
+        Line(tooltip, "Cost (worst case, no procs)", Money(info.cost) .. (info.partial and "+" or ""), "gold")
+        Line(tooltip, "Estimated", Money(info.estimatedCost))
+        Note(tooltip, StatsText(stats))
+    else
+        Line(tooltip, "Cost (estimated)", Money(info.cost) .. (info.partial and "+" or ""), "gold")
+        Note(tooltip, StatsText(stats))
+        local worst = addon:WithCharacter(item.charKey, addon.GetWorstCaseCost, addon, recipe, info)
+        if worst then Line(tooltip, "Worst case (no procs)", Money(worst)) end
+    end
     local yours = item.itemID and addon:GetCraftedCost(item.itemID)
     Line(tooltip, "Your latest crafts cost you", yours and Money(yours) or "not crafted yet")
     Line(tooltip, "Break-even AH price", Money(info.cost / (1 - AH_CUT)))
@@ -306,8 +316,8 @@ end
 local function FillPlanRow(row, node)
     local cells = row.cells
     local indent = string.rep("    ", node.depth - 1) .. (node.depth > 1 and "> " or "")
-    local quality = node.qualityTier and (" " .. addon:TierIconText(node.qualityTier, node.tierCount or 2)) or ""
-    cells.item:SetText(indent .. node.name .. quality)
+    local quality = node.qualityTier and (addon:TierIconText(node.qualityTier, node.tierCount or 2) .. " ") or ""
+    cells.item:SetText(indent .. quality .. node.name)
     cells.need:SetText(Whole(node.need))
     cells.have:SetText(node.have > 0 and Whole(node.have) or "-")
     if node.have <= 0 then cells.have:SetTextColor(addon:Color("dim")) end
@@ -606,8 +616,8 @@ local function CreatePlanScreen(parent)
 
         local tierInfo, tierNote = addon:WithCharacter(p.charKey, FindTierInfo, p)
         screen.tierItemID = tierInfo and tierInfo.itemID or recipe.outputItemID
-        local tierIcon = tierInfo and (" " .. addon:TierIconText(tierInfo.tier, tierInfo.tierCount)) or ""
-        screen.title:SetText(addon:ProfessionIconText(recipe.profession) .. recipe.outputName .. tierIcon)
+        local tierIcon = tierInfo and (addon:TierIconText(tierInfo.tier, tierInfo.tierCount) .. " ") or ""
+        screen.title:SetText(addon:ProfessionIconText(recipe.profession) .. tierIcon .. recipe.outputName)
         -- The checkbox shows the way actually planned (a tier may need
         -- concentration, or not benefit from it)
         local concentrating = tierInfo and tierInfo.concentrate == true
@@ -764,9 +774,9 @@ local function CreateBudget(parent)
         bar.target = best
         if best then
             local first = best.plan[1]
-            local tier = first.row.tier and (" " .. addon:TierIconText(first.row.tier, first.tierCount)) or ""
+            local tier = first.row.tier and (addon:TierIconText(first.row.tier, first.tierCount) .. " ") or ""
             local who = best.key ~= addon.charKey and (" on " .. best.name) or ""
-            bar.best:SetText(string.format("Best use: %dx %s%s%s  %s", first.crafts, first.recipe.outputName, tier, who,
+            bar.best:SetText(string.format("Best use: %dx %s%s%s  %s", first.crafts, tier, first.recipe.outputName, who,
                 addon:Colorize(Signed(first.gain) .. " extra", "profit")))
             bar.best:SetTextColor(addon:Color("text"))
         else
@@ -790,8 +800,8 @@ local function CreateBudget(parent)
             Line(tooltip, string.format("%s - %s%s", row.name, addon:ProfessionIconText(row.profession), row.profession),
                 string.format("%d / %d", row.current, row.max), "conc")
             for _, p in ipairs(row.plan or {}) do
-                local tier = p.row.tier and (" " .. addon:TierIconText(p.row.tier, p.tierCount)) or ""
-                Line(tooltip, string.format("    %dx %s%s", p.crafts, p.recipe.outputName, tier),
+                local tier = p.row.tier and (addon:TierIconText(p.row.tier, p.tierCount) .. " ") or ""
+                Line(tooltip, string.format("    %dx %s%s", p.crafts, tier, p.recipe.outputName),
                     string.format("%d conc, %s", p.points, Signed(p.gain)), "profit")
                 if p.row.description then Note(tooltip, "        " .. p.row.description) end
             end
@@ -875,7 +885,11 @@ local function Create(parent)
     end)
     Explain(view.profitable, function(tooltip)
         tooltip:AddLine("Profitable only", 1, 1, 1)
-        Note(tooltip, "Hides crafts that lose gold at current AH prices, and ones with no AH price yet.")
+        local minROI = addon:Setting("minROI")
+        Note(tooltip, minROI > 0
+            and string.format("Shows only crafts with an ROI of at least %d%% at current AH prices. Hides the rest, and crafts with no AH price yet.", minROI)
+            or "Hides crafts that lose gold at current AH prices, and ones with no AH price yet.")
+        Note(tooltip, "Change the ROI under Settings: Worth crafting at.")
     end)
     view.count = UI.Text(list, "label", "dim", "RIGHT")
     view.count:SetPoint("RIGHT", view.concSwitch, "LEFT", -12, 0)
@@ -942,6 +956,9 @@ local function Refresh(v, state)
     end
 
     local concOn = ui.craftsConcentration == true
+    -- The Cost column says which cost it shows (Settings: Show cost as)
+    local costLabel = addon:Setting("costMode") == "worst" and "Worst cost" or "Cost"
+    SIMPLE_COLUMNS[2].label, CONC_COLUMNS[2].label = costLabel, costLabel
     v.concSwitch:SetOn(concOn)
     v.profitable:SetChecked(ui.profitableOnly == true)
     v.expansion:SetLabel(ExpansionLabel())

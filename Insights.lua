@@ -8,7 +8,8 @@ local addon = _G.Goldsmith or {}
 -- your characters, using each character's own stats.
 
 local HELD_TOO_LONG_DAYS = 7
-local MIN_MARGIN = 15          -- % margin for a craft to count as worth doing
+local AH_CUT = 0.05
+-- The ROI a craft needs to count as worth doing is a setting (minROI)
 local MIN_DEMAND = 1           -- sold per day
 local ENOUGH_STOCK_CAP = 20    -- see GetBestCrafts
 
@@ -194,6 +195,25 @@ function addon:CraftKey(recipeID, row)
     return string.format("%d:%d:%s", recipeID, row.tier or 0, row.concentrate and "c" or "")
 end
 
+-- The "Show cost as" setting (Settings.lua). With "worst", a copy of a
+-- Crafts row with cost, profit and ROI worked out from the worst case (no
+-- procs), keeping the estimate as estimatedCost. Rows are shared (tier
+-- rows are cached per frame), so they're copied, never changed. Call it
+-- with the crafter's stats in use (WithCharacter).
+local function ApplyCostMode(recipe, row)
+    if not row or addon:Setting("costMode") ~= "worst" then return row end
+    local worst = addon:GetWorstCaseCost(recipe, row)
+    if not worst then return row end
+    local copy = {}
+    for k, v in pairs(row) do copy[k] = v end
+    copy.estimatedCost, copy.cost, copy.costMode = row.cost, worst, "worst"
+    if row.price then
+        copy.profit = row.price * (1 - AH_CUT) - worst
+        copy.margin = worst > 0 and (copy.profit / worst * 100) or nil
+    end
+    return copy
+end
+
 -- The best way to make a recipe without concentration: its most
 -- profitable tier, or its single row for crafts without tiers
 local function BestPlainRow(recipe)
@@ -211,8 +231,9 @@ local function BestPlainRow(recipe)
 end
 
 -- The most profitable crafts right now, across professions and characters:
--- a profit of at least MIN_MARGIN %, worth recommending (IsRecommendable),
--- with all material costs known. Most profit per item first.
+-- an ROI of at least the "Worth crafting at" setting, worth recommending
+-- (IsRecommendable), with all material costs known. Most profit per item
+-- first. Costs follow the "Show cost as" setting.
 --
 -- A craft drops off the list once you hold about a day's sales of it
 -- (capped at ENOUGH_STOCK_CAP), and comes back once those sell.
@@ -224,9 +245,11 @@ function addon:GetBestCrafts(prof, count)
         if (prof == "All" or recipe.profession == prof) and addon:CanAuction(recipe.outputItemID) ~= false then
             local charKey = CrafterFor(recipeID)
             if charKey then
-                local row = addon:WithCharacter(charKey, BestPlainRow, recipe)
+                local row = addon:WithCharacter(charKey, function()
+                    return ApplyCostMode(recipe, BestPlainRow(recipe))
+                end)
                 if row and row.profit and row.profit > 0 and not row.partial
-                    and (row.margin or 0) >= MIN_MARGIN and IsRecommendable(recipe, row) then
+                    and (row.margin or 0) >= addon:Setting("minROI") and IsRecommendable(recipe, row) then
                     local itemID = row.itemID or recipe.outputItemID
                     local have = itemID and addon:GetStock(itemID) or 0
                     local enough = math.min(math.max(math.ceil(row.demand or 1), 1), ENOUGH_STOCK_CAP)
@@ -253,8 +276,10 @@ end
 -- not in the game's cache yet are shown until their bind type loads.
 -- opts:
 --   concentration  - include the ways that use concentration
---   profitableOnly - only rows with a profit at current prices (including
+--   profitableOnly - only rows with a profit at current prices and an ROI
+--                    of at least the "Worth crafting at" setting (including
 --                    ones with unknown costs, whose profit is at most that)
+-- Costs follow the "Show cost as" setting.
 --   showExpansion  - function(expansionID) -> whether to include it
 -- Returns { { key, recipe, info (the tier row or GetRecipeProfit), tier,
 -- charKey, itemID, whyNot (see WhyNotRecommended) } }, unsorted.
@@ -263,16 +288,23 @@ function addon:GetCraftRows(prof, opts)
     for recipeID, recipe in pairs(GoldsmithDB.recipes) do
         if (prof == "All" or recipe.profession == prof)
             and addon:CanAuction(recipe.outputItemID) ~= false
-            and (not opts.showExpansion or opts.showExpansion(addon:GetItemExpansion(recipe.outputItemID))) then
+            and (not opts.showExpansion or opts.showExpansion(addon:GetRecipeExpansion(recipe))) then
             local charKey = CrafterFor(recipeID) or addon.charKey
             local rows = addon:WithCharacter(charKey, function()
                 local tierRows = addon:GetTierRows(recipe)
-                if tierRows and #tierRows > 0 then return tierRows end
-                return { addon:GetRecipeProfit(recipe) }
+                if not tierRows or #tierRows == 0 then tierRows = { addon:GetRecipeProfit(recipe) } end
+                local shown = {}
+                for _, row in ipairs(tierRows) do
+                    if opts.concentration or not row.concentrate then
+                        table.insert(shown, ApplyCostMode(recipe, row))
+                    end
+                end
+                return shown
             end)
+            local minROI = addon:Setting("minROI")
             for _, info in ipairs(rows) do
-                if (opts.concentration or not info.concentrate)
-                    and (not opts.profitableOnly or (info.profit and info.profit > 0)) then
+                if not opts.profitableOnly
+                    or (info.profit and info.profit > 0 and (not info.margin or info.margin >= minROI)) then
                     table.insert(list, {
                         key = addon:CraftKey(recipeID, info),
                         recipe = recipe, info = info, tier = info.tier, charKey = charKey,
@@ -353,7 +385,6 @@ end
 -- worked out per item name. Prices, stock and costs are per item (each
 -- quality tier is its own item); an item page can switch between tiers.
 
-local AH_CUT = 0.05
 local BOARD_SIZE = 6
 local MIN_SALES_FOR_ROI = 2    -- sales before an item's ROI is ranked
 local PRICE_DAYS = 30
@@ -645,8 +676,11 @@ function addon:GetItemDetails(name, itemID)
     if not recipe or d.material then
         d.paid, d.paidSource = addon:GetOwnCost(name)
     end
-    local basis = d.yours or d.paid or d.estimated
-    d.breakEvenFrom = (d.yours and "yours") or (d.paid and "paid") or (d.estimated and "estimated")
+    -- Not crafted yet: the cost the "Show cost as" setting picks
+    local worstMode = addon:Setting("costMode") == "worst" and d.worst
+    local basis = d.yours or d.paid or (worstMode and d.worst) or d.estimated
+    d.breakEvenFrom = (d.yours and "yours") or (d.paid and "paid") or (worstMode and "worst")
+        or (d.estimated and "estimated")
     d.breakEven = basis and basis / (1 - AH_CUT)
 
     local sold = SalesByItem("All")[name]

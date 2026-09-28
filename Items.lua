@@ -24,9 +24,10 @@ local TIER_ROWS = 5
 
 local Money, Signed = function(c) return addon:FormatMoney(c) end, function(c) return addon:FormatSignedMoney(c) end
 
+-- The tier goes before the name, so a long name cut short never hides it
 local function ItemText(name, itemID)
     local tier, tierCount = addon:GetItemTier(itemID)
-    return (name or "?") .. (tier and (" " .. addon:TierIconText(tier, tierCount)) or "")
+    return (tier and (addon:TierIconText(tier, tierCount) .. " ") or "") .. (name or "?")
 end
 
 local function DaysSince(t)
@@ -242,7 +243,8 @@ local function CostRow(parent, top)
 end
 
 local function StatsText(stats)
-    if not stats then return "Base recipe numbers. Open the profession to use your stats." end
+    -- Recipes from before Dragonflight have no crafting stats at all
+    if not stats then return "Base recipe numbers: older recipes have no multicraft or resourcefulness. For newer ones, open the profession." end
     local parts = {}
     if stats.multicraft > 0 then table.insert(parts, string.format("multicraft %.1f%%", stats.multicraft)) end
     if stats.resourcefulness > 0 then table.insert(parts, string.format("resourcefulness %.1f%%", stats.resourcefulness)) end
@@ -479,7 +481,8 @@ local function CreatePage(parent)
             end
         end
 
-        local fromText = { yours = "what yours cost you", paid = "what you paid", estimated = "the estimated cost" }
+        local fromText = { yours = "what yours cost you", paid = "what you paid", estimated = "the estimated cost",
+            worst = "the worst-case cost (see Settings)" }
         if d.breakEven then
             local selling = d.price and d.price * 0.95 - (d.breakEven * 0.95)
             t[5]:Set("Break-even", Money(d.breakEven), "gold", "list above this")

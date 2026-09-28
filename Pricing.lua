@@ -195,7 +195,12 @@ end
 function addon:GetAHPriceInfo(itemID)
     if not itemID then return nil end
 
-    local book = GetFreshOrderBook(itemID)
+    -- The price source setting: "auto" (above), "auctionator" (its last
+    -- scan, however old, TSM only without one) or "tsm" (TSM, Auctionator
+    -- only without it; live searches ignored)
+    local preferred = addon:Setting("priceSource")
+
+    local book = preferred ~= "tsm" and GetFreshOrderBook(itemID)
     if book then
         return GetRobustBookPrice(book), "Live", nil
     end
@@ -203,7 +208,9 @@ function addon:GetAHPriceInfo(itemID)
     local auctionator = addon:GetAuctionatorPrice(itemID)
     local age = auctionator and GetAuctionatorAge(itemID)
     local price, source
-    if auctionator and age == 0 and addon:ScannedThisSession() then
+    local useAuctionator = auctionator and (preferred == "auctionator"
+        or (preferred ~= "tsm" and age == 0 and addon:ScannedThisSession()))
+    if useAuctionator then
         price, source = auctionator, "Auctionator"
     else
         local tsm = GetTSMValue("DBMinBuyout", itemID)
@@ -424,6 +431,43 @@ function addon:GetCurrentExpansion()
     return (GetServerExpansionLevel and GetServerExpansionLevel()) or GetExpansionLevel()
 end
 
+-- The expansion a recipe comes from, from its skill line ("Classic
+-- Inscription", "Midnight Inscription"), saved as recipe.skillLine while
+-- the profession window is open. The item a recipe makes isn't reliable:
+-- Enchanting Vellum is made by a Classic recipe but is a Midnight item
+-- (Midnight enchants go on it). Before the skill line is known, the item's
+-- expansion is used. Older skill lines are named by region, not expansion.
+local SKILL_LINE_EXPANSIONS = {
+    { "Classic", 0 }, { "Outland", 1 }, { "Northrend", 2 }, { "Cataclysm", 3 },
+    { "Pandaria", 4 }, { "Draenor", 5 }, { "Legion", 6 }, { "Kul Tiran", 7 },
+    { "Zandalari", 7 }, { "Shadowlands", 8 }, { "Dragon Isles", 9 }, { "Khaz Algar", 10 },
+}
+
+function addon:RecordRecipeSkillLine(recipeID)
+    local recipe = GoldsmithDB.recipes[recipeID]
+    if not recipe or recipe.skillLine or not C_TradeSkillUI.GetTradeSkillLineForRecipe then return end
+    -- Returns skillLineID, skillLineName, parentSkillLineID, parentSkillLineName
+    local ok, _, name = pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe, recipeID)
+    if ok and type(name) == "string" and name ~= "" then
+        recipe.skillLine = name
+    end
+end
+
+function addon:GetRecipeExpansion(recipe)
+    local line = recipe.skillLine
+    if line then
+        for _, e in ipairs(SKILL_LINE_EXPANSIONS) do
+            if line:find(e[1], 1, true) == 1 then return e[2] end
+        end
+        -- Newer skill lines start with the expansion's name ("Midnight")
+        for id = addon:GetCurrentExpansion(), 0, -1 do
+            local name = _G["EXPANSION_NAME" .. id]
+            if name and line:find(name, 1, true) == 1 then return id end
+        end
+    end
+    return addon:GetItemExpansion(recipe.outputItemID)
+end
+
 -- Whether an item can be listed on the AH, from its bind type. Bind on
 -- pickup, quest items and account/warband-bound items can't be. Returns nil
 -- if the item isn't in the game's cache yet (it's requested for next time).
@@ -583,13 +627,14 @@ local function SaveRecipe(recipeID, quiet, attempt, profession)
         reagents = reagents,
     }
     GoldsmithDB.products[outputName] = GoldsmithDB.products[outputName] or profession
+    addon:RecordRecipeSkillLine(recipeID)
     addon:RefreshRecipeStats(recipeID)
 
     if isNew and not quiet then
         Print("Saved recipe: %s", outputName)
     end
-    if isNew and addon.RefreshCrafts then
-        addon.RefreshCrafts()
+    if isNew and addon.Refresh then
+        addon.Refresh()
     end
 end
 
@@ -684,7 +729,7 @@ function addon:RefreshRecipeStats(recipeID)
         if recipe and recipe.profession then
             GoldsmithDB.concentrationCurrency = GoldsmithDB.concentrationCurrency or {}
             local known = GoldsmithDB.concentrationCurrency[recipe.profession]
-            local isCurrent = addon:GetItemExpansion(recipe.outputItemID) == addon:GetCurrentExpansion()
+            local isCurrent = addon:GetRecipeExpansion(recipe) == addon:GetCurrentExpansion()
             if isCurrent or not known or known == 0 then
                 GoldsmithDB.concentrationCurrency[recipe.profession] = currencyID
             end
@@ -1352,7 +1397,7 @@ function addon:AddRecipeTooltipLines(tooltip, recipe, itemID, showBreakdown)
             #parts > 0 and table.concat(parts, ", ") or "no multicraft or resourcefulness",
             outputPerCraft), 0.6, 0.6, 0.6)
     else
-        tooltip:AddLine("  Base recipe numbers - open the profession to use your stats", 0.6, 0.6, 0.6)
+        tooltip:AddLine("  Base recipe numbers (older recipes have no multicraft or resourcefulness)", 0.6, 0.6, 0.6)
     end
 
     if showBreakdown then
@@ -1377,7 +1422,8 @@ end
 -- When the profession window opens (or switches expansion), every learned
 -- recipe that isn't saved yet gets saved, so older-expansion crafts you sell
 -- are recognised without clicking each one. Saves run in small batches to
--- avoid a hitch, and each recipe is only tried once per session.
+-- avoid a hitch, and each recipe is only tried once per session. Stats
+-- (and tier mixes) are read again each time a profession window opens.
 local SCAN_BATCH = 20
 local FRAME_BUDGET_MS = 5
 local scanTimer = nil
@@ -1399,7 +1445,8 @@ local function ScanLearnedRecipes()
     if not ok or not ids then return end
 
     -- New learned recipes to save, and saved ones whose stats haven't been
-    -- read this session (stats change with gear, specialization and skill)
+    -- read since the window opened (stats change with gear, specialization
+    -- and skill)
     -- Each recipe this character has learned is marked as known by it;
     -- stats are only read for those (they're this character's stats).
     local toSave, toStats = {}, {}
@@ -1412,6 +1459,9 @@ local function ScanLearnedRecipes()
             end
             if GoldsmithDB.recipes[id] then
                 statsReadThisSession[id] = true
+                -- Recipes saved before skill lines were kept (for the
+                -- expansion filter)
+                addon:RecordRecipeSkillLine(id)
                 if learned then
                     table.insert(toStats, id)
                 end
@@ -1697,6 +1747,9 @@ function addon:InitializePricing()
         if event == "TRADE_SKILL_ITEM_CRAFTED_RESULT" then
             OnCraftResult(resultData)
         else
+            -- Stats change with knowledge points, gear and skill, so they're
+            -- read again every time a profession window opens
+            if event == "TRADE_SKILL_SHOW" then wipe(statsReadThisSession) end
             QueueRecipeScan()
         end
     end)

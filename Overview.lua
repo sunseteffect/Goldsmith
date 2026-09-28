@@ -49,9 +49,10 @@ local function OnWho(charKey)
     return " on " .. (c and c.name or charKey)
 end
 
+-- The tier goes before the name, so a long name cut short never hides it
 local function ItemText(itemID, name, tier, tierCount)
-    local icon = tier and tierCount and addon:TierIconText(tier, tierCount) or ""
-    return (name or C_Item.GetItemNameByID(itemID) or "?") .. icon
+    local icon = tier and tierCount and (addon:TierIconText(tier, tierCount) .. " ") or ""
+    return icon .. (name or C_Item.GetItemNameByID(itemID) or "?")
 end
 
 -- Tiles
@@ -202,7 +203,8 @@ local function CraftsAction(crafts, prof)
         detail = table.concat(parts, "\n"),
         tooltip = function(tooltip)
             tooltip:AddLine("Best crafts right now", 1, 1, 1)
-            tooltip:AddLine("Current-expansion items with a 15%+ ROI (profit as a share of cost) that sell at least once a day, with no unknown costs. A craft drops off once you hold about a day's sales of it.", 0.6, 0.6, 0.6, true)
+            tooltip:AddLine(string.format("Current-expansion items with a %d%%+ ROI (profit as a share of cost; see Settings) that sell at least once a day, with no unknown costs. A craft drops off once you hold about a day's sales of it.",
+                addon:Setting("minROI")), 0.6, 0.6, 0.6, true)
             for _, c in ipairs(crafts) do
                 tooltip:AddLine(" ")
                 tooltip:AddLine(ItemText(c.itemID, c.recipe.outputName, c.row.tier, c.row.tierCount)

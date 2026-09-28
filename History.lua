@@ -43,10 +43,11 @@ local COLUMNS = {
     { key = "profit", label = "Profit", width = 96, justify = "RIGHT" },
 }
 
+-- The tier goes before the name, so a long name cut short never hides it
 local function ItemText(row)
     local tier, tierCount = addon:GetItemTier(row.itemID)
-    return addon:ProfessionIconText(row.profession) .. (row.item or "?")
-        .. (tier and (" " .. addon:TierIconText(tier, tierCount)) or "")
+    return addon:ProfessionIconText(row.profession)
+        .. (tier and (addon:TierIconText(tier, tierCount) .. " ") or "") .. (row.item or "?")
 end
 
 local function FillRow(r, row)
