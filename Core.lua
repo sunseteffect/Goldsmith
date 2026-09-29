@@ -111,6 +111,7 @@ local function RecordSale(sale)
     local costBasis = unitCost and math.floor(unitCost * sale.count + 0.5)
     addon.ledger:addRevenue(prof, sale.itemName, sale.count, sale.net, costBasis, partial, sale.depositRefund,
         costBasis and costSource)
+    addon:AuctionSold(sale.itemName, sale.count)
 
     if prof == "Unassigned" then
         addon:Notify("money", "Sold %s x%d for %.2fg after AH cut, incl. deposit refund (not a tracked item, saved as Unassigned)",
@@ -378,6 +379,8 @@ function addon:Initialize()
     end
 
     GoldsmithDB.products = GoldsmithDB.products or {}
+    -- A temporary plan log from testing the Characters tab
+    GoldsmithDB.debugPlans = nil
     -- Left from v1's window; still holds the planner's Buy/Craft/Mill choices
     GoldsmithDB.ui = GoldsmithDB.ui or {}
     LearnProfessionIcons()

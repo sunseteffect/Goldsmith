@@ -89,7 +89,21 @@ end
 -- Returns { value, items = { { itemID, name, count, unitValue, value,
 -- crafted, heldSince, byCharacter } } (most valuable first),
 -- heldLong = crafted items held the heldDays setting or more, heldLongValue }.
+-- Cached until data changes, per profession and which characters count.
+local stockCache = addon:NewCache()
+local StockValue
+
 function addon:GetStockValue(prof)
+    local excluded = {}
+    for key in pairs(addon:Setting("excluded") or {}) do table.insert(excluded, key) end
+    table.sort(excluded)
+    local id = prof .. "|" .. table.concat(excluded, ",")
+    local store = stockCache:Get()
+    store[id] = store[id] or StockValue(prof)
+    return store[id]
+end
+
+StockValue = function(prof)
     local outputs = GetOutputRecipes()
     local materials = addon:GetTrackedMaterials()
     local ids = {}
@@ -141,6 +155,24 @@ end
 -- PlanConcentration), using that character's stats.
 -- Returns { current, max, gain, rows = { { key, name, profession, current,
 -- max, minutesToFull, updated, plan, used, gain } } (most gain first) }.
+--
+-- Plans are cached until data changes, per character, profession and
+-- amount of concentration (which only goes up a point every few minutes).
+local planCache = addon:NewCache()
+
+local function CachedPlan(key, profession, current)
+    local store = planCache:Get()
+    local id = string.format("%s:%s:%d", key, profession, current)
+    local cached = store[id]
+    if not cached then
+        local plan, used, gain = addon:WithCharacter(key, addon.PlanConcentration, addon,
+            profession, current, IsRecommendable)
+        cached = { plan = plan, used = used, gain = gain }
+        store[id] = cached
+    end
+    return cached.plan, cached.used, cached.gain
+end
+
 function addon:GetConcentrationOverview(prof)
     local result = { current = 0, max = 0, gain = 0, rows = {} }
     for _, entry in ipairs(addon:GetCharacters()) do
@@ -157,8 +189,7 @@ function addon:GetConcentrationOverview(prof)
                     current, max, minutesToFull, updated = addon:GetCharacterConcentration(entry.key, profession)
                 end
                 if current and max and max > 0 then
-                    local plan, used, gain = addon:WithCharacter(entry.key,
-                        addon.PlanConcentration, addon, profession, current, IsRecommendable)
+                    local plan, used, gain = CachedPlan(entry.key, profession, math.floor(current))
                     table.insert(result.rows, {
                         key = entry.key, name = entry.data.name, profession = profession,
                         current = current, max = max, minutesToFull = minutesToFull, updated = updated,
@@ -179,8 +210,9 @@ function addon:GetConcentrationOverview(prof)
     return result
 end
 
--- Characters who know a recipe: you first, then by name. Characters left
--- out in Settings only count when nobody else knows it.
+-- Characters who know a recipe: you first, then by name. Excluded
+-- characters only count when nobody else knows it (for item tooltips and
+-- pages); the Crafts tab and recommendations leave those recipes out.
 function addon:GetCrafters(recipeID)
     local included, excluded = {}, {}
     for key, c in pairs(GoldsmithDB.characters) do
@@ -240,10 +272,29 @@ end
 
 -- Who makes a recipe best without concentration: of the characters who
 -- know it, the one whose stats give the most profit (or, with no AH price,
--- the lowest cost). Ties go to you, then by name. Worked out once per frame.
+-- the lowest cost). Ties go to you, then by name. Each character's row is
+-- cached until data changes; who's excluded is applied on top, so
+-- excluding a character needs no new work.
 -- Returns the crafter's key and { [charKey] = best plain row } for each
--- character who knows it, or nil if nobody does.
-local crafterCache, crafterFrame = {}, nil
+-- character who could make it, or nil if nobody does.
+local plainRowCache = addon:NewCache()
+
+-- A character's best plain row for a recipe, with the "Show cost as"
+-- setting applied, and items made per craft
+local function PlainRowFor(charKey, recipe)
+    local store = plainRowCache:Get()
+    local key = charKey .. ":" .. recipe.recipeID
+    local cached = store[key]
+    if not cached then
+        local row, outputPerCraft = addon:WithCharacter(charKey, function()
+            local r = ApplyCostMode(recipe, BestPlainRow(recipe))
+            return r, r and (r.outputPerCraft or addon:GetCraftModel(recipe))
+        end)
+        cached = { row = row or false, outputPerCraft = outputPerCraft or 1 }
+        store[key] = cached
+    end
+    return cached.row or nil, cached.outputPerCraft
+end
 
 local function Better(a, b)
     if not b then return true end
@@ -253,26 +304,17 @@ local function Better(a, b)
 end
 
 function addon:GetCrafterInfo(recipeID)
-    local now = GetTime()
-    if crafterFrame ~= now then
-        wipe(crafterCache)
-        crafterFrame = now
-    end
-    local cached = crafterCache[recipeID]
-    if cached then return cached.best, cached.rows end
-
     local recipe = GoldsmithDB.recipes[recipeID]
     local crafters = addon:GetCrafters(recipeID)
     local best, bestRow, rows = crafters[1], nil, {}
     if recipe and #crafters > 1 then
         -- Sorted with you first, so a tie keeps you
         for _, key in ipairs(crafters) do
-            local row = addon:WithCharacter(key, BestPlainRow, recipe)
+            local row = PlainRowFor(key, recipe)
             rows[key] = row
             if row and Better(row, bestRow) then best, bestRow = key, row end
         end
     end
-    crafterCache[recipeID] = { best = best, rows = rows }
     return best, rows
 end
 
@@ -307,29 +349,31 @@ end
 -- (IsRecommendable), with all material costs known. Most profit per item
 -- first. Costs follow the "Show cost as" setting.
 --
--- A craft drops off the list once you hold about a day's sales of it
--- (capped at ENOUGH_STOCK_CAP), and comes back once those sell.
+-- Suggests how many to make (SuggestedQuantity). Once you've made it, the
+-- craft drops off, and it comes back only when you've sold every one you
+-- hold: never more while some sit unsold, in case the market turns.
+-- Crafts whose crafter is excluded aren't recommended.
 -- Returns up to `count` { recipe, row, charKey, profit, margin, demand,
--- have }.
+-- have, make (items to make), makeReason, outputPerCraft }.
 function addon:GetBestCrafts(prof, count)
     local list = {}
     for recipeID, recipe in pairs(GoldsmithDB.recipes) do
         if (prof == "All" or recipe.profession == prof) and addon:CanAuction(recipe.outputItemID) ~= false then
             local charKey = CrafterFor(recipeID)
-            if charKey then
-                local row = addon:WithCharacter(charKey, function()
-                    return ApplyCostMode(recipe, BestPlainRow(recipe))
-                end)
+            if charKey and addon:IsCharacterIncluded(charKey) then
+                local row, outputPerCraft = PlainRowFor(charKey, recipe)
                 if row and row.profit and row.profit > 0 and not row.partial
                     and (row.margin or 0) >= addon:Setting("minROI") and IsRecommendable(recipe, row) then
                     local itemID = row.itemID or recipe.outputItemID
-                    local have = itemID and addon:GetStock(itemID) or 0
-                    local enough = math.min(math.max(math.ceil(row.demand or 1), 1), ENOUGH_STOCK_CAP)
-                    if have < enough then
+                    -- In bags, banks or listed on the AH, on any character
+                    local have = itemID and addon:GetHeld(itemID) or 0
+                    if have == 0 then
+                        local make, makeReason = addon:SuggestedQuantity(recipe.outputName)
                         table.insert(list, {
                             key = addon:CraftKey(recipeID, row),
                             recipe = recipe, row = row, charKey = charKey, itemID = itemID,
                             profit = row.profit, margin = row.margin, demand = row.demand, have = have,
+                            make = make, makeReason = makeReason, outputPerCraft = outputPerCraft,
                         })
                     end
                 end
@@ -339,6 +383,92 @@ function addon:GetBestCrafts(prof, count)
     table.sort(list, function(a, b) return a.profit > b.profit end)
     for i = #list, count + 1, -1 do list[i] = nil end
     return list
+end
+
+-- How many to make
+--
+-- Deliberately cautious: better to sell out and make more than to sit on
+-- items the market has moved away from. Region sales (TSM) are every
+-- seller's, so they aren't used; your own are:
+--   sold some in the last SALES_DAYS days: a day's worth of your sales
+--     (the average, rounded down, at least 1)
+--   never sold it: a first batch of FIRST_BATCH
+-- Capped at ENOUGH_STOCK_CAP. Returns the count and why, in plain words.
+local SALES_DAYS = 7
+local FIRST_BATCH = 3
+local salesCache = addon:NewCache()
+
+-- Units of each item (by name) you sold in the last SALES_DAYS days
+local function RecentSales()
+    local store = salesCache:Get()
+    if not store.sold then
+        local sold, since = {}, time() - SALES_DAYS * 86400
+        for _, e in ipairs(addon.ledger:getAll()) do
+            if e.type == "REVENUE" and e.timestamp >= since and e.item then
+                sold[e.item] = (sold[e.item] or 0) + (e.quantity or 1)
+            end
+        end
+        store.sold = sold
+    end
+    return store.sold
+end
+
+function addon:SuggestedQuantity(itemName)
+    local sold = itemName and RecentSales()[itemName] or 0
+    if sold > 0 then
+        local perDay = math.max(math.floor(sold / SALES_DAYS), 1)
+        return math.min(perDay, ENOUGH_STOCK_CAP),
+            string.format("a day's worth (you sold %d in the last %d days)", sold, SALES_DAYS)
+    end
+    return FIRST_BATCH, string.format("a first batch of %d (you haven't sold any in the last %d days)", FIRST_BATCH, SALES_DAYS)
+end
+
+-- A to-do list per character: what "Do this next" suggests, split by who
+-- should do it. Each character's concentration plan (see
+-- GetConcentrationOverview), and the best crafts (GetBestCrafts) they make
+-- best, as many as cover about a day's sales less what you hold. Items
+-- already in a concentration plan count toward that, so the two don't add
+-- up to more than sells.
+-- Returns { [charKey] = { total, items = { { recipe, row, itemID,
+-- tierCount, crafts, quantity (items made), profit (all crafts),
+-- concentration (points, or nil) } } (most profit first) } } for included
+-- characters with something to do.
+function addon:GetCharacterTodo(prof, conc)
+    conc = conc or addon:GetConcentrationOverview(prof)
+    local todo, planned = {}, {}
+    local function Add(charKey, item)
+        todo[charKey] = todo[charKey] or { total = 0, items = {} }
+        table.insert(todo[charKey].items, item)
+        todo[charKey].total = todo[charKey].total + item.profit
+    end
+
+    for _, r in ipairs(conc.rows) do
+        for _, p in ipairs(r.plan or {}) do
+            local itemID = p.row.itemID or p.recipe.outputItemID
+            local quantity = math.max(math.floor(p.crafts * (p.row.outputPerCraft or 1)), 1)
+            if itemID then planned[itemID] = (planned[itemID] or 0) + quantity end
+            Add(r.key, {
+                recipe = p.recipe, row = p.row, itemID = itemID, tierCount = p.tierCount,
+                crafts = p.crafts, quantity = quantity, profit = p.profit, concentration = p.points,
+            })
+        end
+    end
+
+    for _, c in ipairs(addon:GetBestCrafts(prof, math.huge)) do
+        local make = c.make - (c.itemID and planned[c.itemID] or 0)
+        if make > 0 then
+            Add(c.charKey, {
+                recipe = c.recipe, row = c.row, itemID = c.itemID, tierCount = c.row.tierCount,
+                crafts = math.max(math.ceil(make / c.outputPerCraft), 1), quantity = make,
+                profit = c.profit * make, why = c.makeReason,
+            })
+        end
+    end
+
+    for _, t in pairs(todo) do
+        table.sort(t.items, function(a, b) return a.profit > b.profit end)
+    end
+    return todo
 end
 
 -- Every craft for the Crafts tab. The ways without concentration are
@@ -360,17 +490,25 @@ end
 --   showExpansion  - function(expansionID) -> whether to include it
 -- Returns { { key, recipe, info (the tier row or GetRecipeProfit), tier,
 -- charKey, itemID, whyNot (see WhyNotRecommended) } }, unsorted.
+local craftRowsCache = addon:NewCache()
+
 function addon:GetCraftRows(prof, opts)
     local list = {}
     for recipeID, recipe in pairs(GoldsmithDB.recipes) do
         if (prof == "All" or recipe.profession == prof)
             and (not opts.onlyMine or addon.char.knownRecipes[recipeID])
             and addon:CanAuction(recipe.outputItemID) ~= false
-            and (not opts.showExpansion or opts.showExpansion(addon:GetRecipeExpansion(recipe))) then
+            and (not opts.showExpansion or opts.showExpansion(addon:GetRecipeExpansion(recipe)))
+            -- Recipes only excluded characters know are left out
+            and (opts.onlyMine or addon:IsCharacterIncluded(CrafterFor(recipeID) or addon.charKey)) then
             local charKey = opts.onlyMine and addon.charKey or CrafterFor(recipeID) or addon.charKey
-            -- Rows for one character: the plain ways or the concentration ways
+            -- Rows for one character: the plain ways or the concentration
+            -- ways (cached until data changes)
             local function RowsFor(key, concentrate)
-                return addon:WithCharacter(key, function()
+                local store = craftRowsCache:Get()
+                local id = string.format("%s:%d:%s", key, recipeID, concentrate and "c" or "")
+                if store[id] then return store[id] end
+                store[id] = addon:WithCharacter(key, function()
                     local tierRows = addon:GetTierRows(recipe)
                     if not tierRows or #tierRows == 0 then tierRows = { addon:GetRecipeProfit(recipe) } end
                     local shown = {}
@@ -381,13 +519,16 @@ function addon:GetCraftRows(prof, opts)
                     end
                     return shown
                 end)
+                return store[id]
             end
             local sets = { { key = charKey, rows = RowsFor(charKey, false) } }
             if opts.concentration then
                 local crafters = opts.onlyMine and { charKey } or addon:GetCrafters(recipeID)
                 if #crafters == 0 then crafters = { charKey } end
                 for _, key in ipairs(crafters) do
-                    table.insert(sets, { key = key, rows = RowsFor(key, true) })
+                    if opts.onlyMine or addon:IsCharacterIncluded(key) then
+                        table.insert(sets, { key = key, rows = RowsFor(key, true) })
+                    end
                 end
             end
             local minROI = addon:Setting("minROI")

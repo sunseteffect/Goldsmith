@@ -4,7 +4,7 @@ local UI = addon.UI
 -- The window
 --
 -- A header (title, profession and date filters, where prices come from,
--- settings), four tabs, and the tab's screen below. Each screen is a view
+-- settings), five tabs, and the tab's screen below. Each screen is a view
 -- registered with addon:RegisterView; the window creates it the first time
 -- its tab is opened and refreshes it when shown or when data changes.
 --
@@ -20,9 +20,11 @@ local TABS = {
     { key = "crafts", label = "Crafts" },
     { key = "items", label = "Items" },
     { key = "history", label = "History" },
+    { key = "characters", label = "Characters" },
 }
 
--- Views: key -> { create = function(parent) -> view, refresh = function(view, state) }
+-- Views: key -> { create = function(parent) -> view, refresh = function(view, state),
+--                 reset = function(view) (optional: back to the home view) }
 -- state = { profession, range, since, setProfession(prof) }
 local views = {}
 
@@ -328,7 +330,11 @@ function addon:CreateWindow()
     tabLine:SetPoint("TOPRIGHT", tabArea, "BOTTOMRIGHT")
     tabLine:SetHeight(2)
 
+    -- Clicking the tab you're on takes it back to its home view (e.g. from a
+    -- craft plan to the Crafts list)
+    local ResetView -- defined below
     local tabBar = UI.TabBar(tabArea, TABS, function(key)
+        if key == ui.tab then ResetView(key) end
         ui.tab = key
         Refresh()
     end)
@@ -349,6 +355,11 @@ function addon:CreateWindow()
         local view = def.create(screen)
         created[key] = { frame = screen, view = view, def = def }
         return created[key]
+    end
+
+    ResetView = function(key)
+        local screen = created[key]
+        if screen and screen.def.reset then screen.def.reset(screen.view) end
     end
 
     Refresh = function()
@@ -409,11 +420,13 @@ function addon:CreateWindow()
         settings:Show()
     end
 
-    -- Other files call addon.Refresh when data changes. Data changes come in
-    -- bursts (AH searches, bag updates), so the window refreshes once, half
-    -- a second after the first of a burst.
+    -- Other files call addon.Refresh when data changes. It empties the
+    -- caches (Settings.lua) at once. Data changes come in bursts (AH
+    -- searches, bag updates), so the window refreshes once, half a second
+    -- after the first of a burst.
     local refreshPending = false
     addon.Refresh = function()
+        addon:DataChanged()
         if frame:IsShown() and not refreshPending then
             refreshPending = true
             C_Timer.After(0.5, function()

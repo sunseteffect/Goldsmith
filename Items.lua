@@ -885,6 +885,17 @@ local function Refresh(v, state)
     end
 end
 
-addon:RegisterView("items", { create = Create, refresh = Refresh })
+-- Clicking the Items tab again: back to the leaderboards, from an item's
+-- page, a search or In my bags
+local function Reset(v)
+    v.page.item = nil
+    v.search = ""
+    v.searchBox:SetText("")
+    v.searchBox:ClearFocus()
+    GoldsmithDB.ui2.itemsInBags = nil
+    v.list:ScrollToTop()
+end
+
+addon:RegisterView("items", { create = Create, refresh = Refresh, reset = Reset })
 
 _G.Goldsmith = addon

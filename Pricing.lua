@@ -427,11 +427,81 @@ function addon:AvailableColumns(columns)
     return list
 end
 
+-- Items the game hasn't loaded yet
+--
+-- The game only knows an item's details (expansion, bind type) once
+-- something asks for them. Until then Goldsmith can't tell whether a craft
+-- is worth recommending, so it asks the game to load the item, and
+-- refreshes (emptying the caches) when items arrive. Recipe outputs are
+-- asked for at login, so recommendations are right from the start.
+local waitingItems = {}
+local itemRefreshPending = false
+
+local function RequestItem(itemID)
+    if waitingItems[itemID] then return end
+    waitingItems[itemID] = true
+    C_Item.RequestLoadItemDataByID(itemID)
+end
+
+local itemEvents = CreateFrame("Frame")
+itemEvents:RegisterEvent("GET_ITEM_INFO_RECEIVED")
+itemEvents:RegisterEvent("PLAYER_ENTERING_WORLD")
+itemEvents:SetScript("OnEvent", function(self, event, itemID)
+    if event == "PLAYER_ENTERING_WORLD" then
+        self:UnregisterEvent("PLAYER_ENTERING_WORLD")
+        C_Timer.After(2, function()
+            for _, recipe in pairs(GoldsmithDB.recipes or {}) do
+                local id = recipe.outputItemID
+                if id and not C_Item.GetItemInfo(id) then RequestItem(id) end
+            end
+            for _, c in pairs(GoldsmithDB.characters or {}) do
+                for _, td in pairs(c.tierData or {}) do
+                    for _, out in pairs(td.outputs or {}) do
+                        if out.itemID and not C_Item.GetItemInfo(out.itemID) then RequestItem(out.itemID) end
+                    end
+                end
+            end
+        end)
+        return
+    end
+    if not (itemID and waitingItems[itemID]) then return end
+    waitingItems[itemID] = nil
+    -- Items arrive in bursts; refresh once for the lot
+    if not itemRefreshPending then
+        itemRefreshPending = true
+        C_Timer.After(1, function()
+            itemRefreshPending = false
+            if addon.Refresh then addon.Refresh() end
+        end)
+    end
+end)
+
 -- Expansions
 
--- Expansion an item comes from (0 = Classic), or nil if not cached yet.
+-- An item's expansion and bind type never change, but the game can drop an
+-- item's details again soon after loading them, so asking it each time
+-- made recommendations flicker. They're remembered once seen, in
+-- GoldsmithDB.itemFacts[itemID] = { expansion, bind }.
+local function ItemFacts(itemID)
+    GoldsmithDB.itemFacts = GoldsmithDB.itemFacts or {}
+    local facts = GoldsmithDB.itemFacts[itemID]
+    if facts then return facts end
+    local bind = select(14, C_Item.GetItemInfo(itemID))
+    local expansion = select(15, C_Item.GetItemInfo(itemID))
+    if bind == nil or expansion == nil then
+        RequestItem(itemID)
+        return nil
+    end
+    facts = { expansion = expansion, bind = bind }
+    GoldsmithDB.itemFacts[itemID] = facts
+    return facts
+end
+
+-- Expansion an item comes from (0 = Classic), or nil if not loaded yet
+-- (it's asked for, and everything refreshes when it arrives)
 function addon:GetItemExpansion(itemID)
-    return select(15, C_Item.GetItemInfo(itemID))
+    local facts = ItemFacts(itemID)
+    return facts and facts.expansion
 end
 
 function addon:GetExpansionName(expansionID)
@@ -485,12 +555,9 @@ end
 local UNSELLABLE_BINDS = { [1] = true, [4] = true, [7] = true, [8] = true, [9] = true }
 
 function addon:CanAuction(itemID)
-    local bindType = select(14, C_Item.GetItemInfo(itemID))
-    if bindType == nil then
-        C_Item.RequestLoadItemDataByID(itemID)
-        return nil
-    end
-    return not UNSELLABLE_BINDS[bindType]
+    local facts = ItemFacts(itemID)
+    if not facts then return nil end
+    return not UNSELLABLE_BINDS[facts.bind]
 end
 
 -- Recipes

@@ -49,6 +49,12 @@ local function OnWho(charKey)
     return " on " .. (c and c.name or charKey)
 end
 
+-- A name cut to `max` letters with "..." (nil stays nil)
+local function ShortName(name, max)
+    if name and #name > max then return name:sub(1, max - 3) .. "..." end
+    return name
+end
+
 -- The tier goes before the name, so a long name cut short never hides it
 local function ItemText(itemID, name, tier, tierCount)
     local icon = tier and tierCount and (addon:TierIconText(tier, tierCount) .. " ") or ""
@@ -161,11 +167,10 @@ local function ConcentrationAction(conc)
     local first = best.plan[1]
     return {
         highlight = true,
-        title = string.format("%sCraft %dx %s with concentration%s", addon:ProfessionIconText(best.profession),
-            first.crafts, ItemText(first.row.itemID, first.recipe.outputName, first.row.tier, first.tierCount),
-            OnWho(best.key)),
-        detail = string.format("%d concentration for %s extra, %s profit in total",
-            first.points, Signed(first.gain), Signed(first.profit)),
+        title = string.format("%sCraft %dx %s", addon:ProfessionIconText(best.profession),
+            first.crafts, ItemText(first.row.itemID, ShortName(first.recipe.outputName, 34), first.row.tier, first.tierCount)),
+        detail = string.format("With %d concentration%s  ·  %s profit",
+            math.floor(first.points + 0.5), OnWho(best.key), addon:Colorize(Signed(first.profit), "profit")),
         tooltip = function(tooltip)
             tooltip:AddLine(string.format("Best use of %s's %d concentration", best.name, best.current), 1, 1, 1)
             for _, p in ipairs(best.plan) do
@@ -189,22 +194,23 @@ end
 local function CraftsAction(crafts, prof)
     if #crafts == 0 then return nil end
     -- One craft per line; the row has room for CRAFTS_SHOWN, the hover lists
-    -- them all
+    -- them all with ROI and sales. Names are shortened so a line never wraps;
+    -- who makes it goes last, when it isn't you.
     local parts = {}
     for i = 1, math.min(#crafts, CRAFTS_SHOWN) do
         local c = crafts[i]
         local icon = prof == "All" and addon:ProfessionIconText(c.recipe.profession) or ""
-        local roi = c.margin and string.format("  ·  %.0f%% ROI", c.margin) or ""
-        table.insert(parts, string.format("%s%s   %s%s", icon,
-            ItemText(c.itemID, c.recipe.outputName, c.row.tier, c.row.tierCount),
-            addon:Colorize(Signed(c.profit), "profit"), roi))
+        local who = OnWho(c.charKey)
+        table.insert(parts, string.format("%s%s   %s each%s", icon,
+            ItemText(c.itemID, ShortName(c.recipe.outputName, 26), c.row.tier, c.row.tierCount),
+            addon:Colorize(Signed(c.profit), "profit"), who ~= "" and ("  ·" .. who) or ""))
     end
     return {
         title = "Best crafts right now",
         detail = table.concat(parts, "\n"),
         tooltip = function(tooltip)
             tooltip:AddLine("Best crafts right now", 1, 1, 1)
-            tooltip:AddLine(string.format("Current-expansion items with a %d%%+ ROI (profit as a share of cost; see Settings) that sell at least once a day, with no unknown costs. A craft drops off once you hold about a day's sales of it.",
+            tooltip:AddLine(string.format("Current-expansion items with a %d%%+ ROI (profit as a share of cost; see Settings) that sell at least once a day, with no unknown costs. A craft drops off once you've made it, and comes back when you've sold them all (bags, banks and AH listings on every character).",
                 addon:Setting("minROI")), 0.6, 0.6, 0.6, true)
             for _, c in ipairs(crafts) do
                 tooltip:AddLine(" ")
@@ -593,6 +599,13 @@ local function Create(parent)
     actions:SetSize(HALF_WIDTH, MIDDLE_HEIGHT)
     view.actionsTitle = UI.Text(actions, "heading")
     view.actionsTitle:SetPoint("TOPLEFT", 16, -16)
+    -- The same suggestions split into a to-do list per character
+    view.byCharacter = UI.Button(actions, "By character", 100, 22, function() addon:ShowTab("characters") end)
+    view.byCharacter:SetPoint("TOPRIGHT", -12, -11)
+    UI.SetTooltip(view.byCharacter, function(tooltip)
+        tooltip:AddLine("By character", 1, 1, 1)
+        tooltip:AddLine("A to-do list for each character: what to craft on who, and how many.", 0.8, 0.8, 0.8, true)
+    end, "ANCHOR_BOTTOM")
     view.actionRows = {}
     for i = 1, ACTION_COUNT do
         view.actionRows[i] = CreateActionRow(actions, i)
@@ -682,6 +695,7 @@ local function Refresh(view, state)
     end
     view.setup:SetShown(inSetup)
     view.setup.close:SetShown(inSetup)
+    view.byCharacter:SetShown(not inSetup)
     view.actionsTitle:SetText(not inSetup and "Do this next"
         or allDone and "Getting started: all done, close this with X" or "Getting started")
 

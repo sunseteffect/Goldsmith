@@ -292,6 +292,15 @@ local function Refresh(view, state)
     view.footnote:SetText(table.concat(notes, "   "))
 end
 
-addon:RegisterView("history", { create = Create, refresh = Refresh })
+-- Clicking the History tab again: everything (all types, all characters,
+-- no item) from the top
+local function Reset(view)
+    local ui = GoldsmithDB.ui2
+    view.item = nil
+    ui.historyKind, ui.historyCharacter = nil, nil
+    view.list:ScrollToTop()
+end
+
+addon:RegisterView("history", { create = Create, refresh = Refresh, reset = Reset })
 
 _G.Goldsmith = addon

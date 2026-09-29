@@ -22,7 +22,9 @@ end
 --                                        cycleMS, perCycle, time } },
 --     money, gold   = { ["YYYY-MM-DD"] = copper at the end of that day },
 --     goldTime      = { ["YYYY-MM-DD"] = seconds spent making gold },
---     stock, stockTime = { [itemID] = count in bags and bank } and when }
+--     stock, stockTime = { [itemID] = count in bags and bank } and when,
+--     auctions, auctionsTime = { [itemID] = count listed on the AH } and
+--                              when it was last read from the AH }
 -- addon.char is the logged-in character's table. Prices, recipes' materials,
 -- the ledger, milling and vendor prices stay shared across the account.
 -- The warband bank is shared too: GoldsmithDB.warbandStock and warbandGold.
@@ -41,13 +43,13 @@ local function NewCharacter(name, realm)
         name = name, realm = realm,
         professions = {}, knownRecipes = {},
         recipeStats = {}, tierData = {}, calibration = {},
-        concentration = {}, gold = {}, goldTime = {}, stock = {},
+        concentration = {}, gold = {}, goldTime = {}, stock = {}, auctions = {},
     }
 end
 
 local function EnsureFields(c)
     for _, key in ipairs({ "professions", "knownRecipes", "recipeStats", "tierData",
-                           "calibration", "concentration", "gold", "goldTime", "stock" }) do
+                           "calibration", "concentration", "gold", "goldTime", "stock", "auctions" }) do
         c[key] = c[key] or {}
     end
 end
@@ -240,6 +242,59 @@ function addon:GetStock(itemID)
     end
     table.sort(list, function(a, b) return a.count > b.count end)
     return total, list
+end
+
+-- Auctions
+--
+-- How many of each item each character has listed on the AH, so an item
+-- you've posted still counts as held until it sells. Read from the AH
+-- whenever it's open (your auctions list, which also drops expired and
+-- cancelled ones); in between, a sale collected from the mailbox takes
+-- its count off.
+local function SnapshotAuctions()
+    if not (C_AuctionHouse and C_AuctionHouse.GetOwnedAuctions) then return end
+    local ok, owned = pcall(C_AuctionHouse.GetOwnedAuctions)
+    if not ok or type(owned) ~= "table" then return end
+    local active = Enum.AuctionStatus and Enum.AuctionStatus.Active or 0
+    local auctions = {}
+    for _, a in ipairs(owned) do
+        local itemID = a.itemKey and a.itemKey.itemID
+        if itemID and a.status == active then
+            auctions[itemID] = (auctions[itemID] or 0) + (a.quantity or 1)
+        end
+    end
+    addon.char.auctions, addon.char.auctionsTime = auctions, time()
+    if addon.Refresh then addon.Refresh() end
+end
+
+local function QueryAuctions()
+    if C_AuctionHouse and C_AuctionHouse.QueryOwnedAuctions then
+        pcall(C_AuctionHouse.QueryOwnedAuctions, {})
+    end
+end
+
+-- A sale collected from the mail (Core.lua): the mail names the item, not
+-- its ID, so it's matched by name
+function addon:AuctionSold(itemName, count)
+    local auctions = addon.char.auctions
+    for itemID, listed in pairs(auctions) do
+        if C_Item.GetItemNameByID(itemID) == itemName then
+            local left = listed - (count or 1)
+            auctions[itemID] = left > 0 and left or nil
+            return
+        end
+    end
+end
+
+-- Everything you hold of an item, whether or not the character counts
+-- (an excluded bank alt still holds it): bags and banks on every
+-- character, the warband bank, and AH listings
+function addon:GetHeld(itemID)
+    local total = GoldsmithDB.warbandStock[itemID] or 0
+    for _, c in pairs(GoldsmithDB.characters) do
+        total = total + (c.stock[itemID] or 0) + (c.auctions[itemID] or 0)
+    end
+    return total
 end
 
 -- Goldmaking time
@@ -438,6 +493,19 @@ function addon:KnowsRecipe(recipeID, charKey)
     return c and c.knownRecipes[recipeID] == true
 end
 
+-- Forgets a character (deleted, renamed or moved realm): its recipes,
+-- stats, concentration, stock and gold. Sales and purchases in the ledger
+-- stay. It stays excluded, so if you log in on it again it comes back
+-- excluded, not in your recommendations. Not the logged-in one.
+function addon:RemoveCharacter(charKey)
+    if charKey == addon.charKey then return end
+    GoldsmithDB.characters[charKey] = nil
+    GoldsmithDB.settings = GoldsmithDB.settings or {}
+    GoldsmithDB.settings.excluded = GoldsmithDB.settings.excluded or {}
+    GoldsmithDB.settings.excluded[charKey] = true
+    if addon.Refresh then addon.Refresh() end
+end
+
 -- /gsm chars
 function addon:ListCharacters()
     UpdateAll()
@@ -553,12 +621,24 @@ function addon:InitializeCharacters()
     frame:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
     frame:RegisterEvent("PLAYER_LOGOUT")
     frame:RegisterEvent("BAG_UPDATE_DELAYED")
+    frame:RegisterEvent("OWNED_AUCTIONS_UPDATED")
+    frame:RegisterEvent("AUCTION_HOUSE_AUCTION_CREATED")
     for event in pairs(GOLDMAKING_OPEN) do frame:RegisterEvent(event) end
     for event in pairs(GOLDMAKING_CLOSE) do frame:RegisterEvent(event) end
     C_Timer.NewTicker(GOLDMAKING_TICK, FlushGoldTime)
 
     local pending, stockPending = false, false
     frame:SetScript("OnEvent", function(_, event)
+        if event == "OWNED_AUCTIONS_UPDATED" then
+            SnapshotAuctions()
+            return
+        elseif event == "AUCTION_HOUSE_AUCTION_CREATED" then
+            -- The new auction shows in your list a moment later
+            C_Timer.After(1, QueryAuctions)
+            return
+        elseif event == "AUCTION_HOUSE_SHOW" then
+            QueryAuctions()
+        end
         if GOLDMAKING_OPEN[event] then
             OnGoldmakingOpen(GOLDMAKING_OPEN[event])
             return

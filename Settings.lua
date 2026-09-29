@@ -42,18 +42,50 @@ function addon:SetSetting(key, value)
     if addon.Refresh then addon.Refresh() end
 end
 
--- False for a character left out in Settings
+-- Caches
+--
+-- Working out every character's crafts and concentration plans takes long
+-- enough to stutter the game, so results are kept until data changes:
+-- addon.Refresh (prices, stock, recipes, crafts, settings) calls
+-- DataChanged. Switching tabs, scrolling and excluding a character only
+-- redraw. As a safety net a cache also empties after CACHE_SECONDS.
+local CACHE_SECONDS = 300
+addon.dataVersion = 0
+
+function addon:DataChanged()
+    addon.dataVersion = addon.dataVersion + 1
+end
+
+-- cache:Get() returns a table to keep results in, emptied when data has
+-- changed since; cache:Clear() empties it now
+function addon:NewCache()
+    local cache = { store = {}, version = -1, time = 0 }
+    function cache:Get()
+        if self.version ~= addon.dataVersion or GetTime() - self.time > CACHE_SECONDS then
+            wipe(self.store)
+            self.version, self.time = addon.dataVersion, GetTime()
+        end
+        return self.store
+    end
+    function cache:Clear() self.version = -1 end
+    return cache
+end
+
+-- False for a character excluded (Settings or the Characters tab)
 function addon:IsCharacterIncluded(charKey)
     local excluded = addon:Setting("excluded")
     return not (excluded and excluded[charKey])
 end
 
-local function SetCharacterIncluded(charKey, included)
+-- Also on the Characters tab. Cached results are kept for every character,
+-- so excluding one only redraws.
+function addon:SetCharacterIncluded(charKey, included)
     GoldsmithDB.settings = GoldsmithDB.settings or {}
     GoldsmithDB.settings.excluded = GoldsmithDB.settings.excluded or {}
     GoldsmithDB.settings.excluded[charKey] = (not included) or nil
-    if addon.Refresh then addon.Refresh() end
+    if addon.RefreshWindow then addon.RefreshWindow() end
 end
+local function SetCharacterIncluded(charKey, included) addon:SetCharacterIncluded(charKey, included) end
 
 -- Chat messages Goldsmith prints by itself (not answers to /gsm commands).
 -- kind is "money" (a sale, purchase or deposit) or "info" (anything else).
@@ -185,9 +217,10 @@ local HELP = {
         "Off: none. Everything is still recorded; see the History tab. Answers to /gsm commands always show.",
     },
     characters = {
-        "Characters",
-        "Untick a character to leave it out of Gold in stock, concentration, total gold and the Overview: a bank alt, or one you've stopped playing.",
+        "Exclude characters",
+        "Tick a character to leave it out of Gold in stock, concentration, total gold, the Crafts tab and Do this next: a bank alt, or one you've stopped playing.",
         "Its sales and purchases still count, and Goldsmith keeps recording it while you play it.",
+        "The Characters tab has the same switch, and can remove a character you've deleted.",
     },
     showMinimap = {
         "Minimap button",
@@ -296,11 +329,12 @@ function addon:CreateSettingsPanel(parent)
     rows.tooltips = ChoiceRow(panel, "tooltips", "Item tooltips", "Goldsmith's lines in the game's item tooltips.")
     rows.chat = ChoiceRow(panel, "chat", "Chat messages", "What Goldsmith says in chat as things happen.")
 
-    rows.characters = Row(panel, "characters", "Characters", "Which characters count toward stock, concentration and the Overview.")
+    rows.characters = Row(panel, "characters", "Exclude characters", "Characters left out of stock, concentration, Crafts and Do this next.")
     rows.characters.control = Dropdown(rows.characters, "characters", function(root)
+        root:CreateTitle("Tick to exclude")
         for _, entry in ipairs(addon:GetCharacters()) do
             root:CreateCheckbox(CharacterLabel(entry),
-                function() return addon:IsCharacterIncluded(entry.key) end,
+                function() return not addon:IsCharacterIncluded(entry.key) end,
                 function()
                     SetCharacterIncluded(entry.key, not addon:IsCharacterIncluded(entry.key))
                     panel:Update()
@@ -308,12 +342,11 @@ function addon:CreateSettingsPanel(parent)
         end
     end)
     function rows.characters:Update()
-        local total, included = 0, 0
+        local excluded = 0
         for _, entry in ipairs(addon:GetCharacters()) do
-            total = total + 1
-            if addon:IsCharacterIncluded(entry.key) then included = included + 1 end
+            if not addon:IsCharacterIncluded(entry.key) then excluded = excluded + 1 end
         end
-        self.control:SetLabel(included == total and "All characters" or string.format("%d of %d characters", included, total))
+        self.control:SetLabel(excluded == 0 and "None excluded" or string.format("%d excluded", excluded))
     end
 
     rows.showMinimap = Row(panel, "showMinimap", "Minimap button", "A coin by the minimap that opens Goldsmith.")
@@ -390,7 +423,7 @@ local HELP_SECTIONS = {
     { "Opening Goldsmith",
       "/gsm, the gold coin on the minimap, the addons button by the minimap, or a key of your own (Settings > Key to open Goldsmith)." },
     { "The tabs",
-      "Overview: how you're doing and what to do next. Crafts: every recipe you know with its cost, profit and ROI; click one for a shopping plan. Items: any item's page, and In my bags for everything you hold. History: every purchase, sale, craft and deposit; right-click an entry to fix it." },
+      "Overview: how you're doing and what to do next. Crafts: every recipe you know with its cost, profit and ROI; click one for a shopping plan. Items: any item's page, and In my bags for everything you hold. History: every purchase, sale, craft and deposit; right-click an entry to fix it. Characters: a to-do list for each character, and which characters count." },
     { "Item tooltips",
       "Show your cost, profit and break-even price. Hold Shift for each material's cost. Settings > Item tooltips makes them shorter or turns them off." },
     { "Recommended: TSM",

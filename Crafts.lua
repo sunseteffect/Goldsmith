@@ -529,6 +529,79 @@ local function ProfessionOpen(recipe)
     return info ~= nil and info.professionName == recipe.profession
 end
 
+-- The game's profession window shows what Goldsmith will craft: the
+-- recipe, the plan's mix of material qualities, concentration on or off,
+-- and how many. Uses the window's own recipe form (Blizzard's
+-- ProfessionsRecipeTransactionMixin); if the game changes it, this quietly
+-- does nothing and crafting still works. state is a CraftState.
+local function Reagent(itemID)
+    if Professions and Professions.CreateCraftingReagentByItemID then
+        return Professions.CreateCraftingReagentByItemID(itemID)
+    end
+    return { itemID = itemID }
+end
+
+local function SyncProfessionWindow(recipeID, state)
+    local page = ProfessionsFrame and ProfessionsFrame.CraftingPage
+    local form = page and page.SchematicForm
+    if not (form and page.SelectRecipe and form.GetTransaction) then return end
+    local info = C_TradeSkillUI.GetRecipeInfo(recipeID)
+    if not info then return end
+    local function Apply()
+        local tx = form:GetTransaction()
+        if not tx then return end
+
+        if state.reagents and #state.reagents > 0 then
+            local schematic = tx:GetRecipeSchematic()
+            local slotFor = {}
+            for i, slot in ipairs(schematic and schematic.reagentSlotSchematics or {}) do
+                slotFor[slot.dataSlotIndex] = i
+            end
+            -- Keep the window from swapping in its own choice of qualities
+            if tx.SetManuallyAllocated then tx:SetManuallyAllocated(true) end
+            local cleared = {}
+            for _, entry in ipairs(state.reagents) do
+                local i = slotFor[entry.dataSlotIndex]
+                local allocations = i and tx:GetAllocations(i)
+                if allocations then
+                    if not cleared[i] then allocations:Clear(); cleared[i] = true end
+                    allocations:Allocate(Reagent(entry.reagent.itemID), entry.quantity)
+                end
+            end
+        end
+        tx:SetApplyConcentration(state.concentrate == true)
+        if form.UpdateAllSlots then form:UpdateAllSlots() end
+        if form.OnAllocationsChanged then form:OnAllocationsChanged() end
+        if state.crafts and state.crafts > 0 and page.CreateMultipleInputBox then
+            page.CreateMultipleInputBox:SetValue(state.crafts)
+        end
+    end
+
+    local shown = form.GetRecipeInfo and form:GetRecipeInfo()
+    if shown and shown.recipeID == recipeID then
+        pcall(Apply)
+    else
+        -- Picking the recipe sets up a fresh form; fill it in once that's
+        -- done, so the window's own defaults don't replace the plan's
+        pcall(page.SelectRecipe, page, info)
+        C_Timer.After(0.1, function() pcall(Apply) end)
+    end
+end
+
+-- After "Open <profession>": opening takes a moment, so check a few times
+-- and update the plan once it's open (which shows the plan in the window,
+-- see SetCraftState)
+local function UpdateWhenOpen(recipe, update, tries)
+    tries = tries or 10
+    C_Timer.After(0.3, function()
+        if ProfessionOpen(recipe) then
+            update()
+        elseif tries > 1 then
+            UpdateWhenOpen(recipe, update, tries - 1)
+        end
+    end)
+end
+
 local function MaterialName(itemID)
     local tier, tierCount = addon:GetItemTier(itemID)
     return (tier and (addon:TierIconText(tier, tierCount) .. " ") or "")
@@ -734,6 +807,9 @@ local function CreatePlanScreen(parent)
         if state.open then
             if C_TradeSkillUI.OpenRecipe then
                 C_TradeSkillUI.OpenRecipe(p.recipe.recipeID)
+                UpdateWhenOpen(p.recipe, function()
+                    if screen.plan == p and screen:IsVisible() then screen:Update() end
+                end)
             else
                 print("|cFF00FF00[Goldsmith]|r Open " .. p.recipe.profession .. ", then click Craft.")
             end
@@ -765,12 +841,31 @@ local function CreatePlanScreen(parent)
         for _, line in ipairs(state.blockers) do tooltip:AddLine(line, 1, 0.6, 0.2, true) end
     end, "ANCHOR_TOP")
 
+    -- With the profession open, the window is set to match the plan whenever
+    -- the plan changes (recipe, mix, concentration, how many), but not after
+    -- each craft, so it's never changed mid-craft
+    local function SyncWindow(state)
+        local p = screen.plan
+        if not (state and state.reagents and p and ProfessionOpen(p.recipe)) then
+            screen.syncedKey = nil
+            return
+        end
+        local parts = { p.recipe.recipeID, tostring(state.concentrate), screen.qty:GetText() }
+        for _, e in ipairs(state.reagents) do table.insert(parts, e.reagent.itemID .. "x" .. e.quantity) end
+        local key = table.concat(parts, "|")
+        if key ~= screen.syncedKey then
+            screen.syncedKey = key
+            SyncProfessionWindow(p.recipe.recipeID, state)
+        end
+    end
+
     local function SetCraftState(state)
         screen.craftState = state
         screen.craft:SetLabel(state and state.label or "Craft")
         local enabled = state ~= nil and state.enabled == true
         screen.craft:SetEnabled(enabled)
         screen.craft:SetAlpha(enabled and 1 or 0.5)
+        SyncWindow(state)
     end
 
     local function ClearSummary(message)
@@ -1219,7 +1314,16 @@ local function Refresh(v, state)
     end
 end
 
-addon:RegisterView("crafts", { create = Create, refresh = Refresh })
+-- Clicking the Crafts tab again: out of a plan or a focused list, back to
+-- the whole list at the top (filters stay as set)
+local function Reset(v)
+    v.plan.plan, v.plan.current = nil, nil
+    v.plan.qty:ClearFocus()
+    v.focus = nil
+    v.list:ScrollToTop()
+end
+
+addon:RegisterView("crafts", { create = Create, refresh = Refresh, reset = Reset })
 
 -- Keep the planner's Craft button current while it's showing: the
 -- profession opening or closing, bags changing as you craft or buy,

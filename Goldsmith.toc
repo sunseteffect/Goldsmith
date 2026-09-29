@@ -26,3 +26,4 @@ Overview.lua
 Crafts.lua
 Items.lua
 History.lua
+CharactersTab.lua

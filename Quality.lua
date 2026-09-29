@@ -39,10 +39,9 @@ local AH_CUT = 0.05
 local MAX_TIER_STEPS = 6
 local SWEEP_POINTS = 10
 
--- GetTierRows results for the current frame, per character (the stats
--- used), so the Overview's many questions in one refresh share the work.
--- Cleared every frame and whenever tier data changes.
-local tierRowsCache, tierRowsFrame = {}, nil
+-- GetTierRows results per character (the stats used), kept until data
+-- changes (see addon:NewCache) and cleared whenever tier data changes
+local tierRowsCache = addon:NewCache()
 
 -- Quality materials from the recipe's schematic, in order
 local function QualitySlots(schematic)
@@ -305,7 +304,7 @@ function addon:RefreshTierData(recipeID)
         if mix then AddScenario(mix, true) end
     end
 
-    wipe(tierRowsCache)
+    addon:DataChanged()
     addon.char.tierData[recipeID] = {
         qualities = qualities,
         outputs = outputs,
@@ -463,7 +462,7 @@ end
 --   { tier, tierCount, itemID, scenario, mix, concentrate, concentration
 --     (expected per craft), cost, partial, price, priceSource, priceAge,
 --     profit, margin, demand, demandSource, concentrationValue, scenarios }
--- Rows are shared within a frame (see tierRowsCache); don't change them.
+-- Rows are shared until data changes (see tierRowsCache); don't change them.
 local function BuildTierRows(recipe)
     local td = addon:StatsChar().tierData[recipe.recipeID]
     if not td then return nil end
@@ -549,16 +548,12 @@ local function BuildTierRows(recipe)
 end
 
 function addon:GetTierRows(recipe)
-    local now = GetTime()
-    if tierRowsFrame ~= now then
-        wipe(tierRowsCache)
-        tierRowsFrame = now
-    end
+    local store = tierRowsCache:Get()
     local char = addon:StatsChar()
-    local byChar = tierRowsCache[char]
+    local byChar = store[char]
     if not byChar then
         byChar = {}
-        tierRowsCache[char] = byChar
+        store[char] = byChar
     end
     local rows = byChar[recipe.recipeID]
     if rows == nil then
