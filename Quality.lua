@@ -336,7 +336,10 @@ local function GetTierPrice(td, tier)
         if ok and price and price > 0 then
             -- Gear tiers are often thinly listed; check for outliers against
             -- the item's usual price across tiers
-            local checked, source, age = addon:CheckAgainstMarket(out.itemID, price, "Auctionator", nil)
+            -- Auctionator only gives an age per item ID, so every tier of
+            -- the item shares it
+            local checked, source, age = addon:CheckAgainstMarket(out.itemID, price, "Auctionator",
+                addon:GetAuctionatorAge(out.itemID))
             return checked, source, age, out.itemID
         end
     end

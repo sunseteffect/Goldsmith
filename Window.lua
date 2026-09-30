@@ -34,9 +34,11 @@ end
 
 -- Where AH prices come from, for the header (see GetAHPriceInfo and the
 -- price source setting). Automatic: an Auctionator scan made this session
--- beats TSM; otherwise TSM. Returns text and a theme color.
+-- beats TSM; otherwise TSM. Without either, Blizzard AH data under a day
+-- old beats an older Auctionator scan. Returns text and a theme color.
 local function PriceSourceText()
-    local scan = GoldsmithDB.lastPriceUpdate
+    -- The saved scan time only counts while Auctionator is loaded
+    local scan = addon:HasAuctionator() and GoldsmithDB.lastPriceUpdate
     local scanText
     if scan then
         local days = math.floor((time() - scan) / 86400)
@@ -53,8 +55,17 @@ local function PriceSourceText()
         return "Prices: Auctionator scan " .. scanText, "muted"
     elseif addon:HasTSM() then
         return "Prices: TSM", "muted"
-    elseif scanText then
+    elseif scanText and not addon:BlizzardDataBeatsScan() then
         return "Prices: Auctionator scan " .. scanText, "warning"
+    elseif addon:GetBlizzardDataTime() then
+        -- Blizzard AH data (commodities only) fills in without either addon's
+        -- prices, or when it's newer than the last Auctionator scan
+        local updated = addon:GetBlizzardDataTime()
+        local days = math.floor((time() - updated) / 86400)
+        return "Prices: Blizzard AH data " .. (date("%Y-%m-%d", updated) == date("%Y-%m-%d")
+            and ("at " .. date("%H:%M", updated))
+            or string.format("%d day%s ago", math.max(days, 1), days == 1 and "" or "s")),
+            days >= 1 and "warning" or "muted"
     elseif addon:HasAuctionator() then
         return "Prices: no Auctionator scan yet", "warning"
     end

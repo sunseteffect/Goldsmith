@@ -953,6 +953,11 @@ end
 -- partial, profession, character (key), entry (the ledger entry), lot
 -- (crafts) }, and totals { gold in, gold out }.
 function addon:GetHistory(filters)
+    -- Once per session, when prices are in (see RepairOrderLots)
+    if not addon.orderLotsRepaired then
+        addon.orderLotsRepaired = true
+        addon:RepairOrderLots()
+    end
     local rows, totals = {}, { goldIn = 0, goldOut = 0 }
     local estimates = {}
     local function Estimate(name)
@@ -1027,10 +1032,18 @@ function addon:GetHistory(filters)
             local recipe = lot.name and addon:FindRecipeByOutput(lot.name)
             local profession = recipe and recipe.profession or addon:GetProfessionForItemName(lot.name or "")
             if lot.name and Keep("Order", lot.time, lot.name, profession, nil) then
+                -- The commission is gold in; profit adds the materials you
+                -- kept and sellable rewards, less your own materials
+                -- (orders saved before commissions were recorded have neither)
+                local commission = lot.commission
                 table.insert(rows, {
                     kind = "Order", time = lot.time, item = lot.name, itemID = lot.itemID, qty = lot.qty,
                     cost = lot.unitCost, partial = lot.partial, profession = profession, lot = lot,
+                    gold = commission,
+                    profit = commission and (commission + (lot.kept or 0) + (lot.rewardsValue or 0)
+                        - (lot.unitCost or 0) * (lot.qty or 0)),
                 })
+                if commission then totals.goldIn = totals.goldIn + commission end
             end
         end
     end

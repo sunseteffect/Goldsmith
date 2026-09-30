@@ -82,13 +82,26 @@ local function Tooltip(tooltip, row)
     end
     Line("Type", KIND_LONG[row.kind], KIND_COLORS[row.kind])
     Line("Quantity", tostring(row.qty))
-    if row.kind == "Craft" or row.kind == "Order" then
-        Line("Materials cost", Money(row.cost) .. (row.partial and "+" or "") .. " each")
-        if row.kind == "Order" then
-            tooltip:AddLine("Crafted for a crafting order: the item went to the customer, so it isn't in your stock and doesn't count toward what yours cost you.", 0.6, 0.6, 0.6, true)
+    if row.kind == "Order" then
+        -- Your materials only; the customer's aren't a cost of yours
+        Line("Your materials", Money((row.cost or 0) * (row.qty or 0)) .. (row.partial and "+" or ""))
+        if row.gold then
+            Line("Commission", Money(row.gold))
+            local lot = row.lot
+            if lot.kept then Line("Materials you kept", Money(lot.kept)) end
+            for _, r in ipairs(lot.rewards or {}) do
+                local name = C_Item.GetItemNameByID(r.itemID) or "Reward"
+                Line("Reward: " .. name .. (r.count > 1 and (" x" .. r.count) or ""),
+                    r.value > 0 and Money(r.value) or "can't be sold", r.value > 0 and "text" or "dim")
+            end
+            Line(row.partial and "Profit (at most)" or "Profit", Signed(row.profit), addon:MoneyColor(row.profit))
         else
-            tooltip:AddLine("Crafts are kept for working out costs, so they can't be deleted here.", 0.6, 0.6, 0.6, true)
+            tooltip:AddLine("Crafted before Goldsmith recorded commissions, so the gold isn't known.", 0.6, 0.6, 0.6, true)
         end
+        tooltip:AddLine("Crafted for a crafting order: the item went to the customer, so it isn't in your stock and doesn't count toward what yours cost you.", 0.6, 0.6, 0.6, true)
+    elseif row.kind == "Craft" then
+        Line("Materials cost", Money(row.cost) .. (row.partial and "+" or "") .. " each")
+        tooltip:AddLine("Crafts are kept for working out costs, so they can't be deleted here.", 0.6, 0.6, 0.6, true)
     else
         Line("Total", Money(math.abs(row.gold)))
         if row.qty and row.qty > 0 then Line("Each", Money(math.abs(row.gold) / row.qty)) end

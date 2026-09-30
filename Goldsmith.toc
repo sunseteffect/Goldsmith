@@ -9,6 +9,7 @@
 ## AddonCompartmentFunc: Goldsmith_OnAddonCompartmentClick
 
 Core.lua
+PriceData.lua
 Data.lua
 Theme.lua
 Widgets.lua

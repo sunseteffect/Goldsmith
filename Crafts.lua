@@ -291,8 +291,12 @@ local function CraftTooltip(tooltip, item)
     tooltip:AddLine(" ")
     if info.price then
         local stale = info.priceAge and info.priceAge >= STALE_PRICE_DAYS
-        Line(tooltip, "AH price", Money(info.price) .. ", " .. (addon:PriceAgeText(item.itemID) or ""),
-            stale and "warning" or nil)
+        Line(tooltip, "AH price", Money(info.price))
+        -- Where the price came from, on its own row: "Blizzard, 09:15",
+        -- "Auctionator, 2 days old", "TSM". From the row's own price, since
+        -- gear tiers are priced by link, not by their shared item ID.
+        Line(tooltip, "Price data", addon:PriceSourceText(item.itemID, info.priceSource, info.priceAge),
+            stale and "warning" or "muted")
         Line(tooltip, "Profit each", string.format("%s%s", Signed(info.profit),
             info.margin and string.format(" (%.0f%% ROI)", info.margin) or ""), addon:MoneyColor(info.profit))
     else

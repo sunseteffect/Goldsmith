@@ -496,9 +496,12 @@ local function SetupSteps()
             table.concat(done, " and ") .. ". Open the professions on your other crafters too." })
     end
 
-    if GoldsmithDB.lastPriceUpdate or hasTSM then
+    local scanned = hasAuctionator and GoldsmithDB.lastPriceUpdate
+    if scanned or hasTSM or addon:GetBlizzardDataTime() then
         table.insert(steps, { true, "AH prices in",
-            GoldsmithDB.lastPriceUpdate and "Auctionator has prices. Scan again whenever you're at the AH." or "Using TSM's prices." })
+            scanned and "Auctionator has prices. Scan again whenever you're at the AH."
+            or hasTSM and "Using TSM's prices."
+            or "Using Blizzard AH data for materials. Gear needs an Auctionator scan." })
     else
         table.insert(steps, { false, "Scan the auction house",
             "Open the AH and run Auctionator's Full Scan on its Auctionator tab (or search for your materials)." })

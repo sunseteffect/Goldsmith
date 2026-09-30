@@ -151,6 +151,55 @@ end
 -- price, and the market value is used instead.
 local UNDERCUT_RATIO = 0.6
 
+-- Blizzard AH data
+--
+-- PriceData.lua is written outside the game by Tools\Fetch-PriceData.ps1
+-- (a scheduled task, hourly) from the Blizzard API: region-wide commodities
+-- only, so no gear. It loads at login or /reload. Used when neither
+-- Auctionator nor TSM has a price for the item, or when Auctionator's price
+-- is a day or more old and this data is newer (not with TSM installed).
+--   GoldsmithPriceData.items[itemID] = { min, market, median, quantity }
+-- (copper; market = average of the cheapest 15% of units listed)
+function addon:GetBlizzardDataTime()
+    return GoldsmithPriceData and GoldsmithPriceData.updated
+end
+
+-- True if Blizzard AH data is under a day old and the last Auctionator scan
+-- was before it and on an earlier day (an older scan loses to fresh data)
+function addon:BlizzardDataBeatsScan()
+    local updated = addon:GetBlizzardDataTime()
+    local scan = GoldsmithDB.lastPriceUpdate
+    if not updated or time() - updated >= 86400 then return false end
+    return not scan or (scan < updated and date("%Y-%m-%d", scan) ~= date("%Y-%m-%d"))
+end
+
+-- Lowest price, or the market price when the lowest looks like a small
+-- undercut (same rule as the TSM check). Returns price, age in days, note.
+local function GetBlizzardPrice(itemID)
+    local data = GoldsmithPriceData
+    local entry = data and data.items and data.items[itemID]
+    if not entry then return nil end
+    local price, market, note = entry[1], entry[2], nil
+    if market and price < market * UNDERCUT_RATIO then
+        note = string.format("lowest listing %s looked like a small undercut", FormatGold(price))
+        price = market
+    end
+    local age = math.max(0, math.floor((time() - (data.updated or time())) / 86400))
+    return price, age, note
+end
+
+-- "Blizzard, 17:15" (today) or "Blizzard, 2 days old"
+local function BlizzardAgeText()
+    local updated = addon:GetBlizzardDataTime()
+    local when
+    if updated and date("%Y-%m-%d", updated) == date("%Y-%m-%d") then
+        when = date("%H:%M", updated)
+    else
+        when = addon:FormatAge(updated and math.max(1, math.floor((time() - updated) / 86400)))
+    end
+    return "Blizzard, " .. when
+end
+
 -- Vendor prices
 --
 -- The game only shows what a vendor charges while you're at the vendor, so
@@ -191,6 +240,8 @@ end
 --                    looked like a small undercut or far too high
 --   "TSM sale avg" - TSM's region sale average, used because the price
 --                    was far above what the item actually sells for
+--   "Blizzard"     - Blizzard AH data, when neither addon has a price or
+--                    Auctionator's is older
 -- nil if nothing has a price.
 function addon:GetAHPriceInfo(itemID)
     if not itemID then return nil end
@@ -216,8 +267,16 @@ function addon:GetAHPriceInfo(itemID)
         local tsm = GetTSMValue("DBMinBuyout", itemID)
         if tsm then
             price, source, age = tsm, "TSM", nil
-        elseif auctionator then
+        elseif auctionator and (preferred == "auctionator" or (age or 0) < 1
+                or not addon:BlizzardDataBeatsScan() or not GetBlizzardPrice(itemID)) then
             price, source = auctionator, "Auctionator"
+        else
+            -- No price from either addon, or Auctionator's is a day or more
+            -- old and the Blizzard data is fresher
+            local blizzard, blizzardAge, note = GetBlizzardPrice(itemID)
+            if blizzard then
+                return blizzard, "Blizzard", blizzardAge, note
+            end
         end
     end
     if not price then return nil end
@@ -295,34 +354,37 @@ function addon:GetMarketAge(itemID)
     end
 end
 
--- Where the price in use came from, and how old: "from 14:32",
--- "2 days old", "from TSM", "live, 5m ago", "TSM market value (...)"
-function addon:PriceAgeText(itemID)
-    local price, source, age, note = addon:GetMarketPriceInfo(itemID)
-    if not price then return "no price" end
+-- Where a price came from, and how old, from GetAHPriceInfo's source and
+-- age: "Blizzard, 09:15", "Auctionator, 2 days old", "TSM",
+-- "TSM market value", "live, 5m ago". Short, for tooltips.
+function addon:PriceSourceText(itemID, source, age)
     if source == "Live" then
-        local book = GoldsmithDB.orderBooks[itemID]
-        return string.format("live, %dm ago", math.floor((time() - book.time) / 60))
+        local book = itemID and GoldsmithDB.orderBooks[itemID]
+        return book and string.format("live, %dm ago", math.floor((time() - book.time) / 60)) or "live"
     end
-    if source == "TSM" then return "from TSM" end
-    if source == "TSM market" then return "TSM market value (" .. note .. ")" end
-    if source == "TSM sale avg" then return "TSM region sale average (" .. note .. ")" end
-    if source == "Vendor" then return "vendor price" end
-    return addon:FormatAge(age)
+    if source == "TSM" then return "TSM" end
+    if source == "TSM market" then return "TSM market value" end
+    if source == "TSM sale avg" then return "TSM sale average" end
+    if source == "Blizzard" then return BlizzardAgeText() end
+    if source == "Vendor" then return "vendor" end
+    if source == "Auctionator" then
+        return age and ("Auctionator, " .. addon:FormatAge(age):gsub("^from ", "")) or "Auctionator"
+    end
+    return source or "no price"
+end
+
+-- Where the price in use came from, and how old (see PriceSourceText)
+function addon:PriceAgeText(itemID)
+    local price, source, age = addon:GetMarketPriceInfo(itemID)
+    if not price then return "no price" end
+    return addon:PriceSourceText(itemID, source, age)
 end
 
 -- Same as PriceAgeText, for the AH price only (ignoring vendor prices)
 function addon:AHPriceAgeText(itemID)
-    local price, source, age, note = addon:GetAHPriceInfo(itemID)
+    local price, source, age = addon:GetAHPriceInfo(itemID)
     if not price then return "no price" end
-    if source == "Live" then
-        local book = GoldsmithDB.orderBooks[itemID]
-        return string.format("live, %dm ago", math.floor((time() - book.time) / 60))
-    end
-    if source == "TSM" then return "from TSM" end
-    if source == "TSM market" then return "TSM market value (" .. note .. ")" end
-    if source == "TSM sale avg" then return "TSM region sale average (" .. note .. ")" end
-    return addon:FormatAge(age)
+    return addon:PriceSourceText(itemID, source, age)
 end
 
 -- Time of the last Auctionator price update if it happened today ("14:32"),
@@ -886,16 +948,76 @@ local currentCraftRecipeID = nil
 local currentEnchantTarget = nil   -- item ID of the vellum an enchant went on
 local currentCraftReagents = nil   -- the materials list the game was given (qualities used)
 local currentCraftIsOrder = false  -- crafting for a crafting order (patron or player)
+local currentOrderTerms = nil      -- that order's commission and customer materials
+
+-- The crafting order you've claimed, if it's for this recipe (in case you
+-- craft something else while holding one)
+local function GetClaimedOrder(recipeID)
+    if not (C_CraftingOrders and C_CraftingOrders.GetClaimedOrder) then return nil end
+    local ok, order = pcall(C_CraftingOrders.GetClaimedOrder)
+    if ok and type(order) == "table" and order.spellID == recipeID then return order end
+end
 
 -- Whether a craft is for a crafting order: the game passes the order's ID
--- to the craft, and reports the order you've claimed (checked against the
--- recipe, in case you craft something else while holding one). Order
--- crafts go to the customer, so they aren't stock or a cost of yours.
+-- to the craft, or reports the order you've claimed. Order crafts go to
+-- the customer, so they aren't stock or a cost of yours.
 local function IsOrderCraft(recipeID, orderID)
     if type(orderID) == "number" and orderID > 0 then return true end
-    if not (C_CraftingOrders and C_CraftingOrders.GetClaimedOrder) then return false end
-    local ok, order = pcall(C_CraftingOrders.GetClaimedOrder)
-    return ok and type(order) == "table" and order.spellID == recipeID
+    return GetClaimedOrder(recipeID) ~= nil
+end
+
+-- Copy of game data (tables, numbers, strings, booleans) to save, `depth`
+-- levels deep
+local function PlainCopy(t, depth)
+    if type(t) ~= "table" then return nil end
+    local copy = {}
+    for k, v in pairs(t) do
+        if type(v) == "table" then
+            if depth > 1 then copy[k] = PlainCopy(v, depth - 1) end
+        elseif type(v) ~= "function" and type(v) ~= "userdata" then
+            copy[k] = v
+        end
+    end
+    return copy
+end
+
+-- What a claimed order pays and supplies: commission = the tip less the
+-- consortium's cut (copper; a patron order's gold reward), provided =
+-- { [itemID] = quantity } of the materials the customer gave. The raw
+-- numbers are kept too, to check against the mail.
+--
+-- The order's reagents list holds only what the customer supplies (tested
+-- on patron orders: every entry had source 0, which isn't the enum's
+-- Customer value), so every entry counts as provided.
+local function GetProvided(reagents)
+    local provided = {}
+    for _, r in ipairs(reagents or {}) do
+        local info = r.reagentInfo or r
+        local id = (type(info.reagent) == "table" and info.reagent.itemID) or info.itemID
+        if id and info.quantity then
+            provided[id] = (provided[id] or 0) + info.quantity
+        end
+    end
+    return provided
+end
+
+local function GetOrderTerms(recipeID)
+    local order = GetClaimedOrder(recipeID)
+    if not order then return nil end
+    local provided = GetProvided(order.reagents)
+    -- Patron rewards: { itemID, count, link }
+    local rewards = {}
+    for _, r in ipairs(order.npcOrderRewards or {}) do
+        local id = r.itemLink and C_Item.GetItemInfoInstant(r.itemLink)
+        if id then table.insert(rewards, { itemID = id, count = r.count or 1, link = r.itemLink }) end
+    end
+    return {
+        commission = math.max((order.tipAmount or 0) - (order.consortiumCut or 0), 0),
+        tip = order.tipAmount, cut = order.consortiumCut,
+        provided = provided,
+        rewards = rewards,
+        reagents = PlainCopy(order.reagents, 4),
+    }
 end
 
 -- Item ID of a material resourcefulness returned. The game nests it in a
@@ -987,7 +1109,7 @@ local function OnCraftResult(resultData)
     end
 
     -- Order crafts still teach the proc sizes above; only the lot differs
-    addon:RecordCraftLot(recipe, resultData, currentCraftReagents, currentCraftIsOrder)
+    addon:RecordCraftLot(recipe, resultData, currentCraftReagents, currentCraftIsOrder, currentOrderTerms)
 end
 
 -- Crafted lots
@@ -1003,7 +1125,8 @@ local CRAFT_LOT_LIMIT = 30
 local ORDER_CRAFT_LIMIT = 100
 
 -- Crafts for crafting orders go to GoldsmithDB.orderCrafts instead
--- ({ time, qty, unitCost, partial, name, itemID }, the last
+-- ({ time, qty, unitCost (your materials only), partial, name, itemID,
+-- commission (copper, nil for orders saved before it was recorded) }, the last
 -- ORDER_CRAFT_LIMIT): the item went to the customer, so it isn't stock and
 -- mustn't count toward what yours cost you. Kept for History.
 local function AddOrderCraft(lot)
@@ -1029,7 +1152,59 @@ function addon:MarkCraftAsOrder(itemID, lot)
     if addon.Refresh then addon.Refresh() end
 end
 
-function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder)
+-- A crafting order's customer materials aren't a cost of yours: takes them
+-- off `used` ({ [itemID] = quantity }). That exact item first, then any
+-- quality of the same material (the list given to the game names the
+-- lowest quality when the customer's is a better one). slotOf[itemID] =
+-- every item ID of its recipe slot.
+local function TakeOffProvided(used, provided, slotOf)
+    for id, qty in pairs(provided or {}) do
+        local left = qty
+        for _, usedID in ipairs({ id, unpack(slotOf[id] or {}) }) do
+            if used[usedID] and left > 0 then
+                local take = math.min(used[usedID], left)
+                used[usedID] = used[usedID] - take
+                left = left - take
+            end
+        end
+    end
+end
+
+-- Order crafts saved before customer materials were recognised (2026-09-30)
+-- counted them as yours. Those that kept the order's reagents list are
+-- worked out again once, at today's prices.
+function addon:RepairOrderLots()
+    for _, lot in ipairs(GoldsmithDB.orderCrafts or {}) do
+        local recipe = not lot.providedFixed and lot.orderReagents and lot.yours
+            and lot.name and addon:FindRecipeByOutput(lot.name)
+        if recipe then
+            local names, slotOf = {}, {}
+            for _, slot in ipairs(recipe.reagents) do
+                for i, id in ipairs(slot.itemIDs or {}) do
+                    names[id] = slot.names[i]
+                    slotOf[id] = slot.itemIDs
+                end
+            end
+            local used = {}
+            for id, qty in pairs(lot.yours) do used[id] = qty end
+            TakeOffProvided(used, GetProvided(lot.orderReagents), slotOf)
+            local cost, complete = 0, true
+            lot.yours = {}
+            for id, qty in pairs(used) do
+                if qty > 0 then
+                    lot.yours[id] = qty
+                    local unit = (names[id] and addon:GetOwnCost(names[id], lot.itemID)) or addon:GetMarketPrice(id)
+                    if unit then cost = cost + unit * qty else complete = false end
+                end
+            end
+            lot.unitCost = cost / math.max(lot.qty or 1, 1)
+            lot.partial = not complete
+            lot.providedFixed = true
+        end
+    end
+end
+
+function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTerms)
     local made = resultData.quantity or 0
     if made <= 0 then return end
     -- Multicraft extras: the game reports them separately. If the quantity
@@ -1044,10 +1219,13 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder)
         end
     end
 
-    local used, names = {}, {}
+    local used, names, slotOf = {}, {}, {}
     for _, slot in ipairs(recipe.reagents) do
         local ids = slot.itemIDs or {}
-        for i, id in ipairs(ids) do names[id] = slot.names[i] end
+        for i, id in ipairs(ids) do
+            names[id] = slot.names[i]
+            slotOf[id] = ids
+        end
         if #ids > 1 then
             -- Quality material: the qualities actually used, from the
             -- materials list given to the game
@@ -1069,9 +1247,23 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder)
         end
     end
 
+    TakeOffProvided(used, orderTerms and orderTerms.provided, slotOf)
+
+    -- What a material is worth to you: what it cost you, or the price
+    local function UnitValue(id)
+        return (names[id] and addon:GetOwnCost(names[id], resultData.itemID)) or addon:GetMarketPrice(id)
+    end
+
+    -- Materials resourcefulness gave back. On your own crafts they lower
+    -- the cost. On an order you keep them, even the customer's, so their
+    -- value is a gain of the order's (kept).
+    local kept = 0
     for _, ret in ipairs(resultData.resourcesReturned or {}) do
         local id = GetReturnedItemID(ret)
-        if id and used[id] and ret.quantity then
+        if isOrder then
+            local unit = id and ret.quantity and UnitValue(id)
+            if unit then kept = kept + unit * ret.quantity end
+        elseif id and used[id] and ret.quantity then
             used[id] = math.max(used[id] - ret.quantity, 0)
         end
     end
@@ -1079,7 +1271,7 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder)
     local cost, complete = 0, true
     for id, qty in pairs(used) do
         if qty > 0 then
-            local unit = (names[id] and addon:GetOwnCost(names[id], resultData.itemID)) or addon:GetMarketPrice(id)
+            local unit = UnitValue(id)
             if unit then
                 cost = cost + unit * qty
             else
@@ -1094,6 +1286,30 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder)
     }
     if isOrder then
         lot.itemID = resultData.itemID
+        lot.kept = kept > 0 and kept or nil
+        if orderTerms then
+            -- What the order paid (copper), when the game reported it
+            lot.commission = orderTerms.commission
+            lot.tip, lot.cut = orderTerms.tip, orderTerms.cut
+            -- Rewards you could sell, at their AH price; bound ones
+            -- (knowledge, currencies) are listed at 0
+            local rewardsValue = 0
+            for _, r in ipairs(orderTerms.rewards) do
+                local price = addon:CanAuction(r.itemID) and addon:GetAHPrice(r.itemID)
+                r.value = price and price * r.count or 0
+                rewardsValue = rewardsValue + r.value
+            end
+            lot.rewards = #orderTerms.rewards > 0 and orderTerms.rewards or nil
+            lot.rewardsValue = rewardsValue > 0 and rewardsValue or nil
+            -- For checking: the order's materials as the game gave them,
+            -- and what was counted as yours
+            lot.orderReagents = orderTerms.reagents
+            lot.providedFixed = true
+            lot.yours = {}
+            for id, qty in pairs(used) do
+                if qty > 0 then lot.yours[id] = qty end
+            end
+        end
         AddOrderCraft(lot)
         return
     end
@@ -1819,6 +2035,7 @@ function addon:InitializePricing()
         currentEnchantTarget = nil
         currentCraftReagents = craftingReagents
         currentCraftIsOrder = IsOrderCraft(recipeID, orderID)
+        currentOrderTerms = currentCraftIsOrder and GetOrderTerms(recipeID) or nil
         SaveRecipe(recipeID, false)
     end)
     hooksecurefunc(C_TradeSkillUI, "CraftSalvage", function()
@@ -1831,6 +2048,7 @@ function addon:InitializePricing()
             currentCraftReagents = craftingReagents
             currentCraftRecipeID = recipeID
             currentCraftIsOrder = IsOrderCraft(recipeID)
+            currentOrderTerms = currentCraftIsOrder and GetOrderTerms(recipeID) or nil
             currentEnchantTarget = itemTarget and C_Item.DoesItemExist(itemTarget)
                 and C_Item.GetItemID(itemTarget) or nil
             -- Enchanting gear doesn't make a scroll; only a vellum does
