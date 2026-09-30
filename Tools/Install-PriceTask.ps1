@@ -16,8 +16,10 @@ if ($Remove) {
 }
 
 $script = Join-Path $PSScriptRoot 'Fetch-PriceData.ps1'
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-    -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`""
+# Started through a headless console (Windows 11): powershell.exe on its
+# own flashes a window every run, even with -WindowStyle Hidden
+$action = New-ScheduledTaskAction -Execute 'conhost.exe' `
+    -Argument "--headless powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$script`""
 # Hourly at :15 past (Blizzard refreshes about hourly), starting now.
 $start = (Get-Date).Date.AddHours((Get-Date).Hour).AddMinutes(15)
 $trigger = New-ScheduledTaskTrigger -Once -At $start -RepetitionInterval (New-TimeSpan -Hours 1)
