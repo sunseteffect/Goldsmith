@@ -271,10 +271,13 @@ local function DealsAction(prof)
                 addon:Setting("dealPercent")), 0.6, 0.6, 0.6, true)
             for i = 1, math.min(#cheap, 8) do
                 local d = cheap[i]
-                tooltip:AddDoubleLine(d.name, string.format("%s (usually %s)", Money(d.now), Money(d.usual)),
+                tooltip:AddDoubleLine(d.name, string.format("%.0f%%  %s (usually %s)", d.diff * 100, Money(d.now), Money(d.usual)),
                     0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
             end
+            tooltip:AddLine("Click to see them on the Items tab: what you have, what they're used in, price history.",
+                0.37, 0.81, 0.48, true)
         end,
+        onClick = function() addon:OpenItems({ cheap = true }) end,
     }
 end
 

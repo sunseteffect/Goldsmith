@@ -49,7 +49,8 @@ function addon:OpenItem(name, itemID)
     addon:ShowTab("items")
 end
 
--- Opens the Items landing page. opts.inBags shows what you hold.
+-- Opens the Items landing page. opts.inBags shows what you hold;
+-- opts.cheap shows cheap materials.
 function addon:OpenItems(opts)
     pending = { landing = opts or {} }
     addon:ShowTab("items")
@@ -191,6 +192,93 @@ local STOCK_COLUMNS = {
     { key = "saleRate", label = "Sale rate", width = 64, justify = "RIGHT", tsm = true },
 }
 
+-- Materials well below their usual price (Settings > Cheap materials), from
+-- the Overview's "Cheap materials today"
+local CHEAP_COLUMNS = {
+    { key = "item", label = "Item" },
+    { key = "discount", label = "Vs usual", width = 70, justify = "RIGHT" },
+    { key = "price", label = "Price now", width = 90, justify = "RIGHT" },
+    { key = "usual", label = "Usually", width = 90, justify = "RIGHT" },
+    { key = "have", label = "You have", width = 70, justify = "RIGHT" },
+    { key = "usedIn", label = "Used in", width = 150 },
+}
+
+-- Cheap materials, each with what you hold (every character) and the
+-- recipes it goes into
+local function GetCheapMaterials(prof)
+    local threshold = -addon:Setting("dealPercent") / 100
+    local items = {}
+    for _, d in ipairs((addon:GetDeals(prof))) do
+        if d.diff <= threshold then
+            d.have = addon:GetHeld(d.itemID)
+            d.recipes = addon:GetRecipesUsing(d.itemID)
+            d.profitable = 0
+            for _, r in ipairs(d.recipes) do
+                if r.profit and r.profit > 0 then d.profitable = d.profitable + 1 end
+            end
+            d.milled = GoldsmithDB.milling[d.itemID] ~= nil
+            table.insert(items, d)
+        end
+    end
+    return items
+end
+
+local function UsedInText(item)
+    if #item.recipes > 0 then
+        return string.format("%d profitable of %d", item.profitable, #item.recipes),
+            item.profitable > 0 and "profit" or "muted"
+    end
+    if item.milled then return "Milling", "muted" end
+    return "-", "dim"
+end
+
+local function FillCheapRow(row, item)
+    local c = row.cells
+    c.item:SetText(ItemText(item.name, item.itemID))
+    c.discount:SetText(string.format("%.0f%%", item.diff * 100))
+    c.discount:SetTextColor(addon:Color("profit"))
+    c.price:SetText(Money(item.now))
+    c.usual:SetText(Money(item.usual))
+    c.usual:SetTextColor(addon:Color("muted"))
+    c.have:SetText(item.have > 0 and tostring(item.have) or "-")
+    c.have:SetTextColor(addon:Color(item.have > 0 and "text" or "dim"))
+    local text, color = UsedInText(item)
+    c.usedIn:SetText(text)
+    c.usedIn:SetTextColor(addon:Color(color))
+end
+
+local CHEAP_RECIPES_SHOWN = 8
+
+local function CheapTooltip(tooltip, item)
+    tooltip:AddLine(ItemText(item.name, item.itemID), 1, 1, 1)
+    tooltip:AddDoubleLine("Price now", Money(item.now), 0.8, 0.8, 0.8, 0.37, 0.81, 0.48)
+    tooltip:AddDoubleLine("Usually", string.format("%s (median of %d days)", Money(item.usual), item.days),
+        0.8, 0.8, 0.8, 1, 1, 1)
+    tooltip:AddDoubleLine("Range", string.format("%s - %s", Money(item.low), Money(item.high)),
+        0.8, 0.8, 0.8, 1, 1, 1)
+    tooltip:AddDoubleLine("You have", tostring(item.have), 0.8, 0.8, 0.8, 1, 1, 1)
+    if #item.recipes > 0 then
+        tooltip:AddLine(" ")
+        tooltip:AddLine("Used in crafts that sell (profit each, no concentration; sold per day, sale rate)", 1, 0.82, 0, true)
+        for i = 1, math.min(#item.recipes, CHEAP_RECIPES_SHOWN) do
+            local r = item.recipes[i]
+            local crafter = r.charKey ~= addon.charKey and GoldsmithDB.characters[r.charKey]
+            local name = r.recipe.outputName .. (crafter and (" · " .. crafter.name) or "")
+            local profit = r.profit and addon:Colorize(Signed(r.profit), r.profit > 0 and "profit" or "loss")
+                or addon:Colorize("no price", "dim")
+            local sales = addon:FormatDemand(r.demand) .. "/day"
+            if r.saleRate then sales = sales .. ", " .. addon:FormatSaleRate(r.saleRate) end
+            tooltip:AddDoubleLine(name, profit .. addon:Colorize("   " .. sales, "muted"), 0.9, 0.9, 0.9, 1, 1, 1)
+        end
+        if #item.recipes > CHEAP_RECIPES_SHOWN then
+            tooltip:AddLine(string.format("and %d more", #item.recipes - CHEAP_RECIPES_SHOWN), 0.6, 0.6, 0.6)
+        end
+    elseif item.milled then
+        tooltip:AddLine("A herb you mill into pigments.", 0.6, 0.6, 0.6, true)
+    end
+    tooltip:AddLine("Click to open its page: price history and more.", 0.37, 0.81, 0.48)
+end
+
 -- Sold per day and sale rate for list rows, looked up once per refresh
 -- so sorting by them doesn't ask TSM again for every comparison
 local function AddSales(items)
@@ -234,8 +322,17 @@ local SORTS = {
         demand     = { firstDescending = true,  value = function(i) return i.demand end },
         saleRate   = { firstDescending = true,  value = function(i) return i.saleRate end },
     },
+    cheap = {
+        item     = { firstDescending = false, value = function(i) return i.name end },
+        -- Biggest discount first: the most negative
+        discount = { firstDescending = false, value = function(i) return i.diff end },
+        price    = { firstDescending = true,  value = function(i) return i.now end },
+        usual    = { firstDescending = true,  value = function(i) return i.usual end },
+        have     = { firstDescending = true,  value = function(i) return i.have > 0 and i.have or nil end },
+        usedIn   = { firstDescending = true,  value = function(i) return #i.recipes > 0 and i.profitable or nil end },
+    },
 }
-local DEFAULT_SORTS = { stock = { key = "value", descending = true } }
+local DEFAULT_SORTS = { stock = { key = "value", descending = true }, cheap = { key = "discount", descending = false } }
 
 -- The sort for a list ("stock" or "search"), or nil for its own order
 local function GetSort(mode)
@@ -758,8 +855,11 @@ local function Create(parent)
     end
     if ChatEdit_InsertLink then hooksecurefunc("ChatEdit_InsertLink", OnInsertLink) end
     if ChatFrameUtil and ChatFrameUtil.InsertLink then hooksecurefunc(ChatFrameUtil, "InsertLink", OnInsertLink) end
+    -- In my bags and Cheap materials are two lists; ticking one unticks
+    -- the other
     view.inBags = UI.Checkbox(landing, "In my bags", function(checked)
         ui.itemsInBags = checked or nil
+        if checked then ui.itemsCheap = nil end
         view.list:ScrollToTop()
         addon.RefreshWindow()
     end)
@@ -767,6 +867,18 @@ local function Create(parent)
     UI.SetTooltip(view.inBags, function(tooltip)
         tooltip:AddLine("In my bags", 1, 1, 1)
         tooltip:AddLine("Everything you hold on every character and in the warband bank, with what it's worth and how long you've had it.", 0.6, 0.6, 0.6, true)
+    end)
+    view.cheap = UI.Checkbox(landing, "Cheap materials", function(checked)
+        ui.itemsCheap = checked or nil
+        if checked then ui.itemsInBags = nil end
+        view.list:ScrollToTop()
+        addon.RefreshWindow()
+    end)
+    view.cheap:SetPoint("LEFT", view.inBags, "RIGHT", 16, 0)
+    UI.SetTooltip(view.cheap, function(tooltip)
+        tooltip:AddLine("Cheap materials", 1, 1, 1)
+        tooltip:AddLine(string.format("Materials %d%% or more below their usual price (Settings > Cheap materials), what you have, and the crafts they go into.",
+            addon:Setting("dealPercent")), 0.6, 0.6, 0.6, true)
     end)
     view.note = UI.Text(landing, "label", "dim", "RIGHT")
     view.note:SetPoint("TOPRIGHT", 0, -7)
@@ -784,11 +896,15 @@ local function Create(parent)
 
     view.list = UI.List(landing, {
         fill = function(row, item)
-            if view.listMode == "stock" then FillStockRow(row, item) else FillSearchRow(row, item) end
+            if view.listMode == "stock" then FillStockRow(row, item)
+            elseif view.listMode == "cheap" then FillCheapRow(row, item)
+            else FillSearchRow(row, item) end
         end,
         tooltip = function(tooltip, item)
             if view.listMode == "stock" then
                 StockTooltip(tooltip, item)
+            elseif view.listMode == "cheap" then
+                CheapTooltip(tooltip, item)
             else
                 tooltip:AddLine(ItemText(item.name, item.itemID), 1, 1, 1)
                 tooltip:AddLine("Click to open its page.", 0.37, 0.81, 0.48)
@@ -817,7 +933,12 @@ local function Refresh(v, state)
             v.page.item = pending.page
         else
             v.page.item = nil
-            if pending.landing.inBags then ui.itemsInBags = true end
+            if pending.landing.inBags then ui.itemsInBags, ui.itemsCheap = true, nil end
+            if pending.landing.cheap then
+                ui.itemsCheap, ui.itemsInBags = true, nil
+                v.search = ""
+                v.searchBox:SetText("")
+            end
             v.list:ScrollToTop()
         end
         pending = nil
@@ -832,9 +953,11 @@ local function Refresh(v, state)
     end
 
     local inBags = ui.itemsInBags == true
+    local cheap = ui.itemsCheap == true and not inBags
     v.inBags:SetChecked(inBags)
+    v.cheap:SetChecked(cheap)
     local search = v.search or ""
-    local showList = inBags or search ~= ""
+    local showList = inBags or cheap or search ~= ""
     for _, board in ipairs(v.boards) do board:SetShown(not showList) end
     v.list:SetShown(showList)
     v.footer:SetShown(showList)
@@ -850,7 +973,24 @@ local function Refresh(v, state)
         return
     end
 
-    if inBags then
+    if cheap then
+        local items = {}
+        local needle = search:lower()
+        for _, item in ipairs(GetCheapMaterials(state.profession)) do
+            if needle == "" or item.name:lower():find(needle, 1, true) then table.insert(items, item) end
+        end
+        v.listMode = "cheap"
+        SortItems(items, "cheap")
+        local sort = GetSort("cheap")
+        v.list:SetSort(sort.key, sort.descending)
+        v.list:SetEmptyText(search ~= "" and "No cheap material matches."
+            or string.format("No materials are %d%% or more below their usual price right now.", addon:Setting("dealPercent")))
+        v.list:SetColumnsAndItems(CHEAP_COLUMNS, items)
+        v.footer:SetText(string.format("%s %d%%+ below usual. Usual = median price over the saved days (Auctionator scans).",
+            Plural(#items, "material"), addon:Setting("dealPercent")))
+        v.note:SetText(state.profession ~= "All" and ("Only " .. state.profession .. ", click a column to sort")
+            or "Click a column to sort")
+    elseif inBags then
         local stock = addon:GetStockValue(state.profession)
         local items, value = {}, 0
         local needle = search:lower()
@@ -893,6 +1033,7 @@ local function Reset(v)
     v.searchBox:SetText("")
     v.searchBox:ClearFocus()
     GoldsmithDB.ui2.itemsInBags = nil
+    GoldsmithDB.ui2.itemsCheap = nil
     v.list:ScrollToTop()
 end
 

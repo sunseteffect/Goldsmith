@@ -393,6 +393,42 @@ function addon:GetBestCrafts(prof, count)
     return list
 end
 
+-- Recipes a material goes into, that a counted character knows, each made
+-- by whoever makes it best, with its profit without concentration. Only
+-- crafts worth recommending (WhyNotRecommended): gear nobody buys and
+-- old-expansion items are left out, but ones selling at a loss today stay.
+-- Returns { { recipe, charKey, profit (nil without a price), demand (sold
+-- per day), saleRate } }, most profit first.
+function addon:GetRecipesUsing(itemID)
+    local list = {}
+    for recipeID, recipe in pairs(GoldsmithDB.recipes) do
+        local uses = false
+        for _, slot in ipairs(recipe.reagents or {}) do
+            for _, id in ipairs(slot.itemIDs or {}) do
+                if id == itemID then uses = true end
+            end
+        end
+        local charKey = uses and CrafterFor(recipeID)
+        if charKey and addon:IsCharacterIncluded(charKey) then
+            local row = PlainRowFor(charKey, recipe)
+            if row and IsRecommendable(recipe, row) then
+                local outputID = row.itemID or recipe.outputItemID
+                table.insert(list, {
+                    recipe = recipe, charKey = charKey, profit = row.profit,
+                    demand = row.demand or addon:GetDemand(outputID, recipe.outputName),
+                    saleRate = row.saleRate or addon:GetSaleRate(outputID),
+                })
+            end
+        end
+    end
+    table.sort(list, function(a, b)
+        if (a.profit ~= nil) ~= (b.profit ~= nil) then return a.profit ~= nil end
+        if a.profit and a.profit ~= b.profit then return a.profit > b.profit end
+        return a.recipe.outputName < b.recipe.outputName
+    end)
+    return list
+end
+
 -- How many to make
 --
 -- Deliberately cautious: better to sell out and make more than to sit on
