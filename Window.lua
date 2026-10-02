@@ -78,11 +78,11 @@ local function ProfessionLabel(prof)
 end
 
 function addon:CreateWindow()
-    if not GoldsmithDB.ui2 then
-        -- First time: open if the v1 window was open
-        GoldsmithDB.ui2 = { shown = GoldsmithDB.ui and GoldsmithDB.ui.shown }
-    end
+    GoldsmithDB.ui2 = GoldsmithDB.ui2 or {}
     local ui = GoldsmithDB.ui2
+    -- The window always starts closed on login and /reload; open it with
+    -- /gsm, the key, or the minimap button
+    ui.shown = nil
     ui.tab = ui.tab or "overview"
     ui.profession = ui.profession or "All"
     ui.range = ui.range or "7d"
@@ -406,11 +406,9 @@ function addon:CreateWindow()
     end
 
     frame:SetScript("OnShow", function()
-        ui.shown = true
         Refresh()
     end)
     frame:SetScript("OnHide", function()
-        ui.shown = false
         settings:Hide()
     end)
 
@@ -445,10 +443,6 @@ function addon:CreateWindow()
                 Refresh()
             end)
         end
-    end
-
-    if ui.shown then
-        frame:Show()
     end
 end
 

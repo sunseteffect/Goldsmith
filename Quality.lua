@@ -591,7 +591,8 @@ end
 -- each material mix the sweep in RefreshTierData found (richer mixes cost
 -- more in materials but less concentration). Only options that make a
 -- profit with concentration are used, and only those accept(recipe, row)
--- allows, if given. Each item is capped at about a day of its sales.
+-- allows, if given. Each item is capped at about a day of its sales, less
+-- what you already hold; an item you hold a day's sales of isn't planned.
 --
 -- 1. Fill: most extra gold per concentration point first, as many crafts
 --    as fit, then the next. For a budget that runs out, this is what earns
@@ -624,19 +625,30 @@ function addon:PlanConcentration(profession, budget, accept)
             for _, e in ipairs(rows[1] and rows[1].scenarios or {}) do
                 if e.concentrate and e.concentration > 0 and e.concentrationValue and e.concentrationValue > 0
                     and e.profit and e.profit > 0 and (not accept or accept(recipe, e)) then
-                    -- One cap per item made (each tier is its own item)
+                    -- One cap per item made (each tier is its own item, but
+                    -- gear's tiers share one item ID)
                     local capKey = e.itemID or (recipe.recipeID .. ":" .. e.tier)
+                    if e.itemID and addon:IsGear(e.itemID) then capKey = e.itemID .. ":" .. e.tier end
                     if caps[capKey] == nil then
                         local demand = e.demand or (e.itemID and addon:GetDemand(e.itemID, recipe.outputName))
-                        caps[capKey] = (demand and e.outputPerCraft > 0)
-                            and math.max(math.floor(demand / e.outputPerCraft), 1) or math.huge
+                        -- Less what you already hold (bags, banks, AH listings): an
+                        -- item still sitting unsold isn't made again until it sells
+                        local left = demand and (demand - (e.itemID and addon:GetHeld(e.itemID, e.tier) or 0))
+                        if left and left < 1 then
+                            caps[capKey] = 0
+                        else
+                            caps[capKey] = (left and e.outputPerCraft > 0)
+                                and math.max(math.floor(left / e.outputPerCraft), 1) or math.huge
+                        end
                     end
-                    found[capKey] = found[capKey] or {}
-                    table.insert(found[capKey], {
-                        recipe = recipe, row = e, tierCount = e.tierCount, capKey = capKey,
-                        full = e.scenario.concentration, points = e.concentration,
-                        gain = e.concentrationValue * e.concentration,
-                    })
+                    if caps[capKey] > 0 then
+                        found[capKey] = found[capKey] or {}
+                        table.insert(found[capKey], {
+                            recipe = recipe, row = e, tierCount = e.tierCount, capKey = capKey,
+                            full = e.scenario.concentration, points = e.concentration,
+                            gain = e.concentrationValue * e.concentration,
+                        })
+                    end
                 end
             end
         end

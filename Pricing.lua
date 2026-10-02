@@ -435,6 +435,20 @@ local function GetOwnSoldPerDay(itemName)
     return units / OWN_SALES_DAYS
 end
 
+-- Units of an item you sold per day over the last OWN_SALES_DAYS days, or
+-- nil if none
+function addon:GetOwnDemand(itemName)
+    return itemName and GetOwnSoldPerDay(itemName)
+end
+
+-- Weapons, armor and profession equipment. They aren't commodities: each
+-- realm has its own listings, so region sales are spread over every realm.
+function addon:IsGear(itemID)
+    local classID = itemID and select(6, C_Item.GetItemInfoInstant(itemID))
+    return classID == Enum.ItemClass.Weapon or classID == Enum.ItemClass.Armor
+        or classID == Enum.ItemClass.Profession
+end
+
 function addon:HasTSM()
     return TSM_API and TSM_API.GetCustomPriceValue and true or false
 end
@@ -1784,11 +1798,11 @@ local function ScanLearnedRecipes()
                 if learned then
                     table.insert(toStats, id)
                 end
-            else
+            elseif learned then
+                -- Only learned ones: a recipe learned later this session
+                -- still gets saved on the next scan
                 triedThisSession[id] = true
-                if learned then
-                    table.insert(toSave, id)
-                end
+                table.insert(toSave, id)
             end
         end
     end
@@ -2064,6 +2078,7 @@ function addon:InitializePricing()
     resultFrame:RegisterEvent("TRADE_SKILL_ITEM_CRAFTED_RESULT")
     resultFrame:RegisterEvent("TRADE_SKILL_SHOW")
     resultFrame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
+    resultFrame:RegisterEvent("NEW_RECIPE_LEARNED")
     resultFrame:SetScript("OnEvent", function(_, event, resultData)
         if event == "TRADE_SKILL_ITEM_CRAFTED_RESULT" then
             OnCraftResult(resultData)

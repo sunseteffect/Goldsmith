@@ -11,12 +11,16 @@ local addon = _G.Goldsmith or {}
 local AH_CUT = 0.05
 -- The ROI a craft needs to count as worth doing is a setting (minROI)
 local MIN_DEMAND = 1           -- sold per day
+local GEAR_MIN_DEMAND = 10     -- sold per day across the region, for gear
 local ENOUGH_STOCK_CAP = 20    -- see GetBestCrafts
 
 -- Whether a craft is worth recommending: an item from the current
 -- expansion that sells at least MIN_DEMAND a day. Items nobody buys (no
 -- demand data, or old-expansion items with a few shelf listings) often show
 -- huge "profits" from listings that never sell, so they're left out.
+-- Gear sells realm by realm, so TSM's region sales are spread over every
+-- realm (1 a day region-wide is a sale every few months on yours): it needs
+-- GEAR_MIN_DEMAND, or a sale of your own in the last 14 days.
 -- Items the game hasn't loaded yet are left out until it has.
 -- Returns nil if it's worth recommending, otherwise why not (plain words).
 function addon:WhyNotRecommended(recipe, row)
@@ -30,6 +34,10 @@ function addon:WhyNotRecommended(recipe, row)
     if demand == nil then return "No sales data, so there's no telling whether it sells." end
     if demand < MIN_DEMAND then
         return string.format("Sells under %d a day, so it may take a long time to sell.", MIN_DEMAND)
+    end
+    if addon:IsGear(itemID) and demand < GEAR_MIN_DEMAND and not addon:GetOwnDemand(recipe.outputName) then
+        return string.format("Gear sells realm by realm: about %s a day across the whole region is a sale every few weeks or months on yours. Recommended once you've sold one yourself.",
+            addon:FormatDemand(demand))
     end
 end
 
@@ -366,7 +374,7 @@ function addon:GetBestCrafts(prof, count)
                     and (row.margin or 0) >= addon:Setting("minROI") and IsRecommendable(recipe, row) then
                     local itemID = row.itemID or recipe.outputItemID
                     -- In bags, banks or listed on the AH, on any character
-                    local have = itemID and addon:GetHeld(itemID) or 0
+                    local have = itemID and addon:GetHeld(itemID, row.tier) or 0
                     if have == 0 then
                         local make, makeReason = addon:SuggestedQuantity(recipe.outputName)
                         table.insert(list, {

@@ -134,6 +134,16 @@ local function CreateTodoLine(card, i)
             tooltip:AddDoubleLine("Concentration", tostring(math.floor(item.concentration + 0.5)),
                 0.8, 0.8, 0.8, 0.91, 0.76, 0.35)
         end
+        local demand, source = addon:GetDemand(item.itemID, item.recipe.outputName)
+        if demand then
+            tooltip:AddDoubleLine("Sold per day", string.format("%s (%s)", addon:FormatDemand(demand), source),
+                0.8, 0.8, 0.8, 1, 1, 1)
+        end
+        local saleRate = item.row.saleRate or addon:GetSaleRate(item.itemID)
+        if saleRate then
+            tooltip:AddDoubleLine("Sale rate", addon:FormatSaleRate(saleRate) .. " of listings sell",
+                0.8, 0.8, 0.8, 1, 1, 1)
+        end
         if item.concentration then
             tooltip:AddLine("The best use of this character's concentration right now.", 0.6, 0.6, 0.6, true)
         else

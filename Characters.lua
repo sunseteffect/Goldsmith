@@ -24,10 +24,13 @@ end
 --     goldTime      = { ["YYYY-MM-DD"] = seconds spent making gold },
 --     stock, stockTime = { [itemID] = count in bags and bank } and when,
 --     auctions, auctionsTime = { [itemID] = count listed on the AH } and
---                              when it was last read from the AH }
+--                              when it was last read from the AH,
+--     gearTiers, auctionTiers = { [itemID] = { [tier] = count } } for
+--                              gear in bags and bank, and on the AH }
 -- addon.char is the logged-in character's table. Prices, recipes' materials,
 -- the ledger, milling and vendor prices stay shared across the account.
--- The warband bank is shared too: GoldsmithDB.warbandStock and warbandGold.
+-- The warband bank is shared too: GoldsmithDB.warbandStock, warbandGearTiers
+-- and warbandGold.
 --
 -- Concentration refills over time, so an alt's current amount is worked out
 -- from its last saved amount and how long ago that was.
@@ -49,7 +52,8 @@ end
 
 local function EnsureFields(c)
     for _, key in ipairs({ "professions", "knownRecipes", "recipeStats", "tierData",
-                           "calibration", "concentration", "gold", "goldTime", "stock", "auctions" }) do
+                           "calibration", "concentration", "gold", "goldTime", "stock", "auctions",
+                           "gearTiers", "auctionTiers" }) do
         c[key] = c[key] or {}
     end
 end
@@ -199,6 +203,44 @@ local function GetStockItemIDs()
     return ids
 end
 
+-- Gear's quality tier (1, 2, ...) from its link: every tier of a piece of
+-- gear shares one item ID
+local function GearTier(link)
+    local fn = link and C_TradeSkillUI.GetItemCraftedQualityByItemInfo
+    if not fn then return nil end
+    local ok, tier = pcall(fn, link)
+    if ok and tier and tier > 0 then return tier end
+end
+
+local function AddTier(tiers, itemID, tier, count)
+    tiers[itemID] = tiers[itemID] or {}
+    tiers[itemID][tier] = (tiers[itemID][tier] or 0) + count
+end
+
+-- Gear in bags and bank (character's and warband's) by tier, read slot by
+-- slot. Containers the game hasn't loaded are skipped; their items count
+-- as "tier unknown" (see GetHeld). Returns own tiers, warband tiers.
+local function ScanGearTiers(ids)
+    local own, warband, seen = {}, {}, {}
+    for name, bag in pairs(Enum.BagIndex or {}) do
+        local tiers = (name:find("^Account") and warband)
+            or ((name == "Backpack" or name:find("^Bag_") or name == "ReagentBag"
+                or name:find("Bank")) and own)
+        -- Some bags have more than one name
+        if tiers and not seen[bag] then
+            seen[bag] = true
+            for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
+                local info = C_Container.GetContainerItemInfo(bag, slot)
+                if info and ids[info.itemID] and addon:IsGear(info.itemID) then
+                    local tier = GearTier(info.hyperlink)
+                    if tier then AddTier(tiers, info.itemID, tier, info.stackCount or 1) end
+                end
+            end
+        end
+    end
+    return own, warband
+end
+
 -- The game reports the bank and warband bank even while they're closed
 -- (checked in game 2026-09-26), so everything is counted at any time.
 -- A warband bank that suddenly reads empty is more likely not loaded yet
@@ -206,7 +248,8 @@ end
 local function SnapshotStock()
     local c = addon.char
     local stock, warband, warbandTotal = {}, {}, 0
-    for itemID in pairs(GetStockItemIDs()) do
+    local ids = GetStockItemIDs()
+    for itemID in pairs(ids) do
         local own = C_Item.GetItemCount(itemID, true, false, true, false) or 0
         local withWarband = C_Item.GetItemCount(itemID, true, false, true, true) or 0
         if own > 0 then stock[itemID] = own end
@@ -215,11 +258,13 @@ local function SnapshotStock()
             warbandTotal = warbandTotal + withWarband - own
         end
     end
-    c.stock, c.stockTime = stock, time()
+    local gearTiers, warbandTiers = ScanGearTiers(ids)
+    c.stock, c.gearTiers, c.stockTime = stock, gearTiers, time()
     -- Left over from when bags and bank were kept separately
     c.bagStock, c.bankStock, c.bankTime = nil, nil, nil
     if warbandTotal > 0 or next(GoldsmithDB.warbandStock) == nil then
         GoldsmithDB.warbandStock = warband
+        GoldsmithDB.warbandGearTiers = warbandTiers
     end
 end
 
@@ -256,14 +301,16 @@ local function SnapshotAuctions()
     local ok, owned = pcall(C_AuctionHouse.GetOwnedAuctions)
     if not ok or type(owned) ~= "table" then return end
     local active = Enum.AuctionStatus and Enum.AuctionStatus.Active or 0
-    local auctions = {}
+    local auctions, tiers = {}, {}
     for _, a in ipairs(owned) do
         local itemID = a.itemKey and a.itemKey.itemID
         if itemID and a.status == active then
             auctions[itemID] = (auctions[itemID] or 0) + (a.quantity or 1)
+            local tier = addon:IsGear(itemID) and GearTier(a.itemLink)
+            if tier then AddTier(tiers, itemID, tier, a.quantity or 1) end
         end
     end
-    addon.char.auctions, addon.char.auctionsTime = auctions, time()
+    addon.char.auctions, addon.char.auctionTiers, addon.char.auctionsTime = auctions, tiers, time()
     if addon.Refresh then addon.Refresh() end
 end
 
@@ -288,11 +335,22 @@ end
 
 -- Everything you hold of an item, whether or not the character counts
 -- (an excluded bank alt still holds it): bags and banks on every
--- character, the warband bank, and AH listings
-function addon:GetHeld(itemID)
-    local total = GoldsmithDB.warbandStock[itemID] or 0
+-- character, the warband bank, and AH listings.
+-- With a tier, gear counts only that tier: silver gear doesn't stop gold
+-- being made. Items whose tier wasn't read (a bank the game hadn't
+-- loaded, stock saved before tiers were kept) count toward every tier, to
+-- be safe.
+function addon:GetHeld(itemID, tier)
+    local function Count(total, tiers)
+        local byTier = tier and tiers and tiers[itemID]
+        if not byTier or total == 0 then return total end
+        local known = 0
+        for _, n in pairs(byTier) do known = known + n end
+        return math.min((byTier[tier] or 0) + math.max(total - known, 0), total)
+    end
+    local total = Count(GoldsmithDB.warbandStock[itemID] or 0, GoldsmithDB.warbandGearTiers)
     for _, c in pairs(GoldsmithDB.characters) do
-        total = total + (c.stock[itemID] or 0) + (c.auctions[itemID] or 0)
+        total = total + Count(c.stock[itemID] or 0, c.gearTiers) + Count(c.auctions[itemID] or 0, c.auctionTiers)
     end
     return total
 end
@@ -638,6 +696,12 @@ function addon:InitializeCharacters()
             return
         elseif event == "AUCTION_HOUSE_SHOW" then
             QueryAuctions()
+        elseif event == "BANKFRAME_OPENED" then
+            -- The bank's slots can be read now, so gear tiers there too
+            C_Timer.After(1, function()
+                SnapshotStock()
+                if addon.Refresh then addon.Refresh() end
+            end)
         end
         if GOLDMAKING_OPEN[event] then
             OnGoldmakingOpen(GOLDMAKING_OPEN[event])
