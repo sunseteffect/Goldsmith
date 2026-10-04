@@ -612,9 +612,187 @@ local function MaterialName(itemID)
         .. (C_Item.GetItemNameByID(itemID) or ("item " .. itemID))
 end
 
+-- Materials: enough to start each craft (resourcefulness may give some
+-- back along the way, so you may get further than this). Adds notes and
+-- blockers to state; returns how many crafts the materials allow.
+local function CheckMaterials(state, needs, crafts)
+    local missing = {}
+    for itemID, per in pairs(needs) do
+        local have = C_Item.GetItemCount(itemID, true, false, true, true) or 0
+        local possible = math.floor(have / per)
+        if possible == 0 then
+            table.insert(missing, string.format("%d %s", per - have, MaterialName(itemID)))
+        elseif possible < crafts then
+            table.insert(state.notes, string.format("Materials for %d crafts: %s runs out.", possible, MaterialName(itemID)))
+            crafts = possible
+        end
+    end
+    if #missing > 0 then
+        table.insert(state.blockers, "Missing for one craft: " .. table.concat(missing, ", ")
+            .. ". Send the shopping list to Auctionator.")
+    end
+    return crafts
+end
+
+-- Steps before the final craft: plan rows you'll mill or craft yourself
+-- that you don't have enough of yet, deepest first (pigments are milled
+-- before the ink that uses them is made)
+local function CollectSteps(nodes, steps)
+    for _, node in ipairs(nodes) do
+        if node.toGet > 0 and node.best then
+            CollectSteps(node.children, steps)
+            if node.best.method == "Mill" or node.best.method == "Craft" then
+                table.insert(steps, node)
+            end
+        end
+    end
+    return steps
+end
+
+-- The salvage recipe (milling, prospecting) that takes an item, for the
+-- open profession: recipe ID and how many items one cast uses, or nil
+local salvageRecipes = {}
+local function FindSalvageRecipe(itemID)
+    local info = C_TradeSkillUI.GetBaseProfessionInfo()
+    local key = table.concat({ addon.charKey or "", info and info.professionName or "", itemID }, ":")
+    if salvageRecipes[key] ~= nil then
+        return salvageRecipes[key] and salvageRecipes[key].recipeID, salvageRecipes[key] and salvageRecipes[key].perCast
+    end
+    salvageRecipes[key] = false
+    if C_TradeSkillUI.GetSalvagableItemIDs and Enum.TradeskillRecipeType then
+        for _, recipeID in ipairs(C_TradeSkillUI.GetAllRecipeIDs() or {}) do
+            local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+            if ok and schematic and schematic.recipeType == Enum.TradeskillRecipeType.Salvage then
+                local okI, ids = pcall(C_TradeSkillUI.GetSalvagableItemIDs, recipeID)
+                local recipeInfo = C_TradeSkillUI.GetRecipeInfo(recipeID)
+                for _, id in ipairs(okI and ids or {}) do
+                    if id == itemID and recipeInfo and recipeInfo.learned then
+                        salvageRecipes[key] = { recipeID = recipeID, perCast = math.max(schematic.quantityMax or 1, 1) }
+                        -- The planner rounds herbs up to whole mills
+                        local record = GoldsmithDB.milling[itemID]
+                        if record then record.perCast = salvageRecipes[key].perCast end
+                        return recipeID, salvageRecipes[key].perCast
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- The biggest stack of an item in your bags (salvage needs one to use up)
+local function LargestBagStack(itemID)
+    local best, count = nil, 0
+    for bag = 0, NUM_TOTAL_EQUIPPED_BAG_SLOTS or 5 do
+        for slot = 1, C_Container.GetContainerNumSlots(bag) do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.itemID == itemID and info.stackCount > count then
+                best, count = ItemLocation:CreateFromBagAndSlot(bag, slot), info.stackCount
+            end
+        end
+    end
+    return best, count
+end
+
+-- Button label: "Mill 15 Tranquility Bloom", shortened if it won't fit
+local function StepLabel(verb, count, name)
+    local label = string.format("%s %d %s", verb, count, name)
+    if #label > 22 then label = string.format("%s %d", verb, count) end
+    return label
+end
+
+-- A mill step: mill enough herbs for the pigments still needed, from one
+-- stack at a time
+local function MillStepState(node, state)
+    local herbID, herbName = node.best.herbID, node.best.herbName
+    local record = GoldsmithDB.milling[herbID]
+    local profession = record and record.profession or "Inscription"
+    if not ProfessionOpen({ profession = profession }) then
+        table.insert(state.blockers, string.format("Open %s to mill %s first.", profession, herbName))
+        return state
+    end
+    local recipeID, perCast = FindSalvageRecipe(herbID)
+    if not recipeID then
+        table.insert(state.blockers, string.format("This character can't mill %s.", herbName))
+        return state
+    end
+    local location, stack = LargestBagStack(herbID)
+    local wanted = math.ceil(node.toGet / math.max(node.best.perHerb, 0.01) / perCast - 0.0001)
+    local casts = math.min(wanted, math.floor(stack / perCast))
+    if casts <= 0 then
+        local inBags = C_Item.GetItemCount(herbID) or 0
+        local inBank = (C_Item.GetItemCount(herbID, true, false, true, true) or 0) - inBags
+        if inBank >= perCast then
+            table.insert(state.blockers, string.format("Take %s out of the bank to mill it.", herbName))
+        else
+            table.insert(state.blockers, string.format("Not enough %s to mill (%d at a time). Send the shopping list to Auctionator.",
+                herbName, perCast))
+        end
+        state.label = StepLabel("Mill", wanted * perCast, herbName)
+        return state
+    end
+    local inBags = C_Item.GetItemCount(herbID) or 0
+    table.insert(state.notes, string.format("Uses %d %s per mill; you have %d in your bags.", perCast, herbName, inBags))
+    if casts < wanted and inBags >= (casts + 1) * perCast then
+        table.insert(state.notes, "Mills one stack per click.")
+    end
+    state.salvage = { recipeID = recipeID, casts = casts, location = location }
+    state.enabled = #state.blockers == 0
+    state.label = StepLabel("Mill", casts * perCast, herbName)
+    return state
+end
+
+-- A craft step: make the material, using the qualities the plan picked
+-- for its own materials
+local function CraftStepState(node, state)
+    local recipe = node.best.recipe
+    if not ProfessionOpen(recipe) then
+        table.insert(state.blockers, string.format("Open %s to make %s first.", recipe.profession, node.name))
+        return state
+    end
+    local info = C_TradeSkillUI.GetRecipeInfo(recipe.recipeID)
+    if not (info and info.learned) then
+        table.insert(state.blockers, string.format("This character doesn't know %s.", node.name))
+        return state
+    end
+    local chosen = {}
+    for _, child in ipairs(node.children) do chosen[child.itemID] = true end
+    local reagents, needs = addon:GetCraftReagents(recipe.recipeID, { chosen = chosen })
+    if not reagents then
+        table.insert(state.blockers, "The game didn't give this recipe's materials. Try closing and reopening the profession.")
+        return state
+    end
+    local outputPerCraft = addon:GetCraftModel(recipe)
+    local wanted = math.max(math.ceil(node.toGet / math.max(outputPerCraft, 0.01) - 0.0001), 1)
+    local crafts = CheckMaterials(state, needs, wanted)
+    state.recipeID, state.reagents, state.crafts = recipe.recipeID, reagents, crafts
+    state.enabled = #state.blockers == 0 and crafts > 0
+    state.label = StepLabel("Craft", crafts, node.name)
+    return state
+end
+
+-- The Craft button while there are steps left: the first step, with the
+-- full list for the tooltip
+local function StepState(steps, plan)
+    local state = { label = "Craft", blockers = {}, notes = {}, steps = {} }
+    for _, node in ipairs(steps) do
+        local verb = node.best.method == "Mill" and "Mill" or "Craft"
+        local what = node.best.method == "Mill" and node.best.herbName or node.name
+        table.insert(state.steps, string.format("%s %s", verb, what))
+    end
+    table.insert(state.steps, string.format("Craft %d %s", plan.crafts, plan.recipe.outputName))
+    local node = steps[1]
+    if node.best.method == "Mill" then
+        return MillStepState(node, state)
+    end
+    return CraftStepState(node, state)
+end
+
 -- What the Craft button can do for a plan. Returns { label, enabled,
 -- open (opens the profession instead), blockers (why it can't), notes,
--- crafts, reagents, concentrate, points }.
+-- crafts, reagents, concentrate, points }. While materials still need
+-- milling or crafting, it's that step instead: steps (labels, the last is
+-- the final craft), and salvage = { recipeID, casts, location } for a mill
+-- or recipeID for a craft.
 local function CraftState(p, tierInfo, plan)
     local recipe = p.recipe
     local state = { label = "Craft", blockers = {}, notes = {} }
@@ -637,6 +815,13 @@ local function CraftState(p, tierInfo, plan)
         state.label, state.enabled, state.open = "Open " .. recipe.profession, true, true
         table.insert(state.notes, "Opens " .. recipe.profession .. " at this recipe. The game only crafts with the profession open.")
         return state
+    end
+
+    -- Materials you'll mill or craft yourself come first, one step per
+    -- click; the button moves on as your bags fill up
+    local steps = GoldsmithDB.ui2.planUseOnHand ~= false and CollectSteps(plan.nodes, {}) or {}
+    if #steps > 0 then
+        return StepState(steps, plan)
     end
 
     if C_TradeSkillUI.GetRecipeRequirements then
@@ -671,24 +856,7 @@ local function CraftState(p, tierInfo, plan)
         state.points = crafts * expected
     end
 
-    -- Materials: enough to start each craft (resourcefulness may give some
-    -- back along the way, so you may get further than this)
-    local missing = {}
-    for itemID, per in pairs(needs) do
-        local have = C_Item.GetItemCount(itemID, true, false, true, true) or 0
-        local possible = math.floor(have / per)
-        if possible == 0 then
-            table.insert(missing, string.format("%d %s", per - have, MaterialName(itemID)))
-        elseif possible < crafts then
-            table.insert(state.notes, string.format("Materials for %d crafts: %s runs out.", possible, MaterialName(itemID)))
-            crafts = possible
-        end
-    end
-    if #missing > 0 then
-        table.insert(state.blockers, "Missing for one craft: " .. table.concat(missing, ", ")
-            .. ". Send the shopping list to Auctionator.")
-    end
-
+    crafts = CheckMaterials(state, needs, crafts)
     state.crafts = crafts
     state.enabled = #state.blockers == 0 and crafts > 0
     state.label = string.format("Craft %d", crafts)
@@ -819,8 +987,14 @@ local function CreatePlanScreen(parent)
             end
             return
         end
+        if state.salvage then
+            -- CraftSalvage(recipeID, casts, itemLocation)
+            C_TradeSkillUI.CraftSalvage(state.salvage.recipeID, state.salvage.casts, state.salvage.location)
+            return
+        end
         -- CraftRecipe(recipeID, count, reagents, recipeLevel, orderID, concentrate)
-        C_TradeSkillUI.CraftRecipe(p.recipe.recipeID, state.crafts, state.reagents, nil, nil, state.concentrate)
+        C_TradeSkillUI.CraftRecipe(state.recipeID or p.recipe.recipeID, state.crafts, state.reagents, nil, nil,
+            state.concentrate)
     end)
     screen.craft:SetPoint("BOTTOMRIGHT", screen.shop, "TOPRIGHT", 0, 8)
     UI.Style(screen.craft, "highlight", "borderGold")
@@ -830,6 +1004,14 @@ local function CreatePlanScreen(parent)
         local state = screen.craftState
         if not state then return end
         tooltip:AddLine(state.open and state.label or "Craft from Goldsmith", 1, 1, 1)
+        if state.steps then
+            tooltip:AddLine("One click per step; the button moves on as your bags fill up:", 0.8, 0.8, 0.8, true)
+            for i, step in ipairs(state.steps) do
+                local r, g, b = 0.6, 0.6, 0.6
+                if i == 1 then r, g, b = addon:Color("gold") end
+                tooltip:AddLine(string.format("    %d. %s", i, step), r, g, b)
+            end
+        end
         if state.reagents and #state.reagents > 0 then
             tooltip:AddLine("Uses the plan's mix of material qualities:", 0.8, 0.8, 0.8)
             for _, entry in ipairs(state.reagents) do
@@ -854,12 +1036,14 @@ local function CreatePlanScreen(parent)
             screen.syncedKey = nil
             return
         end
-        local parts = { p.recipe.recipeID, tostring(state.concentrate), screen.qty:GetText() }
+        -- A craft step shows that step's recipe
+        local recipeID = state.recipeID or p.recipe.recipeID
+        local parts = { recipeID, tostring(state.concentrate), screen.qty:GetText() }
         for _, e in ipairs(state.reagents) do table.insert(parts, e.reagent.itemID .. "x" .. e.quantity) end
         local key = table.concat(parts, "|")
         if key ~= screen.syncedKey then
             screen.syncedKey = key
-            SyncProfessionWindow(p.recipe.recipeID, state)
+            SyncProfessionWindow(recipeID, state)
         end
     end
 

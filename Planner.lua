@@ -277,6 +277,13 @@ local function BuildNode(itemID, name, need, depth, ctx, quality)
         end
     elseif best and best.method == "Mill" and node.toGet > 0 then
         local herbs = node.toGet / best.perHerb
+        -- Each mill uses a fixed number of herbs (10 in Midnight), so you
+        -- need whole mills' worth
+        local record = GoldsmithDB.milling[best.herbID]
+        local perCast = record and record.perCast
+        if perCast and perCast > 1 then
+            herbs = math.ceil(herbs / perCast - 0.0001) * perCast
+        end
         table.insert(node.children, BuildNode(best.herbID, best.herbName, herbs, depth + 1, ctx))
     end
     return node

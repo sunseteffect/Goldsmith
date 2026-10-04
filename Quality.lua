@@ -398,7 +398,8 @@ function addon:GetWorstCaseCost(recipe, info)
 end
 
 -- Crafting from Goldsmith: the materials list to give the game for a
--- scenario's mix of qualities (nil scenario: all lowest quality), built
+-- scenario's mix of qualities (nil scenario: all lowest quality; or
+-- { chosen = { [itemID] = true } } for the qualities a plan picked), built
 -- the same way as the lists the game was asked about, from the recipe's
 -- schematic (the profession must be open). Only quality materials go in
 -- it; the game adds the fixed ones itself.
@@ -414,6 +415,9 @@ function addon:GetCraftReagents(recipeID, scenario)
             highUnits[i] = scenario.mix[s.low] or 0
         elseif scenario and scenario.mats == "high" then
             highUnits[i] = s.quantity
+        elseif scenario and scenario.chosen then
+            -- { [itemID] = true }: the better quality where it was chosen
+            highUnits[i] = scenario.chosen[s.high] and s.quantity or 0
         end
     end
     local list = BuildList(qslots, highUnits)

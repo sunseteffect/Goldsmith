@@ -505,6 +505,8 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:ShowSetup()
     elseif cmd == "stats" then
         addon:DumpCraftingStats()
+    elseif cmd == "salvage" then
+        addon:DumpSalvageStats()
     elseif cmd == "reset" then
         StaticPopup_Show("GOLDSMITH_RESET")
     else

@@ -18,9 +18,19 @@ end
 -- GoldsmithDB.milling, keyed by herb item ID:
 --   { name, milled = n, outputs = { [itemID] = { name, qty } } }
 -- This works for any salvage recipe (e.g. prospecting), not just milling.
+--
+-- Each session (salvaging one item until you stop or switch) is also kept
+-- in GoldsmithDB.salvageRuns, with who did it and their stats at the time,
+-- so yields can be compared across characters and spec changes:
+--   { time, character, recipeID, itemID, casts, used, perCast,
+--     outputs = { [itemID] = qty }, skill, difficulty, quality, qualityID,
+--     resourcefulness, concentrated }
+-- casts counts finished casts, so casts * perCast - used is the material
+-- resourcefulness saved.
 
 local OUTPUT_WINDOW = 3   -- seconds after herbs are used up to count new items
 local SUMMARY_DELAY = 3   -- seconds of quiet before printing what was milled
+local MAX_SALVAGE_RUNS = 500
 
 local session = nil
 local summaryTimer = nil
@@ -53,20 +63,73 @@ local function PrintSummary()
     session.summaryOutputs = {}
 end
 
+local function SaveRun()
+    if not session or (session.used == 0 and session.casts == 0) then return end
+    local run = {
+        time = session.started,
+        character = addon.charKey,
+        recipeID = session.recipeID,
+        itemID = session.herbID,
+        casts = session.casts,
+        used = session.used,
+        perCast = session.perCast,
+        outputs = session.outputs,
+        concentrated = session.concentrated,
+    }
+    for key, value in pairs(session.stats) do
+        run[key] = value
+    end
+    GoldsmithDB.salvageRuns = GoldsmithDB.salvageRuns or {}
+    table.insert(GoldsmithDB.salvageRuns, run)
+    while #GoldsmithDB.salvageRuns > MAX_SALVAGE_RUNS do
+        table.remove(GoldsmithDB.salvageRuns, 1)
+    end
+end
+
 local function EndSession()
     if summaryTimer then
         summaryTimer:Cancel()
     end
     PrintSummary()
+    SaveRun()
     session = nil
 end
 
-local function OnCraftSalvage(recipeID, numCasts, itemTarget)
+-- Your skill, quality and resourcefulness for this salvage right now. The
+-- game only reports resourcefulness for prospecting when it's given the
+-- item being salvaged, so pass its GUID.
+local function SalvageStats(recipeID, itemTarget, concentrated)
+    local stats = {}
+    local guid = C_Item.GetItemGUID(itemTarget)
+    local ok, op = pcall(C_TradeSkillUI.GetCraftingOperationInfo, recipeID, {}, guid, false)
+    if not ok or type(op) ~= "table" then return stats end
+    stats.skill = (op.baseSkill or 0) + (op.bonusSkill or 0)
+    stats.difficulty = (op.baseDifficulty or 0) + (op.bonusDifficulty or 0)
+    stats.quality = op.quality
+    stats.qualityID = op.craftingQualityID
+    for _, stat in ipairs(op.bonusStats or {}) do
+        if stat.bonusStatName == "Resourcefulness" then
+            stats.resourcefulness = stat.ratingPct
+        end
+    end
+    -- Concentration raises the quality, not your skill
+    if concentrated then
+        local okC, opC = pcall(C_TradeSkillUI.GetCraftingOperationInfo, recipeID, {}, guid, true)
+        if okC and type(opC) == "table" then
+            stats.quality = opC.quality
+            stats.qualityID = opC.craftingQualityID
+        end
+    end
+    return stats
+end
+
+local function OnCraftSalvage(recipeID, numCasts, itemTarget, craftingReagents, applyConcentration)
     if not itemTarget or not C_Item.DoesItemExist(itemTarget) then return end
     local herbID = C_Item.GetItemID(itemTarget)
     if not herbID then return end
+    local concentrated = applyConcentration and true or false
 
-    if session and session.herbID ~= herbID then
+    if session and (session.herbID ~= herbID or session.concentrated ~= concentrated) then
         EndSession()
     end
     if session then return end
@@ -82,6 +145,9 @@ local function OnCraftSalvage(recipeID, numCasts, itemTarget)
         addon:ReassignProfessions()
     end
 
+    -- A salvage recipe's quantity is how many items one cast uses up
+    local okS, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+
     session = {
         herbID = herbID,
         herbName = herbName,
@@ -90,6 +156,15 @@ local function OnCraftSalvage(recipeID, numCasts, itemTarget)
         lastMill = 0,
         summaryMilled = 0,
         summaryOutputs = {},
+        -- For GoldsmithDB.salvageRuns
+        recipeID = recipeID,
+        started = time(),
+        concentrated = concentrated,
+        stats = SalvageStats(recipeID, itemTarget, concentrated),
+        perCast = okS and schematic and schematic.quantityMax or nil,
+        casts = 0,
+        used = 0,
+        outputs = {},
     }
 end
 
@@ -108,9 +183,11 @@ local function OnBagsChanged()
     end
 
     local used = (session.baseline[herbID] or 0) - (now[herbID] or 0)
+    record.perCast = session.perCast or record.perCast
     if used > 0 then
         record.milled = record.milled + used
         session.summaryMilled = session.summaryMilled + used
+        session.used = session.used + used
         session.lastMill = t
         changed = true
     end
@@ -128,6 +205,7 @@ local function OnBagsChanged()
                 end
                 out.qty = out.qty + gained
                 session.summaryOutputs[itemID] = (session.summaryOutputs[itemID] or 0) + gained
+                session.outputs[itemID] = (session.outputs[itemID] or 0) + gained
                 changed = true
             end
         end
@@ -250,6 +328,147 @@ function addon:ListMilling()
     end
 end
 
+-- Salvage stats check (/gsm salvage)
+--
+-- Salvage recipes (prospecting, crushing, milling, shattering, recycling)
+-- use up an item you pick for a random spread of outputs. This checks what
+-- the game reports for them: whether GetCraftingOperationInfo gives
+-- resourcefulness and the other stats for salvage, and whether it needs the
+-- item being salvaged (its GUID) to do so. Each run is kept in
+-- GoldsmithDB.salvageDump (last 10), so runs before and after spending
+-- knowledge points can be compared.
+
+local MAX_SALVAGE_DUMPS = 10
+
+local function StatText(op)
+    if type(op) ~= "table" then return tostring(op) end
+    local parts = {}
+    for _, stat in ipairs(op.bonusStats or {}) do
+        table.insert(parts, string.format("%s %s%%", tostring(stat.bonusStatName), tostring(stat.ratingPct)))
+    end
+    return string.format("skill %s+%s, quality %s, %s", tostring(op.baseSkill), tostring(op.bonusSkill),
+        tostring(op.quality), #parts > 0 and table.concat(parts, ", ") or "no bonus stats")
+end
+
+local function Operation(recipeID, guid, concentrate)
+    local ok, op = pcall(C_TradeSkillUI.GetCraftingOperationInfo, recipeID, {}, guid, concentrate)
+    if not ok then return "error: " .. tostring(op) end
+    return op and CopyTable(op) or "nil"
+end
+
+-- Items this recipe can salvage, as a set of item IDs
+local function SalvagableItems(recipeID)
+    local set = {}
+    if C_TradeSkillUI.GetSalvagableItemIDs then
+        local ok, ids = pcall(C_TradeSkillUI.GetSalvagableItemIDs, recipeID)
+        if ok and type(ids) == "table" then
+            for _, id in ipairs(ids) do set[id] = true end
+        end
+    end
+    return set
+end
+
+-- The item placed in the profession window's salvage slot, if this recipe
+-- is the one showing
+local function WindowSalvageItem(recipeID)
+    local ok, guid = pcall(function()
+        local tx = ProfessionsFrame.CraftingPage.SchematicForm:GetTransaction()
+        if tx:GetRecipeID() ~= recipeID then return nil end
+        return tx:GetAllocationItemGUID()
+    end)
+    if ok and guid then return guid end
+end
+
+-- A bag item this recipe can salvage: its GUID and item ID
+local function BagSalvageItem(salvagable)
+    for bag = 0, NUM_TOTAL_EQUIPPED_BAG_SLOTS or 5 do
+        for slot = 1, C_Container.GetContainerNumSlots(bag) do
+            local info = C_Container.GetContainerItemInfo(bag, slot)
+            if info and info.itemID and salvagable[info.itemID] then
+                return C_Item.GetItemGUID(ItemLocation:CreateFromBagAndSlot(bag, slot)), info.itemID
+            end
+        end
+    end
+end
+
+function addon:DumpSalvageStats()
+    if not (ProfessionsFrame and ProfessionsFrame:IsShown()) then
+        Print("Open your profession window first, then run /gsm salvage.")
+        return
+    end
+    if not (C_TradeSkillUI.GetCraftingOperationInfo and Enum.TradeskillRecipeType) then
+        Print("The game's crafting stats functions aren't available.")
+        return
+    end
+
+    local okP, profInfo = pcall(C_TradeSkillUI.GetBaseProfessionInfo)
+    local okC, childInfo = pcall(C_TradeSkillUI.GetChildProfessionInfo)
+    local dump = {
+        time = time(),
+        character = UnitName("player"),
+        profession = okP and profInfo and CopyTable(profInfo) or nil,
+        expansion = okC and childInfo and CopyTable(childInfo) or nil,
+        hasSalvagableAPI = C_TradeSkillUI.GetSalvagableItemIDs ~= nil,
+        recipes = {},
+    }
+
+    local found = 0
+    for _, recipeID in ipairs(C_TradeSkillUI.GetAllRecipeIDs() or {}) do
+        local okS, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+        if okS and schematic and schematic.recipeType == Enum.TradeskillRecipeType.Salvage then
+            local info = C_TradeSkillUI.GetRecipeInfo(recipeID)
+            local salvagable = SalvagableItems(recipeID)
+            local guid, itemID = WindowSalvageItem(recipeID), nil
+            local from = guid and "window"
+            if not guid then
+                guid, itemID = BagSalvageItem(salvagable)
+                from = guid and "bags"
+            end
+            if guid and not itemID and C_Item.GetItemIDByGUID then
+                itemID = C_Item.GetItemIDByGUID(guid)
+            end
+
+            local entry = {
+                name = schematic.name,
+                learned = info and info.learned,
+                schematic = CopyTable(schematic),
+                salvagable = salvagable,
+                item = itemID, itemFrom = from,
+                noItem = Operation(recipeID, nil, false),
+                withItem = guid and Operation(recipeID, guid, false) or nil,
+                withItemConcentration = guid and Operation(recipeID, guid, true) or nil,
+            }
+            dump.recipes[recipeID] = entry
+
+            if entry.learned then
+                found = found + 1
+                local itemName = itemID and (C_Item.GetItemNameByID(itemID) or ("item " .. itemID))
+                print(string.format("  |cFFFFD100%s|r (%d)", tostring(schematic.name), recipeID))
+                print("    No item: " .. StatText(entry.noItem))
+                if guid then
+                    print(string.format("    With %s (%s): %s", itemName, from, StatText(entry.withItem)))
+                else
+                    print("    No salvagable item in your bags to test with")
+                end
+            end
+        end
+    end
+
+    GoldsmithDB.salvageDump = GoldsmithDB.salvageDump or {}
+    table.insert(GoldsmithDB.salvageDump, dump)
+    while #GoldsmithDB.salvageDump > MAX_SALVAGE_DUMPS do
+        table.remove(GoldsmithDB.salvageDump, 1)
+    end
+
+    local skill = dump.expansion and dump.expansion.skillLevel
+    if found == 0 then
+        Print("No learned salvage recipes in this profession window.")
+    else
+        Print("%d salvage recipes checked%s. Saved; /reload so the details are written to disk.",
+            found, skill and (" at skill " .. skill) or "")
+    end
+end
+
 function addon:InitializeMilling()
     GoldsmithDB.milling = GoldsmithDB.milling or {}
 
@@ -268,11 +487,22 @@ function addon:InitializeMilling()
     local frame = CreateFrame("Frame")
     frame:RegisterEvent("BAG_UPDATE_DELAYED")
     frame:RegisterEvent("TRADE_SKILL_CLOSE")
+    -- Save a session still open at /reload or logout
+    frame:RegisterEvent("PLAYER_LOGOUT")
     frame:SetScript("OnEvent", function(_, event)
         if event == "BAG_UPDATE_DELAYED" then
             OnBagsChanged()
         else
             EndSession()
+        end
+    end)
+
+    -- Count finished salvage casts (a recipe's ID is its spell ID)
+    local castFrame = CreateFrame("Frame")
+    castFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
+    castFrame:SetScript("OnEvent", function(_, _, _, _, spellID)
+        if session and spellID == session.recipeID then
+            session.casts = session.casts + 1
         end
     end)
 end
