@@ -12,6 +12,28 @@ local AH_CUT = 0.05
 -- The ROI a craft needs to count as worth doing is a setting (minROI)
 local MIN_DEMAND = 1           -- sold per day
 local GEAR_MIN_DEMAND = 10     -- sold per day across the region, for gear
+local MIN_SALE_RATE = 0.10     -- share of listings that sell (TSM region)
+local GOOD_SALE_RATE = 0.25    -- above this, most listings sell (green)
+
+-- Colors for sale rate and sold per day wherever they're shown, from the
+-- same thresholds as WhyNotRecommended so the colors and recommendations
+-- agree. Sale rate: orange under the cutoff, gold decent, green good. Sold
+-- per day: orange under what a recommendation needs, otherwise plain: a
+-- big region number is shared by every seller, so it isn't "good" for you.
+function addon:SaleRateColor(rate)
+    if not rate then return "dim" end
+    if rate < MIN_SALE_RATE then return "warning" end
+    if rate < GOOD_SALE_RATE then return "gold" end
+    return "profit"
+end
+
+function addon:DemandColor(demand, itemID)
+    if not demand then return "dim" end
+    if demand < MIN_DEMAND or (itemID and addon:IsGear(itemID) and demand < GEAR_MIN_DEMAND) then
+        return "warning"
+    end
+    return "text"
+end
 local ENOUGH_STOCK_CAP = 20    -- see GetBestCrafts
 
 -- Whether a craft is worth recommending: an item from the current
@@ -20,9 +42,22 @@ local ENOUGH_STOCK_CAP = 20    -- see GetBestCrafts
 -- huge "profits" from listings that never sell, so they're left out.
 -- Gear sells realm by realm, so TSM's region sales are spread over every
 -- realm (1 a day region-wide is a sale every few months on yours): it needs
--- GEAR_MIN_DEMAND, or a sale of your own in the last 14 days.
+-- GEAR_MIN_DEMAND, or sales of your own at a profit in the last 14 days.
+-- Items where few listings ever sell (under MIN_SALE_RATE, from TSM) are
+-- left out too: most get relisted or expire, so the profit rarely arrives.
+-- Your own profitable sales override that, as for gear.
 -- Items the game hasn't loaded yet are left out until it has.
 -- Returns nil if it's worth recommending, otherwise why not (plain words).
+
+-- Your sales over the last 14 days averaged at least what the craft costs
+-- now (row.cost, per item). A sale at a loss shows people buy it cheap,
+-- not that making it pays (a Deadly Amethyst sold for 5.64g against a 46g
+-- craft cost).
+local function SoldAtProfit(recipe, row)
+    local got = addon:GetOwnSalePrice(recipe.outputName)
+    return got ~= nil and row.cost ~= nil and got >= row.cost
+end
+
 function addon:WhyNotRecommended(recipe, row)
     local itemID = row.itemID or recipe.outputItemID
     local expansion = itemID and addon:GetItemExpansion(itemID)
@@ -35,9 +70,18 @@ function addon:WhyNotRecommended(recipe, row)
     if demand < MIN_DEMAND then
         return string.format("Sells under %d a day, so it may take a long time to sell.", MIN_DEMAND)
     end
-    if addon:IsGear(itemID) and demand < GEAR_MIN_DEMAND and not addon:GetOwnDemand(recipe.outputName) then
-        return string.format("Gear sells realm by realm: about %s a day across the whole region is a sale every few weeks or months on yours. Recommended once you've sold one yourself.",
+    if addon:IsGear(itemID) and demand < GEAR_MIN_DEMAND and not SoldAtProfit(recipe, row) then
+        return string.format("Gear sells realm by realm: about %s a day across the whole region is a sale every few weeks or months on yours. Recommended once you've sold one yourself at a profit.",
             addon:FormatDemand(demand))
+    end
+    local saleRate = row.saleRate or addon:GetSaleRate(itemID)
+    if saleRate and saleRate < MIN_SALE_RATE and not SoldAtProfit(recipe, row) then
+        local got = addon:GetOwnSalePrice(recipe.outputName)
+        return string.format("Only %s of listings sell (TSM region): most sit until they expire.%s",
+            addon:FormatSaleRate(saleRate),
+            (got and row.cost and got < row.cost)
+                and string.format(" Yours sold for %s each lately, less than it costs to make.", addon:FormatMoney(got))
+                or " Recommended once you've sold one yourself at a profit.")
     end
 end
 
@@ -166,15 +210,41 @@ end
 --
 -- Plans are cached until data changes, per character, profession and
 -- amount of concentration (which only goes up a point every few minutes).
+--
+-- Concentration comes back slowly, so it's only worth spending on crafts
+-- that earn at least MIN_CONC_VALUE extra gold per point. When it's full,
+-- or will be within NEAR_FULL_MINUTES, what comes back would be wasted, so
+-- any profitable use is suggested.
+local MIN_CONC_VALUE = 0.5 * 10000   -- copper per concentration point
+local NEAR_FULL_MINUTES = 24 * 60
+local GOOD_CONC_VALUE = 1.5 * 10000  -- copper per point; above this it's a good use
 local planCache = addon:NewCache()
 
-local function CachedPlan(key, profession, current)
+-- The theme color for a rate of extra gold per concentration point:
+-- "warning" under the floor (only suggested because concentration is
+-- nearly full), "gold" for decent, "profit" for good. No red: a planned
+-- craft always makes a profit.
+function addon:ConcentrationValueColor(copper)
+    if not copper or copper < MIN_CONC_VALUE then return "warning" end
+    if copper < GOOD_CONC_VALUE then return "gold" end
+    return "profit"
+end
+
+local function NearFull(current, max, minutesToFull)
+    return current >= max or (minutesToFull ~= nil and minutesToFull <= NEAR_FULL_MINUTES)
+end
+
+local function CachedPlan(key, profession, current, nearFull)
     local store = planCache:Get()
-    local id = string.format("%s:%s:%d", key, profession, current)
+    local id = string.format("%s:%s:%d:%s", key, profession, current, tostring(nearFull))
     local cached = store[id]
     if not cached then
+        local function Accept(recipe, row)
+            if not nearFull and (row.concentrationValue or 0) < MIN_CONC_VALUE then return false end
+            return IsRecommendable(recipe, row)
+        end
         local plan, used, gain = addon:WithCharacter(key, addon.PlanConcentration, addon,
-            profession, current, IsRecommendable)
+            profession, current, Accept)
         cached = { plan = plan, used = used, gain = gain }
         store[id] = cached
     end
@@ -197,7 +267,8 @@ function addon:GetConcentrationOverview(prof)
                     current, max, minutesToFull, updated = addon:GetCharacterConcentration(entry.key, profession)
                 end
                 if current and max and max > 0 then
-                    local plan, used, gain = CachedPlan(entry.key, profession, math.floor(current))
+                    local plan, used, gain = CachedPlan(entry.key, profession, math.floor(current),
+                        NearFull(current, max, minutesToFull))
                     table.insert(result.rows, {
                         key = entry.key, name = entry.data.name, profession = profession,
                         current = current, max = max, minutesToFull = minutesToFull, updated = updated,
@@ -414,7 +485,7 @@ function addon:GetRecipesUsing(itemID)
             if row and IsRecommendable(recipe, row) then
                 local outputID = row.itemID or recipe.outputItemID
                 table.insert(list, {
-                    recipe = recipe, charKey = charKey, profit = row.profit,
+                    recipe = recipe, charKey = charKey, profit = row.profit, itemID = outputID,
                     demand = row.demand or addon:GetDemand(outputID, recipe.outputName),
                     saleRate = row.saleRate or addon:GetSaleRate(outputID),
                 })

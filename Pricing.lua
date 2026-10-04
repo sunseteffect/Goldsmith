@@ -464,6 +464,22 @@ function addon:GetOwnDemand(itemName)
     return itemName and GetOwnSoldPerDay(itemName)
 end
 
+-- What you got per unit (after the AH cut) for your sales of an item over
+-- the last OWN_SALES_DAYS days, or nil if none
+function addon:GetOwnSalePrice(itemName)
+    if not itemName then return nil end
+    local since = time() - OWN_SALES_DAYS * 86400
+    local units, copper = 0, 0
+    for _, e in ipairs(addon.ledger:getAll()) do
+        if e.type == "REVENUE" and e.item == itemName and e.timestamp >= since then
+            units = units + e.quantity
+            copper = copper + e.totalCopper
+        end
+    end
+    if units == 0 then return nil end
+    return copper / units
+end
+
 -- Weapons, armor and profession equipment. They aren't commodities: each
 -- realm has its own listings, so region sales are spread over every realm.
 function addon:IsGear(itemID)
@@ -1731,12 +1747,14 @@ function addon:AddRecipeTooltipLines(tooltip, recipe, itemID, showBreakdown, sho
     if short then return end
 
     if info.demand then
+        local r, g, b = addon:Color(addon:DemandColor(info.demand, data.id))
         tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r sold per day",
-            string.format("%s (%s)", addon:FormatDemand(info.demand), info.demandSource), 1, 1, 1, 1, 1, 1)
+            string.format("%s (%s)", addon:FormatDemand(info.demand), info.demandSource), 1, 1, 1, r, g, b)
     end
     if info.saleRate then
+        local r, g, b = addon:Color(addon:SaleRateColor(info.saleRate))
         tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r sale rate",
-            addon:FormatSaleRate(info.saleRate) .. " of listings sell", 1, 1, 1, 1, 1, 1)
+            addon:FormatSaleRate(info.saleRate) .. " of listings sell", 1, 1, 1, r, g, b)
     end
 
     -- Which stats the cost uses

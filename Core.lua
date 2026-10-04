@@ -53,6 +53,7 @@ function addon:RecordPurchase()
     addon.ledger:addCost(prof, p.name, p.quantity, spent, "PURCHASE", p.itemID)
     addon:Notify("money", "Bought %s x%d for %.2fg (%.2fg each)",
         p.name, p.quantity, spent / 10000, (spent / p.quantity) / 10000)
+    addon:ShoppingListBought(p.itemID, p.quantity)
 
     if addon.Refresh then
         addon.Refresh()

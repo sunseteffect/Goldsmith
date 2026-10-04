@@ -219,11 +219,13 @@ local function CraftsAction(crafts, prof)
                 tooltip:AddDoubleLine("Profit each", string.format("%s (%.0f%% ROI)", Signed(c.profit), c.margin or 0),
                     0.8, 0.8, 0.8, 0.37, 0.81, 0.48)
                 if c.demand then
-                    tooltip:AddDoubleLine("Sold per day", addon:FormatDemand(c.demand), 0.8, 0.8, 0.8, 1, 1, 1)
+                    local r, g, b = addon:Color(addon:DemandColor(c.demand, c.itemID))
+                    tooltip:AddDoubleLine("Sold per day", addon:FormatDemand(c.demand), 0.8, 0.8, 0.8, r, g, b)
                 end
                 if c.row.saleRate then
+                    local r, g, b = addon:Color(addon:SaleRateColor(c.row.saleRate))
                     tooltip:AddDoubleLine("Sale rate", addon:FormatSaleRate(c.row.saleRate) .. " of listings sell",
-                        0.8, 0.8, 0.8, 1, 1, 1)
+                        0.8, 0.8, 0.8, r, g, b)
                 end
                 if c.have > 0 then
                     tooltip:AddDoubleLine("You have", tostring(c.have), 0.8, 0.8, 0.8, 1, 1, 1)

@@ -18,7 +18,7 @@ local AH_CUT = 0.05
 local STALE_PRICE_DAYS = 3
 local TOP_HEIGHT = 26
 local FOOTER_HEIGHT = 44
-local PLAN_SUMMARY_HEIGHT = 140
+local PLAN_SUMMARY_HEIGHT = 158
 
 local Money, Signed = function(c) return addon:FormatMoney(c) end, function(c) return addon:FormatSignedMoney(c) end
 
@@ -217,17 +217,17 @@ local function FillCraftRow(row, item)
     end
 
     cells.demand:SetText(addon:FormatDemand(info.demand))
-    if item.whyNot then
-        cells.demand:SetTextColor(addon:Color("warning"))
-    elseif info.demandSource == "your sales" then
+    local demandColor = addon:DemandColor(info.demand, item.itemID)
+    if demandColor == "text" and info.demandSource == "your sales" then
         -- Only your own sales, which undercount the market
-        cells.demand:SetTextColor(addon:Color("muted"))
+        demandColor = "muted"
     end
+    cells.demand:SetTextColor(addon:Color(demandColor))
 
     -- Not there without TSM (see AvailableColumns)
     if cells.saleRate then
         cells.saleRate:SetText(addon:FormatSaleRate(info.saleRate))
-        cells.saleRate:SetTextColor(addon:Color(info.saleRate and "text" or "dim"))
+        cells.saleRate:SetTextColor(addon:Color(addon:SaleRateColor(info.saleRate)))
     end
 end
 
@@ -303,10 +303,12 @@ local function CraftTooltip(tooltip, item)
         Note(tooltip, "No AH price yet. Scan the AH with Auctionator.")
     end
     if info.demand then
-        Line(tooltip, "Sold per day", string.format("%s (%s)", addon:FormatDemand(info.demand), info.demandSource or "?"))
+        Line(tooltip, "Sold per day", string.format("%s (%s)", addon:FormatDemand(info.demand), info.demandSource or "?"),
+            addon:DemandColor(info.demand, item.itemID))
     end
     if info.saleRate then
-        Line(tooltip, "Sale rate", addon:FormatSaleRate(info.saleRate) .. " of listings sell")
+        Line(tooltip, "Sale rate", addon:FormatSaleRate(info.saleRate) .. " of listings sell",
+            addon:SaleRateColor(info.saleRate))
     end
     local have = item.itemID and addon:GetStock(item.itemID) or 0
     if have > 0 then Line(tooltip, "You have", tostring(have)) end
@@ -610,6 +612,56 @@ local function MaterialName(itemID)
     local tier, tierCount = addon:GetItemTier(itemID)
     return (tier and (addon:TierIconText(tier, tierCount) .. " ") or "")
         .. (C_Item.GetItemNameByID(itemID) or ("item " .. itemID))
+end
+
+-- Materials whose AH price is missing or a day or more old. Every quality
+-- of the recipe's own materials is checked, not just what the plan buys:
+-- the best mix can switch to a quality whose price was out of date once
+-- buying rescans it. Vendor items are skipped.
+local function StalePrices(plan)
+    local seen, stale = {}, {}
+    local function Check(itemID)
+        if not itemID or seen[itemID] then return end
+        seen[itemID] = true
+        if addon:GetVendorPrice(itemID) then return end
+        local price, source, age = addon:GetAHPriceInfo(itemID)
+        if not price or ((source == "Auctionator" or source == "Blizzard") and (age or 0) >= 1) then
+            table.insert(stale, { itemID = itemID })
+        end
+    end
+    for _, slot in ipairs(plan.recipe.reagents or {}) do
+        for _, itemID in ipairs(slot.itemIDs or {}) do Check(itemID) end
+    end
+    for _, node in ipairs(addon:FlattenPlan(plan)) do
+        if not node.best or node.best.method == "Buy" then Check(node.itemID) end
+    end
+    return stale
+end
+
+-- The warning line above the summary, and what the Send button's hover
+-- lists: { more, extra, stale }, or nil when there's nothing to say
+local function ShoppingWarnings(plan)
+    local more, extra = addon:ShoppingListChanges(plan)
+    local w = { more = more or {}, extra = extra or {}, stale = StalePrices(plan) }
+    if #w.more > 0 then
+        local parts = {}
+        for i, item in ipairs(w.more) do
+            if i > 2 then
+                table.insert(parts, string.format("%d more", #w.more - 2))
+                break
+            end
+            table.insert(parts, item.quantity .. " " .. MaterialName(item.itemID))
+        end
+        w.text = "The plan changed since you sent the list. Also needs " .. table.concat(parts, ", ") .. ": send it again."
+    elseif #w.extra > 0 then
+        w.text = "The plan changed since you sent the list (it needs less now). Hover Send for details."
+    elseif #w.stale > 0 then
+        w.text = string.format("Old or missing AH prices for %d material%s (hover Send). Scan the AH first, or the plan may change after you buy.",
+            #w.stale, #w.stale == 1 and "" or "s")
+    else
+        return nil
+    end
+    return w
 end
 
 -- Materials: enough to start each craft (resourcefulness may give some
@@ -957,6 +1009,10 @@ local function CreatePlanScreen(parent)
         fs:SetPoint("RIGHT", summary, "RIGHT", -200, 0)
         return fs
     end
+    -- Shopping warnings: old or missing prices, or the plan changed since
+    -- its list was sent (see ShoppingWarnings)
+    screen.warnLine = SummaryLine(64)
+    screen.warnLine:SetTextColor(addon:Color("warning"))
     screen.demandLine = SummaryLine(46)
     screen.spendLine = SummaryLine(28)
     screen.vendorLine = SummaryLine(10)
@@ -966,11 +1022,34 @@ local function CreatePlanScreen(parent)
         local ok, result = addon:SendShoppingList(screen.current)
         if ok then
             print("|cFF00FF00[Goldsmith]|r Shopping list \"" .. result .. "\" sent to Auctionator's Shopping tab.")
+            screen:Update()
         else
             print("|cFF00FF00[Goldsmith]|r Couldn't create the shopping list: " .. result)
         end
     end)
     screen.shop:SetPoint("BOTTOMRIGHT", -14, 12)
+    UI.SetTooltip(screen.shop, function(tooltip)
+        tooltip:AddLine("Send to Auctionator", 1, 1, 1)
+        tooltip:AddLine("Makes a shopping list of what to buy. Items come off it as you buy them, and it's deleted once everything's bought.",
+            0.8, 0.8, 0.8, true)
+        local w = screen.warnings
+        if not w then return end
+        local r, g, b = addon:Color("warning")
+        local function Section(title, items, describe)
+            if #items == 0 then return end
+            tooltip:AddLine(" ")
+            tooltip:AddLine(title, r, g, b, true)
+            for _, item in ipairs(items) do
+                tooltip:AddDoubleLine("    " .. MaterialName(item.itemID), describe(item), 0.9, 0.9, 0.9, 1, 1, 1)
+            end
+        end
+        Section("The plan changed since you sent the list. Now also needs:", w.more,
+            function(item) return "x" .. item.quantity end)
+        Section("On the list but no longer needed:", w.extra,
+            function(item) return "x" .. item.quantity end)
+        Section("Old or missing AH prices. Scan the AH first, or the plan may change after you buy:", w.stale,
+            function(item) return addon:AHPriceAgeText(item.itemID) end)
+    end, "ANCHOR_TOP")
 
     -- Craft (or open the profession first); see CraftState
     screen.craft = UI.Button(summary, "Craft", 170, 28, function()
@@ -1063,6 +1142,8 @@ local function CreatePlanScreen(parent)
             f.note:SetText("")
         end
         screen.demandLine:SetText(message or "")
+        screen.warnLine:SetText("")
+        screen.warnings = nil
         screen.spendLine:SetText("")
         screen.vendorLine:SetText("")
         screen.shop:Disable()
@@ -1151,9 +1232,14 @@ local function CreatePlanScreen(parent)
 
         if plan.demand and plan.demand > 0 then
             local days = quantity / plan.demand
-            local rate = plan.saleRate and (", " .. addon:FormatSaleRate(plan.saleRate) .. " of listings sell") or ""
+            local rate = plan.saleRate and (", " .. addon:Colorize(addon:FormatSaleRate(plan.saleRate) .. " of listings sell",
+                addon:SaleRateColor(plan.saleRate))) or ""
+            local itemID = (plan.tier and plan.tier.itemID) or plan.recipe.outputItemID
+            local demandColor = addon:DemandColor(plan.demand, itemID)
+            local demandText = addon:FormatDemand(plan.demand)
+            if demandColor == "warning" then demandText = addon:Colorize(demandText, demandColor) end
             local text = string.format("Sells about %s a day (%s%s). Making %d is ",
-                addon:FormatDemand(plan.demand), plan.demandSource or "?", rate, quantity)
+                demandText, plan.demandSource or "?", rate, quantity)
             if days >= 1 then
                 text = text .. string.format("about %.1f days of sales, so it may be slow to sell.", days)
             elseif days < 0.01 then
@@ -1191,6 +1277,13 @@ local function CreatePlanScreen(parent)
 
         screen.shop:SetEnabled(#plan.buyAH > 0)
         screen.shop:SetAlpha(#plan.buyAH > 0 and 1 or 0.5)
+        -- Old prices only matter while there's something to buy
+        local warnings = ShoppingWarnings(plan)
+        if warnings and #warnings.more == 0 and #warnings.extra == 0 and #plan.buyAH == 0 then
+            warnings = nil
+        end
+        screen.warnings = warnings
+        screen.warnLine:SetText(warnings and warnings.text or "")
         SetCraftState(CraftState(p, tierInfo, plan))
     end
 

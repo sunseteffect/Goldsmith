@@ -429,11 +429,62 @@ end
 
 -- Auctionator shopping list
 
+-- Goldsmith keeps one shopping list in Auctionator at a time. Sending a
+-- plan replaces it; items come off as you buy them (or their quantity goes
+-- down), and the list is deleted once everything's bought. Tracked in
+-- GoldsmithDB.shoppingList = { name, items = { { itemID, name, tier,
+-- quantity, bought, search } } }.
+
+local function ShoppingAPI()
+    return Auctionator and Auctionator.API and Auctionator.API.v1
+end
+
+local function SearchString(api, name, quantity, tier)
+    if api.ConvertToSearchString then
+        -- tier makes Auctionator search only the right quality
+        local ok, result = pcall(api.ConvertToSearchString, "Goldsmith",
+            { searchString = name, isExact = true, quantity = quantity, tier = tier })
+        if ok then return result end
+    end
+    -- Auctionator's exact-match search syntax, if conversion isn't available
+    return '"' .. name .. '"'
+end
+
+-- Auctionator's API can't delete a whole list, so this uses its list
+-- manager (the same call its API uses to replace a list). If that ever
+-- changes, the list just stays.
+local function ListManager()
+    local shopping = Auctionator and Auctionator.Shopping
+    local manager = shopping and shopping.ListManager
+    if manager and manager.GetIndexForName and manager.Delete then return manager end
+end
+
+local function DeleteList(name)
+    local manager = ListManager()
+    if not manager then return end
+    local ok, index = pcall(manager.GetIndexForName, manager, name)
+    if ok and index then pcall(manager.Delete, manager, name) end
+end
+
+-- Lists from before Goldsmith kept just one ("Goldsmith: <item> x<qty>")
+local function DeleteOldLists(keep)
+    local manager = ListManager()
+    if not (manager and manager.GetCount and manager.GetByIndex) then return end
+    local names = {}
+    local okC, count = pcall(manager.GetCount, manager)
+    for i = 1, okC and count or 0 do
+        local ok, list = pcall(manager.GetByIndex, manager, i)
+        local name = ok and list and list.GetName and list:GetName()
+        if name and name ~= keep and name:find("^Goldsmith: ") then table.insert(names, name) end
+    end
+    for _, name in ipairs(names) do DeleteList(name) end
+end
+
 -- Sends the plan's AH purchases to Auctionator as a shopping list named
--- "Goldsmith: <item> x<qty>", replacing any list with that name. Returns
--- true on success, or false and a reason.
+-- "Goldsmith: <item> x<qty>", replacing Goldsmith's previous list.
+-- Returns true on success, or false and a reason.
 function addon:SendShoppingList(plan)
-    local api = Auctionator and Auctionator.API and Auctionator.API.v1
+    local api = ShoppingAPI()
     if not (api and api.CreateShoppingList) then
         return false, "Auctionator's shopping list API isn't available."
     end
@@ -441,17 +492,12 @@ function addon:SendShoppingList(plan)
         return false, "Nothing to buy on the AH for this plan."
     end
 
-    local searchStrings = {}
+    local searchStrings, items = {}, {}
     for _, entry in ipairs(plan.buyAH) do
-        local search
-        if api.ConvertToSearchString then
-            -- tier makes Auctionator search only the right quality
-            local ok, result = pcall(api.ConvertToSearchString, "Goldsmith",
-                { searchString = entry.name, isExact = true, quantity = entry.quantity, tier = entry.qualityTier })
-            if ok then search = result end
-        end
-        -- Auctionator's exact-match search syntax, if conversion isn't available
-        table.insert(searchStrings, search or ('"' .. entry.name .. '"'))
+        local search = SearchString(api, entry.name, entry.quantity, entry.qualityTier)
+        table.insert(searchStrings, search)
+        table.insert(items, { itemID = entry.itemID, name = entry.name, tier = entry.qualityTier,
+                              quantity = entry.quantity, bought = 0, search = search })
     end
 
     local listName = string.format("Goldsmith: %s x%d", plan.recipe.outputName, plan.quantity)
@@ -459,7 +505,66 @@ function addon:SendShoppingList(plan)
     if not ok then
         return false, tostring(err)
     end
+    DeleteOldLists(listName)
+    GoldsmithDB.shoppingList = { name = listName, items = items, recipeID = plan.recipe.recipeID }
     return true, listName
+end
+
+-- Whether the plan still matches the list sent for it. The plan is worked
+-- out again as prices change (buying rescans the items), so its best mix of
+-- qualities can switch after the list went out. Returns what the plan now
+-- needs beyond what's left to buy on the list ({ itemID, name, quantity }),
+-- and what's left on the list it no longer needs; nil when no list was
+-- sent for this recipe.
+function addon:ShoppingListChanges(plan)
+    local list = GoldsmithDB.shoppingList
+    if not (list and list.recipeID == plan.recipe.recipeID) then return nil end
+    local left, names = {}, {}
+    for _, item in ipairs(list.items) do
+        left[item.itemID] = (left[item.itemID] or 0) + math.max(item.quantity - item.bought, 0)
+        names[item.itemID] = item.name
+    end
+    local more, extra = {}, {}
+    for _, entry in ipairs(plan.buyAH) do
+        local n = entry.quantity - (left[entry.itemID] or 0)
+        if n > 0 then table.insert(more, { itemID = entry.itemID, name = entry.name, quantity = n }) end
+        left[entry.itemID] = math.max((left[entry.itemID] or 0) - entry.quantity, 0)
+    end
+    for itemID, n in pairs(left) do
+        if n > 0 then table.insert(extra, { itemID = itemID, name = names[itemID], quantity = n }) end
+    end
+    return more, extra
+end
+
+-- An AH purchase (from Core.lua's RecordPurchase): takes it off Goldsmith's
+-- shopping list, and deletes the list once everything on it is bought
+function addon:ShoppingListBought(itemID, quantity)
+    local list = GoldsmithDB.shoppingList
+    local api = ShoppingAPI()
+    if not (list and api and itemID) then return end
+
+    for _, item in ipairs(list.items) do
+        if item.itemID == itemID and item.bought < item.quantity then
+            item.bought = item.bought + quantity
+            local left = item.quantity - item.bought
+            if left <= 0 then
+                pcall(api.DeleteShoppingListItem, "Goldsmith", list.name, item.search)
+            elseif api.AlterShoppingListItem then
+                local search = SearchString(api, item.name, left, item.tier)
+                if pcall(api.AlterShoppingListItem, "Goldsmith", list.name, item.search, search) then
+                    item.search = search
+                end
+            end
+            break
+        end
+    end
+
+    for _, item in ipairs(list.items) do
+        if item.bought < item.quantity then return end
+    end
+    DeleteList(list.name)
+    GoldsmithDB.shoppingList = nil
+    addon:Notify("info", "Everything on %s is bought; the list is removed from Auctionator.", list.name)
 end
 
 _G.Goldsmith = addon

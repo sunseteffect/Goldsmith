@@ -266,9 +266,14 @@ local function CheapTooltip(tooltip, item)
             local name = r.recipe.outputName .. (crafter and (" · " .. crafter.name) or "")
             local profit = r.profit and addon:Colorize(Signed(r.profit), r.profit > 0 and "profit" or "loss")
                 or addon:Colorize("no price", "dim")
-            local sales = addon:FormatDemand(r.demand) .. "/day"
-            if r.saleRate then sales = sales .. ", " .. addon:FormatSaleRate(r.saleRate) end
-            tooltip:AddDoubleLine(name, profit .. addon:Colorize("   " .. sales, "muted"), 0.9, 0.9, 0.9, 1, 1, 1)
+            local demandColor = addon:DemandColor(r.demand, r.itemID)
+            local sales = addon:Colorize("   " .. addon:FormatDemand(r.demand) .. "/day",
+                demandColor == "warning" and "warning" or "muted")
+            if r.saleRate then
+                sales = sales .. addon:Colorize(", ", "muted")
+                    .. addon:Colorize(addon:FormatSaleRate(r.saleRate), addon:SaleRateColor(r.saleRate))
+            end
+            tooltip:AddDoubleLine(name, profit .. sales, 0.9, 0.9, 0.9, 1, 1, 1)
         end
         if #item.recipes > CHEAP_RECIPES_SHOWN then
             tooltip:AddLine(string.format("and %d more", #item.recipes - CHEAP_RECIPES_SHOWN), 0.6, 0.6, 0.6)
@@ -290,11 +295,11 @@ end
 
 local function FillSalesCells(c, item)
     c.demand:SetText(addon:FormatDemand(item.demand))
-    c.demand:SetTextColor(addon:Color(item.demand and "text" or "dim"))
+    c.demand:SetTextColor(addon:Color(addon:DemandColor(item.demand, item.itemID)))
     -- Not there without TSM (see AvailableColumns)
     if c.saleRate then
         c.saleRate:SetText(addon:FormatSaleRate(item.saleRate))
-        c.saleRate:SetTextColor(addon:Color(item.saleRate and "text" or "dim"))
+        c.saleRate:SetTextColor(addon:Color(addon:SaleRateColor(item.saleRate)))
     end
 end
 
@@ -645,16 +650,23 @@ local function CreatePage(parent)
         end
 
         -- Where it's from is in the hover; the tile only has room for one note
-        local demandNote = d.saleRate and (addon:FormatSaleRate(d.saleRate) .. " of listings sell")
+        local demandNote = d.saleRate and addon:Colorize(addon:FormatSaleRate(d.saleRate) .. " of listings sell",
+                addon:SaleRateColor(d.saleRate))
             or (d.demandSource == "your sales" and "your sales" or "region (TSM)")
-        t[3]:Set("Sold per day", addon:FormatDemand(d.demand), d.demand and "text" or "dim",
+        t[3]:Set("Sold per day", addon:FormatDemand(d.demand), addon:DemandColor(d.demand, d.itemID),
             d.demand and demandNote or "no sales data")
         t[3].tooltip = function(tooltip)
             tooltip:AddLine("Sold per day", 1, 1, 1)
-            if d.demand then tooltip:AddDoubleLine("Sold per day", string.format("%s (%s)",
-                addon:FormatDemand(d.demand), d.demandSource or "?"), 0.8, 0.8, 0.8, 1, 1, 1) end
-            if d.saleRate then tooltip:AddDoubleLine("Sale rate", addon:FormatSaleRate(d.saleRate)
-                .. " of listings sell", 0.8, 0.8, 0.8, 1, 1, 1) end
+            if d.demand then
+                local r, g, b = addon:Color(addon:DemandColor(d.demand, d.itemID))
+                tooltip:AddDoubleLine("Sold per day", string.format("%s (%s)",
+                    addon:FormatDemand(d.demand), d.demandSource or "?"), 0.8, 0.8, 0.8, r, g, b)
+            end
+            if d.saleRate then
+                local r, g, b = addon:Color(addon:SaleRateColor(d.saleRate))
+                tooltip:AddDoubleLine("Sale rate", addon:FormatSaleRate(d.saleRate)
+                    .. " of listings sell", 0.8, 0.8, 0.8, r, g, b)
+            end
         end
 
         local heldDays = d.heldSince and DaysSince(d.heldSince)

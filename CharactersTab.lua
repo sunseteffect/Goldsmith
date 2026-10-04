@@ -130,22 +130,37 @@ local function CreateTodoLine(card, i)
         tooltip:AddDoubleLine("Crafts", tostring(item.crafts), 0.8, 0.8, 0.8, 1, 1, 1)
         tooltip:AddDoubleLine("Makes about", tostring(item.quantity), 0.8, 0.8, 0.8, 1, 1, 1)
         tooltip:AddDoubleLine("Profit", Signed(item.profit), 0.8, 0.8, 0.8, 0.37, 0.81, 0.48)
+        local perPoint = item.concentration and item.row.concentrationValue
         if item.concentration then
             tooltip:AddDoubleLine("Concentration", tostring(math.floor(item.concentration + 0.5)),
                 0.8, 0.8, 0.8, 0.91, 0.76, 0.35)
         end
+        if perPoint then
+            -- Extra profit concentrating earns, per point spent; colored by
+            -- how good a use of concentration that is
+            local r, g, b = addon:Color(addon:ConcentrationValueColor(perPoint))
+            tooltip:AddDoubleLine("Gold per concentration", addon:FormatMoney(perPoint),
+                0.8, 0.8, 0.8, r, g, b)
+        end
         local demand, source = addon:GetDemand(item.itemID, item.recipe.outputName)
         if demand then
+            local r, g, b = addon:Color(addon:DemandColor(demand, item.itemID))
             tooltip:AddDoubleLine("Sold per day", string.format("%s (%s)", addon:FormatDemand(demand), source),
-                0.8, 0.8, 0.8, 1, 1, 1)
+                0.8, 0.8, 0.8, r, g, b)
         end
         local saleRate = item.row.saleRate or addon:GetSaleRate(item.itemID)
         if saleRate then
+            local r, g, b = addon:Color(addon:SaleRateColor(saleRate))
             tooltip:AddDoubleLine("Sale rate", addon:FormatSaleRate(saleRate) .. " of listings sell",
-                0.8, 0.8, 0.8, 1, 1, 1)
+                0.8, 0.8, 0.8, r, g, b)
         end
         if item.concentration then
             tooltip:AddLine("The best use of this character's concentration right now.", 0.6, 0.6, 0.6, true)
+            if perPoint and addon:ConcentrationValueColor(perPoint) == "warning" then
+                local r, g, b = addon:Color("warning")
+                tooltip:AddLine("A low rate: suggested only because concentration is full or nearly full, so it would go to waste otherwise.",
+                    r, g, b, true)
+            end
         else
             tooltip:AddLine("How many: " .. (item.why or "?") .. ".", 0.6, 0.6, 0.6, true)
             tooltip:AddLine("Once you've made them it drops off, and comes back when they've all sold.",
