@@ -10,18 +10,41 @@ end
 
 -- Average cost
 
--- Weighted average price paid per unit, from recorded AH purchases.
--- Returns copper per unit and units bought, or nil if never bought.
+-- What the ones you hold cost you, from recorded AH purchases: the newest
+-- purchases, going back until they cover what you have on every character
+-- (or just the newest one when you hold none, e.g. right after using them
+-- up in a craft). Prices you paid long ago stop counting once those items
+-- are gone, so the cost follows the market. The same rule as crafted items
+-- (GetCraftedCost).
+-- Returns copper per unit and units covered, or nil if never bought.
 function addon:GetAverageCost(itemName)
-    local totalCopper, totalQty = 0, 0
+    local purchases, ids = {}, {}
     for _, e in ipairs(addon.ledger:getAll()) do
-        if e.type == "COST" and (e.kind or "PURCHASE") == "PURCHASE" and e.item == itemName then
-            totalCopper = totalCopper + e.totalCopper
-            totalQty = totalQty + e.quantity
+        if e.type == "COST" and (e.kind or "PURCHASE") == "PURCHASE" and e.item == itemName
+            and (e.quantity or 0) > 0 then
+            table.insert(purchases, e)
+            if e.itemID then ids[e.itemID] = true end
         end
     end
-    if totalQty == 0 then return nil end
-    return totalCopper / totalQty, totalQty
+    if #purchases == 0 then return nil end
+    table.sort(purchases, function(a, b) return (a.timestamp or 0) < (b.timestamp or 0) end)
+
+    local held = 0
+    for itemID in pairs(ids) do
+        held = held + (addon.GetHeld and addon:GetHeld(itemID)
+            or C_Item.GetItemCount(itemID, true, false, true, true) or 0)
+    end
+
+    local remaining, totalCopper, covered = math.max(held, 1), 0, 0
+    for i = #purchases, 1, -1 do
+        local e = purchases[i]
+        local take = math.min(e.quantity, remaining)
+        totalCopper = totalCopper + e.totalCopper / e.quantity * take
+        covered = covered + take
+        remaining = remaining - take
+        if remaining <= 0 then break end
+    end
+    return totalCopper / covered, covered
 end
 
 -- Market prices (Auctionator, optional)
@@ -1624,7 +1647,7 @@ local function AddTooltipLines(tooltip, data)
     local avg, qty = addon:GetAverageCost(name)
     if avg then
         tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r avg cost",
-            string.format("%s (%d bought)", FormatGold(avg), qty), 1, 1, 1, 1, 1, 1)
+            string.format("%s (newest %d bought)", FormatGold(avg), qty), 1, 1, 1, 1, 1, 1)
     end
 
     if not short then addon:AddMillingTooltipLines(tooltip, data.id, name) end
