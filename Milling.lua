@@ -504,7 +504,17 @@ end
 --   { inputID, inputName, perCast, inputPerCast, resourcefulness, procSave,
 --     procMeasured, unitPrice, outputs = { { itemID, perCast, unit, value } },
 --     sample, sampleFrom }
--- opts as for GetCraftRows (profitableOnly, onlyMine, showExpansion).
+-- opts as for GetCraftRows (profitableOnly, onlyMine, showExpansion, match).
+-- match gets the salvaged item's name and what it gives (Powder Pigment
+-- finds Tranquility Bloom).
+local function SalvageNames(itemID, record)
+    local names = { record.name or C_Item.GetItemNameByID(itemID) }
+    for id, out in pairs(record.outputs or {}) do
+        table.insert(names, out.name or C_Item.GetItemNameByID(id))
+    end
+    return names
+end
+
 function addon:GetSalvageRows(prof, opts)
     local list = {}
     local totals = RunTotals()
@@ -518,6 +528,7 @@ function addon:GetSalvageRows(prof, opts)
         local byChar = totals[itemID]
         local charKey = (record.milled or 0) > 0 and (prof == "All" or profession == prof)
             and (not opts.showExpansion or opts.showExpansion(addon:GetItemExpansion(itemID)))
+            and (not opts.match or opts.match(SalvageNames(itemID, record)))
             and SalvagerFor(profession, byChar, opts.onlyMine)
         local mine = charKey and byChar and byChar[charKey]
         if charKey and (not opts.onlyMine or mine or addon.char.professions[profession]) then

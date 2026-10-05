@@ -19,6 +19,9 @@ local STALE_PRICE_DAYS = 3
 local TOP_HEIGHT = 26
 local FOOTER_HEIGHT = 44
 local PLAN_SUMMARY_HEIGHT = 158
+-- Search box: seconds to wait after typing, letters before searching
+local SEARCH_DELAY = 0.3
+local SEARCH_MIN_LETTERS = 2
 
 local Money, Signed = function(c) return addon:FormatMoney(c) end, function(c) return addon:FormatSignedMoney(c) end
 
@@ -2069,12 +2072,17 @@ local function Create(parent)
     view.onlyMine:SetPoint("LEFT", view.show, "RIGHT", 16, 0)
 
     -- Search by craft or salvage name. Ignores the expansion and Profitable
-    -- only filters, so whatever you type for is found.
+    -- only filters, so whatever you type for is found. Waits for a pause in
+    -- typing: a search costs every matching craft in every expansion.
     view.search = ""
     view.searchBox = UI.SearchBox(list, 170, "Find a craft", function(text)
         view.search = text
-        view.list:ScrollToTop()
-        addon.RefreshWindow()
+        if view.searchTimer then view.searchTimer:Cancel() end
+        view.searchTimer = C_Timer.NewTimer(text == "" and 0 or SEARCH_DELAY, function()
+            view.searchTimer = nil
+            view.list:ScrollToTop()
+            addon.RefreshWindow()
+        end)
     end)
     -- Far left, before the filters (see Refresh, which moves the filters
     -- over while it's hidden)
@@ -2127,7 +2135,7 @@ local function Create(parent)
     end)
     Explain(view.searchBox, function(tooltip)
         tooltip:AddLine("Find a craft", 1, 1, 1)
-        Note(tooltip, "Matches crafts by name, and salvage by what's salvaged or what it gives, across every expansion and whether or not they're profitable.")
+        Note(tooltip, "Type two letters or more. Matches crafts by name, and salvage by what's salvaged or what it gives, across every expansion and whether or not they're profitable.")
         Note(tooltip, "Only " .. (addon.char.name or "me") .. " and the profession picked at the top still apply. Escape clears it.")
     end)
     Explain(view.onlyMine, function(tooltip)
@@ -2253,7 +2261,8 @@ local function Refresh(v, state)
         v.expansion:SetPoint("LEFT", v.searchBox, "RIGHT", 16, 0)
     end
     local needle = not focus and v.search:lower():match("^%s*(.-)%s*$") or ""
-    local searching = needle ~= ""
+    -- One letter matches nearly everything, so a search starts at two
+    local searching = #needle >= SEARCH_MIN_LETTERS
     local show = (focus or searching) and "all" or CraftsShow()
     local rowOpts = {
         concentration = concOn,
@@ -2262,6 +2271,12 @@ local function Refresh(v, state)
         showExpansion = not focus and not searching and IsExpansionShown or nil,
         -- A search finds ignored crafts too, so they're easy to get back
         showIgnored = ui.craftsShowIgnored or searching,
+        -- Names are matched before costing, so only matches are worked out
+        match = searching and function(names)
+            for _, name in pairs(names) do
+                if name:lower():find(needle, 1, true) then return true end
+            end
+        end or nil,
     }
     local items = addon:GetCraftRows(state.profession, rowOpts)
     -- Milling, prospecting and other salvage, as rows of their own
@@ -2274,25 +2289,6 @@ local function Refresh(v, state)
         local kept = {}
         for _, item in ipairs(items) do
             if not item.whyNot and not item.info.partial then table.insert(kept, item) end
-        end
-        items = kept
-    end
-    if searching then
-        local kept = {}
-        for _, item in ipairs(items) do
-            local names = { item.recipe and item.recipe.outputName, item.recipe and item.recipe.name,
-                            item.salvage and item.salvage.inputName }
-            -- Salvage also matches what it gives (Powder Pigment finds
-            -- Tranquility Bloom)
-            for _, o in ipairs(item.salvage and item.salvage.outputs or {}) do
-                table.insert(names, o.name or C_Item.GetItemNameByID(o.itemID))
-            end
-            for _, name in pairs(names) do
-                if name:lower():find(needle, 1, true) then
-                    table.insert(kept, item)
-                    break
-                end
-            end
         end
         items = kept
     end

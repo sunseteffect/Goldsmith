@@ -607,6 +607,8 @@ end
 -- Costs follow the "Show cost as" setting.
 --   showExpansion  - function(expansionID) -> whether to include it
 --   showIgnored    - include ignored items (Settings > Ignored items)
+--   match          - function(names) -> whether to include it, checked
+--                    before any costing so a search only works out matches
 -- Returns { { key, recipe, info (the tier row or GetRecipeProfit), tier,
 -- charKey, itemID, whyNot (see WhyNotRecommended) } }, unsorted.
 local craftRowsCache = addon:NewCache()
@@ -619,6 +621,7 @@ function addon:GetCraftRows(prof, opts)
             and addon:CanAuction(recipe.outputItemID) ~= false
             and (not opts.showExpansion or opts.showExpansion(addon:GetRecipeExpansion(recipe)))
             and (opts.showIgnored or not addon:IsIgnored(recipe.outputItemID))
+            and (not opts.match or opts.match({ recipe.outputName, recipe.name }))
             -- Recipes only excluded characters know are left out
             and (opts.onlyMine or addon:IsCharacterIncluded(CrafterFor(recipeID) or addon.charKey)) then
             local charKey = opts.onlyMine and addon.charKey or CrafterFor(recipeID) or addon.charKey
