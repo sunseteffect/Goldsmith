@@ -476,13 +476,23 @@ local function PlanTooltip(tooltip, node)
         if o.override and node.best == option then table.insert(tags, "your choice") end
         Line(tooltip, "  " .. label, Money(option.unit) .. (#tags > 0 and ("  (" .. table.concat(tags, ", ") .. ")") or ""),
             o.cheapest == option and "profit" or nil)
-        if detail then Note(tooltip, "    " .. detail) end
+        -- Wrapped text loses the indent, so details come as short lines
+        -- ("\n" between them), each indented
+        for line in (detail or ""):gmatch("[^\n]+") do Note(tooltip, "    " .. line) end
     end
     Option(o.buy, "Buy on the AH", o.buy and ("AH price " .. (o.buy.ageText or "")))
     Option(o.vendor, "Vendor", o.vendor and o.vendor.detail)
     Option(o.craft, "Craft it", o.craft and "From its cheapest materials")
-    Option(o.mill, "Mill it", o.mill and string.format("%.2f per %s; cost shared with its other pigments",
-        o.mill.perHerb, o.mill.herbName))
+    -- A herb that gives several pigments has its price split between them
+    -- by AH value (Planner.lua), so say this one's part
+    local millDetail
+    if o.mill and (o.mill.share or 1) < 0.999 then
+        millDetail = string.format("%.2f per %s\nat %.0f%% of its AH price\n(its other pigments pay the rest,\nby AH value)",
+            o.mill.perHerb, o.mill.herbName, o.mill.share * 100)
+    elseif o.mill then
+        millDetail = string.format("%.2f per %s\nat its AH price", o.mill.perHerb, o.mill.herbName)
+    end
+    Option(o.mill, "Mill it", millDetail)
     if not node.best then Note(tooltip, "  No price found. Scan the AH with Auctionator.", "loss") end
 
     if o.cheapest and o.buy and o.cheapest ~= o.buy and o.buy.unit > o.cheapest.unit then

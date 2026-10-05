@@ -121,7 +121,7 @@ GetOptions = function(itemID, name, depth, memo, visiting)
         -- item you haven't opened the vendor for since
         local paid = addon:GetAverageCost(name)
         if paid then
-            options.vendor = { method = "Vendor", unit = paid, detail = "What you paid; open the vendor to record its price" }
+            options.vendor = { method = "Vendor", unit = paid, detail = "What you paid\nopen the vendor to record its price" }
         end
     end
 
