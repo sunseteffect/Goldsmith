@@ -430,6 +430,53 @@ local function SalvagerFor(profession, byChar, onlyMine)
     end
 end
 
+-- Estimated milling
+--
+-- Midnight mills every herb with one recipe and the game doesn't say what a
+-- herb gives, so a herb normally only shows up once you've milled it. For
+-- the herbs below, whose pigment is known, an estimate fills in until then:
+-- pigment per herb from your own milling of the others in the list. Shown
+-- on the Crafts tab so buying and milling can be compared, but never
+-- recommended (whyNot), and plans don't use it. Azeroot is left out until
+-- its pigment is confirmed.
+local ESTIMATED_MILLING = {
+    -- herb (lowest quality) = { pigment (lowest quality), names }
+    [236761] = { 245807, "Tranquility Bloom", "Powder Pigment" },
+    [236776] = { 245803, "Argentleaf", "Argentleaf Pigment" },
+    [236770] = { 245865, "Sanguithorn", "Sanguithorn Pigment" },
+    [236778] = { 245867, "Mana Lily", "Mana Lily Pigment" },
+}
+
+-- Estimated records (same shape as GoldsmithDB.milling's, plus estimated =
+-- true) for the herbs above you haven't milled, keyed by herb item ID
+function addon:GetEstimatedMilling()
+    local herbs, pigments, from = 0, 0, {}
+    for herbID, known in pairs(ESTIMATED_MILLING) do
+        local record = GoldsmithDB.milling[herbID]
+        if record and (record.milled or 0) > 0 then
+            herbs = herbs + record.milled
+            for _, out in pairs(record.outputs or {}) do pigments = pigments + out.qty end
+            table.insert(from, known[2])
+        end
+    end
+    local list = {}
+    if herbs == 0 or pigments == 0 then return list end
+    table.sort(from)
+    for herbID, known in pairs(ESTIMATED_MILLING) do
+        local record = GoldsmithDB.milling[herbID]
+        if not (record and (record.milled or 0) > 0) then
+            local pigmentID = known[1]
+            list[herbID] = {
+                name = C_Item.GetItemNameByID(herbID) or known[2],
+                profession = "Inscription", perCast = 10, milled = herbs,
+                outputs = { [pigmentID] = { name = C_Item.GetItemNameByID(pigmentID) or known[3], qty = pigments } },
+                estimated = true, estimatedFrom = table.concat(from, ", "),
+            }
+        end
+    end
+    return list
+end
+
 -- Crafts tab rows for salvage, in the same shape as GetCraftRows' rows,
 -- with item.salvage holding the details for the hover:
 --   { inputID, inputName, perCast, inputPerCast, resourcefulness, procSave,
@@ -441,7 +488,10 @@ function addon:GetSalvageRows(prof, opts)
     local totals = RunTotals()
     local procSave, procMeasured = ProcSave()
     local minROI = addon:Setting("minROI")
-    for itemID, record in pairs(GoldsmithDB.milling or {}) do
+    local records = {}
+    for itemID, record in pairs(GoldsmithDB.milling or {}) do records[itemID] = record end
+    for itemID, record in pairs(addon:GetEstimatedMilling()) do records[itemID] = record end
+    for itemID, record in pairs(records) do
         local profession = record.profession or "Inscription"
         local byChar = totals[itemID]
         local charKey = (record.milled or 0) > 0 and (prof == "All" or profession == prof)
@@ -492,7 +542,10 @@ function addon:GetSalvageRows(prof, opts)
 
             local inputName = record.name or C_Item.GetItemNameByID(itemID) or ("item " .. itemID)
             local whyNot
-            if not unitPrice then
+            if record.estimated then
+                whyNot = string.format("An estimate: no %s milled yet, so its yield is your average from %s. Mill some to measure it.",
+                    inputName, record.estimatedFrom)
+            elseif not unitPrice then
                 whyNot = "No AH price for " .. inputName .. "."
             elseif sample < SOLID_INPUTS then
                 whyNot = string.format("Yields from only %d %s salvaged so far, a rough guess until about %d.",
@@ -504,7 +557,8 @@ function addon:GetSalvageRows(prof, opts)
                 local verb = SalvageVerb(mine and mine.recipeID, profession)
                 table.insert(list, {
                     key = "salvage:" .. itemID,
-                    recipe = { outputName = string.format("%s %d %s", verb, perCast, inputName),
+                    recipe = { outputName = string.format("%s %d %s%s", verb, perCast, inputName,
+                                   record.estimated and " (estimate)" or ""),
                                profession = profession },
                     info = info, charKey = charKey, itemID = itemID, whyNot = whyNot,
                     salvage = {
@@ -512,6 +566,7 @@ function addon:GetSalvageRows(prof, opts)
                         inputPerCast = inputPerCast, resourcefulness = resourcefulness,
                         procSave = procSave, procMeasured = procMeasured, unitPrice = unitPrice,
                         outputs = outputs, sample = sample, sampleFrom = sampleFrom,
+                        estimated = record.estimated, estimatedFrom = record.estimatedFrom,
                     },
                 })
             end

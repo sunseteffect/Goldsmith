@@ -298,8 +298,13 @@ local function SalvageTooltip(tooltip, item)
     end
 
     tooltip:AddLine(" ")
-    Note(tooltip, string.format("Your yields from %d %s salvaged%s.", s.sample, s.inputName,
-        s.sampleFrom and (" on " .. CharName(s.sampleFrom)) or ", all characters"))
+    if s.estimated then
+        Note(tooltip, string.format("Estimated: your average pigment per herb from %s (%d herbs milled).",
+            s.estimatedFrom, s.sample))
+    else
+        Note(tooltip, string.format("Your yields from %d %s salvaged%s.", s.sample, s.inputName,
+            s.sampleFrom and (" on " .. CharName(s.sampleFrom)) or ", all characters"))
+    end
     if s.resourcefulness > 0 then
         Note(tooltip, s.procMeasured
             and string.format("A resourcefulness proc saves about %.0f%% of the input (measured from your salvage).", s.procSave * 100)
