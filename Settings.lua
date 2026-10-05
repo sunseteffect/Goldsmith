@@ -87,6 +87,41 @@ function addon:SetCharacterIncluded(charKey, included)
 end
 local function SetCharacterIncluded(charKey, included) addon:SetCharacterIncluded(charKey, included) end
 
+-- Ignored items: crafts you never want suggested, such as gear nobody buys.
+-- Right-click a craft on the Crafts tab > Ignore this item. They're left
+-- out of Do this next (WhyNotRecommended) and the Crafts list (unless Show
+-- ignored is ticked there). Undo from the same menu, or Settings > Ignored
+-- items. Keyed by the recipe's item ID, so every quality tier goes:
+-- GoldsmithDB.ignored[itemID] = { name, time }
+function addon:IsIgnored(itemID)
+    return itemID ~= nil and GoldsmithDB.ignored ~= nil and GoldsmithDB.ignored[itemID] ~= nil
+end
+
+function addon:SetIgnored(itemID, name, ignored)
+    if not itemID then return end
+    GoldsmithDB.ignored = GoldsmithDB.ignored or {}
+    GoldsmithDB.ignored[itemID] = ignored and { name = name, time = time() } or nil
+    if ignored then
+        print("|cFF00FF00[Goldsmith]|r Ignoring " .. (name or "that item")
+            .. ". To undo: right-click it on Crafts (tick Show ignored in the Show menu), or Settings > Ignored items.")
+    else
+        print("|cFF00FF00[Goldsmith]|r No longer ignoring " .. (name or "that item") .. ".")
+    end
+    -- Suggestions are cached; this makes them work it out again
+    addon:DataChanged()
+    if addon.RefreshWindow then addon.RefreshWindow() end
+end
+
+-- { { itemID, name } }, by name
+function addon:GetIgnoredItems()
+    local list = {}
+    for itemID, entry in pairs(GoldsmithDB.ignored or {}) do
+        table.insert(list, { itemID = itemID, name = entry.name or C_Item.GetItemNameByID(itemID) or ("item " .. itemID) })
+    end
+    table.sort(list, function(a, b) return a.name < b.name end)
+    return list
+end
+
 -- Chat messages Goldsmith prints by itself (not answers to /gsm commands).
 -- kind is "money" (a sale, purchase or deposit) or "info" (anything else).
 function addon:Notify(kind, msg, ...)
@@ -222,6 +257,11 @@ local HELP = {
         "Its sales and purchases still count, and Goldsmith keeps recording it while you play it.",
         "The Characters tab has the same switch, and can remove a character you've deleted.",
     },
+    ignored = {
+        "Ignored items",
+        "Crafts you've told Goldsmith to ignore: they're never suggested in Do this next and are hidden on the Crafts tab.",
+        "Untick one here to stop ignoring it. To ignore a craft, right-click it on the Crafts tab. Tick Show ignored in the Crafts tab's Show menu to see ignored crafts there.",
+    },
     showMinimap = {
         "Minimap button",
         "A gold coin on the edge of the minimap: click to show or hide Goldsmith, right-click for these settings, drag to move it.",
@@ -289,7 +329,7 @@ local function CharacterLabel(entry)
 end
 
 local COLUMNS = {
-    { title = "Crafting and prices", rows = { "costMode", "priceSource", "minROI", "dealPercent", "heldDays" } },
+    { title = "Crafting and prices", rows = { "costMode", "priceSource", "minROI", "dealPercent", "heldDays", "ignored" } },
     { title = "Display", rows = { "tooltips", "chat", "characters", "showMinimap", "keybind" } },
 }
 
@@ -347,6 +387,30 @@ function addon:CreateSettingsPanel(parent)
             if not addon:IsCharacterIncluded(entry.key) then excluded = excluded + 1 end
         end
         self.control:SetLabel(excluded == 0 and "None excluded" or string.format("%d excluded", excluded))
+    end
+
+    rows.ignored = Row(panel, "ignored", "Ignored items", "Crafts never suggested and hidden on Crafts. Untick to undo.")
+    rows.ignored.control = Dropdown(rows.ignored, "ignored", function(root)
+        local list = addon:GetIgnoredItems()
+        if #list == 0 then
+            root:CreateTitle("Nothing ignored. Right-click a craft on the Crafts tab to ignore it.")
+            return
+        end
+        root:CreateTitle("Untick to stop ignoring")
+        -- Ten at a time, with a scroll bar, once the list gets long
+        if #list > 10 and root.SetScrollMode then root:SetScrollMode(11 * 20) end
+        for _, entry in ipairs(list) do
+            root:CreateCheckbox(entry.name,
+                function() return addon:IsIgnored(entry.itemID) end,
+                function()
+                    addon:SetIgnored(entry.itemID, entry.name, not addon:IsIgnored(entry.itemID))
+                    panel:Update()
+                end)
+        end
+    end)
+    function rows.ignored:Update()
+        local count = #addon:GetIgnoredItems()
+        self.control:SetLabel(count == 0 and "None ignored" or string.format("%d ignored", count))
     end
 
     rows.showMinimap = Row(panel, "showMinimap", "Minimap button", "A coin by the minimap that opens Goldsmith.")

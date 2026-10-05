@@ -59,6 +59,9 @@ local function SoldAtProfit(recipe, row)
 end
 
 function addon:WhyNotRecommended(recipe, row)
+    if addon:IsIgnored(recipe.outputItemID) then
+        return "You're ignoring this item. Right-click it to stop, or Settings > Ignored items."
+    end
     local itemID = row.itemID or recipe.outputItemID
     local expansion = itemID and addon:GetItemExpansion(itemID)
     if not expansion then return "The game hasn't loaded this item yet." end
@@ -603,6 +606,7 @@ end
 --                    ones with unknown costs, whose profit is at most that)
 -- Costs follow the "Show cost as" setting.
 --   showExpansion  - function(expansionID) -> whether to include it
+--   showIgnored    - include ignored items (Settings > Ignored items)
 -- Returns { { key, recipe, info (the tier row or GetRecipeProfit), tier,
 -- charKey, itemID, whyNot (see WhyNotRecommended) } }, unsorted.
 local craftRowsCache = addon:NewCache()
@@ -614,6 +618,7 @@ function addon:GetCraftRows(prof, opts)
             and (not opts.onlyMine or addon.char.knownRecipes[recipeID])
             and addon:CanAuction(recipe.outputItemID) ~= false
             and (not opts.showExpansion or opts.showExpansion(addon:GetRecipeExpansion(recipe)))
+            and (opts.showIgnored or not addon:IsIgnored(recipe.outputItemID))
             -- Recipes only excluded characters know are left out
             and (opts.onlyMine or addon:IsCharacterIncluded(CrafterFor(recipeID) or addon.charKey)) then
             local charKey = opts.onlyMine and addon.charKey or CrafterFor(recipeID) or addon.charKey
@@ -656,6 +661,7 @@ function addon:GetCraftRows(prof, opts)
                             recipe = recipe, info = info, tier = info.tier, charKey = set.key,
                             itemID = info.itemID or recipe.outputItemID,
                             whyNot = addon:WhyNotRecommended(recipe, info),
+                            ignored = addon:IsIgnored(recipe.outputItemID),
                         })
                     end
                 end

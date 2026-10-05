@@ -161,8 +161,12 @@ local WHO_INDENT = 18
 
 local function FillCraftRow(row, item)
     local info, cells = item.info, row.cells
-    cells.item:SetText(ItemText(item))
-    if item.whyNot then cells.item:SetTextColor(addon:Color("muted")) end
+    cells.item:SetText(ItemText(item) .. (item.ignored and addon:Colorize("  ignored", "dim") or ""))
+    if item.ignored then
+        cells.item:SetTextColor(addon:Color("dim"))
+    elseif item.whyNot then
+        cells.item:SetTextColor(addon:Color("muted"))
+    end
 
     -- Who makes it, when it isn't you: a second line, indented under the
     -- name. The list places the name in the middle of the row each time, so
@@ -1954,6 +1958,16 @@ local function RowMenu(item)
             addon.RefreshWindow()
         end)
         root:CreateButton("Item page", function() addon:OpenItem(recipe.outputName, item.itemID) end)
+        root:CreateDivider()
+        if addon:IsIgnored(recipe.outputItemID) then
+            root:CreateButton("Stop ignoring", function()
+                addon:SetIgnored(recipe.outputItemID, recipe.outputName, false)
+            end)
+        else
+            root:CreateButton("Ignore this item", function()
+                addon:SetIgnored(recipe.outputItemID, recipe.outputName, true)
+            end)
+        end
     end)
 end
 
@@ -1973,6 +1987,26 @@ local function SalvageMenu(item)
     end)
 end
 
+-- The Show filter's choices (ui.craftsShow)
+local SHOW_CHOICES = {
+    { value = "all", label = "All crafts" },
+    { value = "profitable", label = "Profitable" },
+    { value = "recommended", label = "Recommended" },
+}
+
+-- The Show filter, with the old Profitable only checkbox carried over
+local function CraftsShow()
+    local ui = GoldsmithDB.ui2
+    return ui.craftsShow or (ui.profitableOnly and "profitable") or "all"
+end
+
+local function ShowLabel(value)
+    for _, choice in ipairs(SHOW_CHOICES) do
+        if choice.value == value then return choice.label end
+    end
+    return "All crafts"
+end
+
 local function Create(parent)
     local ui = GoldsmithDB.ui2
     view = { focus = nil }
@@ -1981,7 +2015,7 @@ local function Create(parent)
     list:SetAllPoints()
     view.listScreen = list
 
-    view.expansion = UI.Dropdown(list, 160, function(root)
+    view.expansion = UI.Dropdown(list, 150, function(root)
         root:CreateTitle("Show items from")
         for _, expansionID in ipairs(GetRecipeExpansions()) do
             root:CreateCheckbox(addon:GetExpansionName(expansionID),
@@ -2004,23 +2038,40 @@ local function Create(parent)
     end)
     view.expansion:SetPoint("TOPLEFT", 0, 0)
 
-    view.profitable = UI.Checkbox(list, "Profitable only", function(checked)
-        ui.profitableOnly = checked or nil
-        addon.RefreshWindow()
+    -- Show: all crafts, profitable ones, or recommended ones (profitable and
+    -- they sell: what Do this next would suggest). ui.craftsShow; the old
+    -- Profitable only checkbox (ui.profitableOnly) carries over.
+    view.show = UI.Dropdown(list, 150, function(root)
+        root:CreateTitle("Show")
+        for _, choice in ipairs(SHOW_CHOICES) do
+            root:CreateRadio(choice.label, function() return CraftsShow() == choice.value end, function()
+                ui.craftsShow = choice.value
+                ui.profitableOnly = nil
+                addon.RefreshWindow()
+            end)
+        end
+        -- Ignored items (right-click a craft) are hidden unless this is on
+        root:CreateDivider()
+        root:CreateCheckbox(string.format("Show ignored (%d)", #addon:GetIgnoredItems()),
+            function() return ui.craftsShowIgnored == true end,
+            function()
+                ui.craftsShowIgnored = (not ui.craftsShowIgnored) or nil
+                addon.RefreshWindow()
+            end)
     end)
-    view.profitable:SetPoint("LEFT", view.expansion, "RIGHT", 16, 0)
+    view.show:SetPoint("LEFT", view.expansion, "RIGHT", 16, 0)
 
     -- Only what the character you're on can make, with their own stats
     view.onlyMine = UI.Checkbox(list, "Only " .. (addon.char.name or "me"), function(checked)
         ui.craftsOnlyMine = checked or nil
         addon.RefreshWindow()
     end)
-    view.onlyMine:SetPoint("LEFT", view.profitable, "RIGHT", 16, 0)
+    view.onlyMine:SetPoint("LEFT", view.show, "RIGHT", 16, 0)
 
     -- Search by craft or salvage name. Ignores the expansion and Profitable
     -- only filters, so whatever you type for is found.
     view.search = ""
-    view.searchBox = UI.SearchBox(list, 200, "Find a craft", function(text)
+    view.searchBox = UI.SearchBox(list, 170, "Find a craft", function(text)
         view.search = text
         view.list:ScrollToTop()
         addon.RefreshWindow()
@@ -2063,13 +2114,16 @@ local function Create(parent)
         Note(tooltip, "The bar at the bottom shows your concentration on all characters and the best way to spend it.")
         Note(tooltip, "Goldsmith tries mixes of lower and higher quality materials. Better materials cost more but need less concentration, so the same concentration can make more crafts. It picks the mix that earns the most.", "gold")
     end)
-    Explain(view.profitable, function(tooltip)
-        tooltip:AddLine("Profitable only", 1, 1, 1)
+    Explain(view.show, function(tooltip)
+        -- One short line per choice; the detail is in each craft's hover
+        tooltip:AddLine("Show", 1, 1, 1)
         local minROI = addon:Setting("minROI")
-        Note(tooltip, minROI > 0
-            and string.format("Shows only crafts with an ROI of at least %d%% at current AH prices. Hides the rest, and crafts with no AH price yet.", minROI)
-            or "Hides crafts that lose gold at current AH prices, and ones with no AH price yet.")
-        Note(tooltip, "Change the ROI under Settings: Worth crafting at.")
+        Line(tooltip, "All crafts", "everything you can make")
+        Line(tooltip, "Profitable", minROI > 0 and string.format("%d%%+ ROI at AH prices", minROI) or "makes gold at AH prices")
+        Line(tooltip, "Recommended", "profitable, and it sells")
+        Line(tooltip, "Show ignored", "adds your ignored crafts")
+        tooltip:AddLine(" ")
+        Note(tooltip, "Recommended is what Do this next suggests. Hover a greyed-out craft for why it isn't.")
     end)
     Explain(view.searchBox, function(tooltip)
         tooltip:AddLine("Find a craft", 1, 1, 1)
@@ -2182,14 +2236,14 @@ local function Refresh(v, state)
     local costLabel = addon:Setting("costMode") == "worst" and "Worst cost" or "Cost"
     SIMPLE_COLUMNS[2].label, CONC_COLUMNS[2].label = costLabel, costLabel
     v.concSwitch:SetOn(concOn)
-    v.profitable:SetChecked(ui.profitableOnly == true)
+    v.show:SetLabel("Show: " .. ShowLabel(CraftsShow()))
     v.onlyMine:SetChecked(ui.craftsOnlyMine == true)
     v.expansion:SetLabel(ExpansionLabel())
 
     -- Following a link from the Overview shows just those crafts, whatever
     -- the filters say
     local focus = v.focus
-    v.profitable:SetShown(not focus)
+    v.show:SetShown(not focus)
     v.onlyMine:SetShown(not focus)
     v.searchBox:SetShown(not focus)
     v.expansion:ClearAllPoints()
@@ -2200,16 +2254,28 @@ local function Refresh(v, state)
     end
     local needle = not focus and v.search:lower():match("^%s*(.-)%s*$") or ""
     local searching = needle ~= ""
+    local show = (focus or searching) and "all" or CraftsShow()
     local rowOpts = {
         concentration = concOn,
-        profitableOnly = not focus and not searching and ui.profitableOnly,
+        profitableOnly = show ~= "all",
         onlyMine = not focus and ui.craftsOnlyMine,
         showExpansion = not focus and not searching and IsExpansionShown or nil,
+        -- A search finds ignored crafts too, so they're easy to get back
+        showIgnored = ui.craftsShowIgnored or searching,
     }
     local items = addon:GetCraftRows(state.profession, rowOpts)
     -- Milling, prospecting and other salvage, as rows of their own
     for _, item in ipairs(addon:GetSalvageRows(state.profession, rowOpts)) do
         table.insert(items, item)
+    end
+    -- Recommended: what Do this next would suggest (no reason against it,
+    -- every material priced)
+    if show == "recommended" then
+        local kept = {}
+        for _, item in ipairs(items) do
+            if not item.whyNot and not item.info.partial then table.insert(kept, item) end
+        end
+        items = kept
     end
     if searching then
         local kept = {}
@@ -2256,8 +2322,8 @@ local function Refresh(v, state)
             or "No craft matches. Try All professions at the top, or open the profession that makes it so Goldsmith can load the recipe.")
     else
         v.list:SetEmptyText(ui.craftsOnlyMine
-            and "No crafts match. This character may not know these recipes: untick Only " .. (addon.char.name or "me") .. ", try All expansions, or turn off Profitable only."
-            or "No crafts match. Try All expansions, turn off Profitable only, or pick All professions at the top.")
+            and "No crafts match. This character may not know these recipes: untick Only " .. (addon.char.name or "me") .. ", try All expansions, or set Show to All crafts."
+            or "No crafts match. Try All expansions, set Show to All crafts, or pick All professions at the top.")
     end
     v.list:SetItems(items)
     v.count:SetText(string.format("%d craft%s", #items, #items == 1 and "" or "s"))
