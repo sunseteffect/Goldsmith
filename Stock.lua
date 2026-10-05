@@ -140,7 +140,8 @@ end
 
 -- Materials with enough history, for the Deals tab, and the earliest date
 -- any history was saved (so the tab can say how long until it's ready).
--- prof filters to one profession's materials, or "All".
+-- prof filters to one profession's materials, or "All". Vendor items are
+-- left out.
 function addon:GetDeals(prof)
     local list = {}
     local earliest
@@ -151,7 +152,7 @@ function addon:GetDeals(prof)
     end
     for itemID, name in pairs(addon:GetTrackedMaterials()) do
         local materialProf = GoldsmithDB.reagents[name]
-        if prof == "All" or materialProf == prof then
+        if (prof == "All" or materialProf == prof) and not addon:IsVendorItem(itemID) then
             local insight = addon:GetPriceInsight(itemID)
             if insight then
                 insight.itemID = itemID

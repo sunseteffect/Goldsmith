@@ -253,6 +253,13 @@ function addon:GetVendorPrice(itemID)
     return itemID and GoldsmithDB.vendorPrices and GoldsmithDB.vendorPrices[itemID]
 end
 
+-- Sold by a vendor: you've opened a vendor selling it, or it's in TSM's
+-- list of vendor items. Its AH price swings don't matter, so it stays out
+-- of Cheap materials.
+function addon:IsVendorItem(itemID)
+    return addon:GetVendorPrice(itemID) ~= nil or GetTSMValue("vendorbuy", itemID) ~= nil
+end
+
 -- AH price only (no vendor cap). Returns price per unit, source, the
 -- price's age in days (Auctionator only), and a note when the price was
 -- adjusted. Sources:
