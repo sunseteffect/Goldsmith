@@ -37,27 +37,44 @@ end
 -- price source setting). Automatic: an Auctionator scan made this session
 -- beats TSM; otherwise TSM. Without either, Blizzard AH data under a day
 -- old beats an older Auctionator scan. Returns text and a theme color.
+-- "at 14:32" today, else "2 days ago"
+local function When(ts)
+    if date("%Y-%m-%d", ts) == date("%Y-%m-%d") then return "at " .. date("%H:%M", ts) end
+    local days = math.max(1, math.floor((time() - ts) / 86400))
+    return string.format("%d day%s ago", days, days == 1 and "" or "s")
+end
+
+-- Auctionator updates after full scans and after any AH search, so the
+-- text says which was last: "Auctionator full scan at 11:51", or "AH search
+-- at 11:13, full scan 2 days ago". Also true if the full scan was today.
+local function AuctionatorText(scan)
+    local full = GoldsmithDB.lastFullScan
+    local fresh = full and date("%Y-%m-%d", full) == date("%Y-%m-%d")
+    if full and scan - full < 60 then
+        return "Prices: Auctionator full scan " .. When(full), fresh
+    end
+    return "Prices: AH search " .. When(scan)
+        .. (full and (", full scan " .. When(full)) or ", no full scan yet"), fresh
+end
+
 local function PriceSourceText()
     -- The saved scan time only counts while Auctionator is loaded
     local scan = addon:HasAuctionator() and GoldsmithDB.lastPriceUpdate
-    local scanText
-    if scan then
-        local days = math.floor((time() - scan) / 86400)
-        scanText = date("%Y-%m-%d", scan) == date("%Y-%m-%d") and ("at " .. date("%H:%M", scan))
-            or string.format("%d day%s ago", math.max(days, 1), days == 1 and "" or "s")
-    end
     local source = addon:Setting("priceSource")
     if source == "tsm" and addon:HasTSM() then
         return "Prices: TSM (preferred)", "muted"
-    elseif source == "auctionator" and scanText then
-        return "Prices: Auctionator scan " .. scanText .. " (preferred)", "muted"
+    elseif source == "auctionator" and scan then
+        local text, fresh = AuctionatorText(scan)
+        return text .. " (preferred)", fresh and "muted" or "warning"
     end
     if addon:ScannedThisSession() then
-        return "Prices: Auctionator scan " .. scanText, "muted"
+        -- Items this update didn't see use TSM when it's installed
+        local text, fresh = AuctionatorText(scan)
+        return text, (fresh or addon:HasTSM()) and "muted" or "warning"
     elseif addon:HasTSM() then
         return "Prices: TSM", "muted"
-    elseif scanText and not addon:BlizzardDataBeatsScan() then
-        return "Prices: Auctionator scan " .. scanText, "warning"
+    elseif scan and not addon:BlizzardDataBeatsScan() then
+        return (AuctionatorText(scan)), "warning"
     elseif addon:GetBlizzardDataTime() then
         -- Blizzard AH data (commodities only) fills in without either addon's
         -- prices, or when it's newer than the last Auctionator scan

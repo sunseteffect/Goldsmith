@@ -398,7 +398,7 @@ function addon:PriceSourceText(itemID, source, age)
     if source == "Blizzard" then return BlizzardAgeText() end
     if source == "Vendor" then return "vendor" end
     if source == "Auctionator" then
-        return age and ("Auctionator, " .. addon:FormatAge(age):gsub("^from ", "")) or "Auctionator"
+        return age and ("Auctionator, " .. addon:FormatAge(age, itemID):gsub("^from ", "")) or "Auctionator"
     end
     return source or "no price"
 end
@@ -417,21 +417,22 @@ function addon:AHPriceAgeText(itemID)
     return addon:PriceSourceText(itemID, source, age)
 end
 
--- Time of the last Auctionator price update if it happened today ("14:32"),
--- else nil. Auctionator only reports item ages in whole days, so this is
--- the best "when" available for prices seen today.
-function addon:GetTodayScanTime()
-    local ts = GoldsmithDB.lastPriceUpdate
-    if ts and date("%Y-%m-%d", ts) == date("%Y-%m-%d") then
-        return date("%H:%M", ts)
+-- When an item's Auctionator price was seen today ("14:32"), from
+-- GoldsmithDB.priceSeen (see RecordPriceHistory), else nil. Auctionator
+-- only reports ages in whole days.
+function addon:GetPriceSeenTime(itemID)
+    local entry = itemID and GoldsmithDB.priceSeen and GoldsmithDB.priceSeen[itemID]
+    if entry and date("%Y-%m-%d", entry[1]) == date("%Y-%m-%d") then
+        return date("%H:%M", entry[1])
     end
 end
 
-function addon:FormatAge(days)
+-- "from 14:32" (seen today, with itemID), "from today", "2 days old"
+function addon:FormatAge(days, itemID)
     if not days then return "age unknown" end
     if days == 0 then
-        local scanTime = addon:GetTodayScanTime()
-        return scanTime and ("from " .. scanTime) or "from today"
+        local seenTime = addon:GetPriceSeenTime(itemID)
+        return seenTime and ("from " .. seenTime) or "from today"
     end
     if days == 1 then return "1 day old" end
     return days .. " days old"
@@ -2139,19 +2140,51 @@ function addon:InitializePricing()
         end
     end)
 
-    -- Auctionator tells registered addons when its price data changes, which
-    -- gives an exact "prices last updated" time for the window
-    local api = Auctionator and Auctionator.API and Auctionator.API.v1
-    if api and api.RegisterForDBUpdate then
-        pcall(api.RegisterForDBUpdate, "Goldsmith", function()
-            GoldsmithDB.lastPriceUpdate = time()
-            addon:RecordPriceHistory()
-            -- A scan loads the items it saw, so more scrolls can be matched
-            addon:MatchEnchantScrolls()
-            if addon.Refresh then
-                addon.Refresh()
-            end
-        end)
+    -- Auctionator updates its prices after a full scan and after any AH
+    -- search or browse. Both set lastPriceUpdate; a full scan also sets
+    -- lastFullScan, so the window doesn't call a search a scan.
+    local function OnPricesUpdated(isFullScan)
+        local now = time()
+        GoldsmithDB.lastPriceUpdate = now
+        if isFullScan then GoldsmithDB.lastFullScan = now end
+        addon:RecordPriceHistory(isFullScan)
+        -- A scan loads the items it saw, so more scrolls can be matched
+        addon:MatchEnchantScrolls()
+        if addon.Refresh then
+            addon.Refresh()
+        end
+    end
+
+    -- Auctionator's event bus says which kind of update it was. Its public
+    -- API (RegisterForDBUpdate) doesn't, so it's only the fallback.
+    local A = Auctionator
+    local bus = A and A.EventBus
+    local fullEvents = A and A.FullScan and A.FullScan.Events
+    local incEvents = A and A.IncrementalScan and A.IncrementalScan.Events
+    local searchEvents = A and A.Search and A.Search.Events
+    local processed = (incEvents and incEvents.PricesProcessed) or (searchEvents and searchEvents.PricesProcessed)
+    local isFull = {}
+    if fullEvents and fullEvents.ScanComplete then isFull[fullEvents.ScanComplete] = true end
+    -- Auctionator's other full scan (browsing every page) ends with this
+    -- and then PricesProcessed; the second is skipped
+    if incEvents and incEvents.ScanComplete then isFull[incEvents.ScanComplete] = true end
+    local registered = false
+    if bus and bus.Register and processed and next(isFull) then
+        local events = { processed }
+        for event in pairs(isFull) do table.insert(events, event) end
+        registered = pcall(bus.Register, bus, {
+            ReceiveEvent = function(_, event)
+                if isFull[event] then
+                    OnPricesUpdated(true)
+                elseif GoldsmithDB.lastFullScan ~= time() then
+                    OnPricesUpdated(false)
+                end
+            end,
+        }, events)
+    end
+    local api = A and A.API and A.API.v1
+    if not registered and api and api.RegisterForDBUpdate then
+        pcall(api.RegisterForDBUpdate, "Goldsmith", function() OnPricesUpdated(false) end)
     end
 
     -- Save each recipe as you click it in the profession window, so costs

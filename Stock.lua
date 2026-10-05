@@ -76,10 +76,18 @@ end
 -- it builds up so later features can compare today's prices with the past.
 local HISTORY_DAYS = 60
 
-function addon:RecordPriceHistory()
+-- The same pass also notes when each item's Auctionator price was seen, as
+-- GoldsmithDB.priceSeen[itemID] = { time, price }, because Auctionator only
+-- gives ages in whole days. A full scan stamps every item priced today. A
+-- search doesn't say which items it saw, so it only stamps items whose
+-- price changed: an item it saw at the same price keeps its older time,
+-- so a time is never newer than it should be.
+function addon:RecordPriceHistory(isFullScan)
     local history = GoldsmithDB.priceHistory
+    local seen = GoldsmithDB.priceSeen
+    local now = time()
     local today = date("%Y-%m-%d")
-    local cutoff = date("%Y-%m-%d", time() - HISTORY_DAYS * 86400)
+    local cutoff = date("%Y-%m-%d", now - HISTORY_DAYS * 86400)
 
     local items = addon:GetTrackedMaterials()
     for _, recipe in pairs(GoldsmithDB.recipes) do
@@ -92,7 +100,16 @@ function addon:RecordPriceHistory()
         if price and addon:GetAuctionatorAge(itemID) == 0 then
             history[itemID] = history[itemID] or {}
             history[itemID][today] = price
+            local last = seen[itemID]
+            if isFullScan or not last or last[2] ~= price then
+                seen[itemID] = { now, price }
+            end
         end
+    end
+
+    -- A day on, Auctionator's own age in days takes over
+    for itemID, entry in pairs(seen) do
+        if now - entry[1] > 2 * 86400 then seen[itemID] = nil end
     end
 
     for itemID, days in pairs(history) do
@@ -169,6 +186,7 @@ end
 
 function addon:InitializeStock()
     GoldsmithDB.priceHistory = GoldsmithDB.priceHistory or {}
+    GoldsmithDB.priceSeen = GoldsmithDB.priceSeen or {}
 end
 
 _G.Goldsmith = addon
