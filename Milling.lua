@@ -61,10 +61,14 @@ local function PrintSummary()
 
     session.summaryMilled = 0
     session.summaryOutputs = {}
+    -- Yields changed (the session counts before it's saved; see
+    -- SalvageRuns), so the Crafts rows and mill planner catch up
+    if addon.Refresh then addon.Refresh() end
 end
 
-local function SaveRun()
-    if not session or (session.used == 0 and session.casts == 0) then return end
+-- The session in progress as a salvage run, or nil
+local function CurrentRun()
+    if not session or (session.used == 0 and session.casts == 0) then return nil end
     local run = {
         time = session.started,
         character = addon.charKey,
@@ -79,6 +83,24 @@ local function SaveRun()
     for key, value in pairs(session.stats) do
         run[key] = value
     end
+    return run
+end
+
+-- Saved salvage runs plus the session in progress, which is only saved
+-- when it ends (another item, logout or /reload), so yields count as you go
+local function SalvageRuns()
+    local runs = GoldsmithDB.salvageRuns or {}
+    local current = CurrentRun()
+    if not current then return runs end
+    local all = {}
+    for i, run in ipairs(runs) do all[i] = run end
+    table.insert(all, current)
+    return all
+end
+
+local function SaveRun()
+    local run = CurrentRun()
+    if not run then return end
     GoldsmithDB.salvageRuns = GoldsmithDB.salvageRuns or {}
     table.insert(GoldsmithDB.salvageRuns, run)
     while #GoldsmithDB.salvageRuns > MAX_SALVAGE_RUNS do
@@ -355,7 +377,7 @@ local SALVAGE_MIN_ROI = 20
 -- Share of one salvage's input a resourcefulness proc saves
 local function ProcSave()
     local saved, procs, units = 0, 0, 0
-    for _, run in ipairs(GoldsmithDB.salvageRuns or {}) do
+    for _, run in ipairs(SalvageRuns()) do
         if run.perCast and run.casts > 0 and run.resourcefulness then
             saved = saved + math.max(run.casts * run.perCast - run.used, 0)
             procs = procs + run.casts * run.resourcefulness / 100
@@ -383,7 +405,7 @@ end
 -- [itemID][charKey] = { casts, used, outputs = { [id] = qty }, perCast, recipeID, last }
 local function RunTotals()
     local totals = {}
-    for _, run in ipairs(GoldsmithDB.salvageRuns or {}) do
+    for _, run in ipairs(SalvageRuns()) do
         if run.itemID and run.character and run.casts > 0 then
             totals[run.itemID] = totals[run.itemID] or {}
             local t = totals[run.itemID][run.character]

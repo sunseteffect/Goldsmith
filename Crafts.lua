@@ -313,7 +313,8 @@ local function SalvageTooltip(tooltip, item)
     if item.whyNot then
         Note(tooltip, "Not recommended: " .. item.whyNot, "warning")
     end
-    Note(tooltip, "Click for " .. s.inputName .. "'s page, right-click to queue a batch.", "profit")
+    Note(tooltip, string.format("Click to plan it (buy or %s?), right-click to queue a batch or open %s's page.",
+        (item.recipe.outputName:match("^(%S+)") or "Salvage"):lower(), s.inputName), "profit")
 end
 
 local function CraftTooltip(tooltip, item)
@@ -585,6 +586,30 @@ function addon:OpenCraftPlan(recipe, info, charKey, quantity, returnTab)
             recipe = recipe, charKey = charKey or addon:GetCrafter(recipe.recipeID) or addon.charKey,
             tier = info and info.tier, concentrate = info and info.concentrate == true or false,
             scenario = info and info.scenario, returnTab = returnTab,
+        },
+        quantity = quantity,
+    }
+    addon:ShowTab("crafts")
+end
+
+-- Opens the mill planner for a salvage row (milling, prospecting): itemID
+-- is what's salvaged; charKey whose yields to use (default: whoever the
+-- Crafts row uses); quantity optional; returnTab as for OpenCraftPlan
+function addon:OpenSalvagePlan(itemID, charKey, quantity, returnTab)
+    local found
+    for _, r in ipairs(addon:GetSalvageRows("All", {})) do
+        if r.itemID == itemID then found = r break end
+    end
+    local s = found and found.salvage
+    pending = {
+        salvage = {
+            itemID = itemID,
+            name = (s and s.inputName) or C_Item.GetItemNameByID(itemID) or ("item " .. itemID),
+            verb = found and found.recipe.outputName:match("^(%S+)") or "Salvage",
+            profession = found and found.recipe.profession,
+            estimated = s and s.estimated,
+            charKey = charKey or (found and found.charKey) or addon.charKey,
+            returnTab = returnTab,
         },
         quantity = quantity,
     }
@@ -1412,6 +1437,408 @@ local function CreatePlanScreen(parent)
     return screen
 end
 
+-- Mill planner
+--
+-- Clicking a salvage row (mill, prospect) opens this: how many to salvage,
+-- what to buy, what should come out, and whether salvaging beats buying
+-- what comes out. Planned like a queued batch (BuildSalvagePlan, Queue.lua).
+local SALVAGE_COLUMNS = {
+    { key = "item", label = "Item" },
+    { key = "amount", label = "Amount", width = 70, justify = "RIGHT" },
+    { key = "have", label = "Have", width = 56, justify = "RIGHT" },
+    { key = "each", label = "Each", width = 84, justify = "RIGHT" },
+    { key = "total", label = "Total", width = 90, justify = "RIGHT" },
+}
+
+-- Rows: what's salvaged first, then what should come out (output = true)
+local function FillSalvageRow(row, item)
+    local c = row.cells
+    c.item:SetText((item.output and "    > " or "") .. MaterialName(item.itemID, item.name))
+    c.item:SetTextColor(addon:Color("text"))
+    c.amount:SetText((item.output and "~" or "") .. Whole(item.amount))
+    c.have:SetText(item.have and item.have > 0 and Whole(item.have) or "-")
+    c.have:SetTextColor(addon:Color(item.have and item.have > 0 and "text" or "dim"))
+    c.each:SetText(item.unit and Money(item.unit) or "no price")
+    c.each:SetTextColor(addon:Color(item.unit and "text" or "dim"))
+    c.total:SetText(item.total and Money(item.total) or "-")
+    c.total:SetTextColor(addon:Color(item.total and "text" or "dim"))
+end
+
+local function SalvageRowTooltip(tooltip, item)
+    tooltip:AddLine(MaterialName(item.itemID, item.name), 1, 1, 1)
+    if item.output then
+        Line(tooltip, "Should come out", "about " .. Whole(item.amount))
+        Line(tooltip, "AH price", item.unit and string.format("%s (%s)", Money(item.unit), addon:PriceAgeText(item.itemID))
+            or "no price")
+        if item.millUnit then
+            Line(tooltip, "By salvaging", Money(item.millUnit) .. " each", item.millUnit < item.unit and "profit" or "warning")
+            Note(tooltip, "The cost of what's salvaged, split across what comes out by AH value.")
+        end
+    else
+        Line(tooltip, "To salvage", Whole(item.amount))
+        if item.have and item.have > 0 then Line(tooltip, "You have", Whole(item.have)) end
+        Line(tooltip, "To buy", Whole(item.toBuy))
+        Line(tooltip, "AH price", item.unit and string.format("%s (%s)", Money(item.unit), addon:PriceAgeText(item.itemID))
+            or "no price", (not item.unit) and "warning" or nil)
+    end
+    Note(tooltip, "Click for the item's page.", "profit")
+end
+
+-- A salvage recipe for an item from saved salvage runs, so the profession
+-- can be opened at it while it's closed (the game only lists recipes with
+-- it open): this character's run of the item, else their latest salvage in
+-- the same profession, else anyone's
+local function KnownSalvageRecipe(itemID, profession)
+    local own, same, any
+    for _, run in pairs(GoldsmithDB.salvageRuns or {}) do
+        local record = GoldsmithDB.milling[run.itemID]
+        local runProfession = record and record.profession or "Inscription"
+        if run.recipeID and runProfession == profession then
+            local mine = run.character == addon.charKey
+            if mine and run.itemID == itemID then
+                if not own or run.time > own.time then own = run end
+            elseif mine then
+                if not same or run.time > same.time then same = run end
+            elseif not any or run.time > any.time then
+                any = run
+            end
+        end
+    end
+    local run = own or same or any
+    return run and run.recipeID
+end
+
+local function CreateSalvageScreen(parent)
+    local ui = GoldsmithDB.ui2
+    local screen = CreateFrame("Frame", nil, parent)
+    screen:SetAllPoints()
+    screen:Hide()
+
+    screen.back = UI.Button(screen, "< Back", 76, 26, function() view:CloseSalvage() end)
+    screen.back:SetPoint("TOPLEFT", 0, 0)
+    screen.title = UI.Text(screen, "heading")
+    screen.title:SetPoint("LEFT", screen.back, "RIGHT", 14, 0)
+    local titleButton = CreateFrame("Button", nil, screen)
+    titleButton:SetAllPoints(screen.title)
+    titleButton:SetScript("OnClick", function()
+        local t = screen.target
+        if t then addon:OpenItem(t.name, t.itemID) end
+    end)
+    UI.SetTooltip(titleButton, function(tooltip)
+        tooltip:AddLine("Click for the item's page", 1, 1, 1)
+    end)
+    screen.subtitle = UI.Text(screen, "small", "muted")
+    screen.subtitle:SetPoint("LEFT", screen.title, "RIGHT", 10, 0)
+
+    screen.queue = UI.Button(screen, "Add to queue", 130, 26, function()
+        local t = screen.target
+        local quantity = tonumber(screen.qty:GetText()) or 0
+        if not t or quantity <= 0 then return end
+        local updated = addon:AddSalvageToQueue(t.charKey, t.itemID, quantity)
+        addon:Notify("info", "%s %s's queue: %s %d %s.", updated and "Changed in" or "Added to",
+            CharName(t.charKey), t.verb:lower(), quantity, t.name)
+        screen:Update()
+    end)
+    screen.queue:SetPoint("TOPRIGHT", 0, 0)
+    UI.SetTooltip(screen.queue, function(tooltip)
+        local t = screen.target
+        if not t then return end
+        tooltip:AddLine(screen.queue.label:GetText(), 1, 1, 1)
+        tooltip:AddLine(string.format("Queue this batch for %s: shop for everything in the queue at once, then work through it from the Queue tab or the button on the profession window.",
+            CharName(t.charKey)), 0.8, 0.8, 0.8, true)
+        if screen.queued then
+            tooltip:AddLine(string.format("Already queued: %d (%d done so far). Clicking sets it to the number above.",
+                screen.queued.quantity, screen.queued.made or 0), 0.6, 0.6, 0.6, true)
+        end
+    end, "ANCHOR_BOTTOM")
+    screen.subtitle:SetPoint("RIGHT", screen.queue, "LEFT", -10, 0)
+
+    screen.verbLabel = UI.Text(screen, "body", "muted")
+    screen.verbLabel:SetPoint("TOPLEFT", 2, -44)
+    screen.qty = UI.NumberBox(screen, 70, function(quantity)
+        local t = screen.target
+        if t and quantity and quantity > 0 then
+            ui.salvageBatch = ui.salvageBatch or {}
+            ui.salvageBatch[t.itemID] = quantity
+        end
+        screen:Update()
+    end)
+    screen.qty:SetPoint("LEFT", screen.verbLabel, "RIGHT", 10, 0)
+    screen.casts = UI.Text(screen, "small", "muted")
+    screen.casts:SetPoint("LEFT", screen.qty, "RIGHT", 10, 0)
+
+    screen.useHave = UI.Checkbox(screen, "Use materials I have", function(checked)
+        ui.planUseOnHand = checked
+        screen:Update()
+    end)
+    screen.useHave:SetPoint("TOPRIGHT", 0, -44)
+
+    screen.list = UI.List(screen, {
+        fill = FillSalvageRow,
+        tooltip = SalvageRowTooltip,
+        onClick = function(item) addon:OpenItem(item.name, item.itemID) end,
+        empty = "Enter how many to salvage.",
+    })
+    screen.list:SetPoint("TOPLEFT", 0, -80)
+    screen.list:SetPoint("BOTTOMRIGHT", 0, PLAN_SUMMARY_HEIGHT + 12)
+    screen.list:SetColumns(SALVAGE_COLUMNS)
+
+    -- Summary: cost, worth, profit; then buy-or-salvage, shopping, buttons
+    local summary = UI.Panel(screen)
+    summary:SetPoint("BOTTOMLEFT")
+    summary:SetPoint("BOTTOMRIGHT")
+    summary:SetHeight(PLAN_SUMMARY_HEIGHT)
+    local third = 860 / 3
+    local function Figure(i, label)
+        local f = {}
+        f.label = UI.Text(summary, "label", "muted")
+        f.label:SetPoint("TOPLEFT", 16 + (i - 1) * third, -14)
+        f.label:SetText(label)
+        f.value = UI.Text(summary, "value")
+        f.value:SetPoint("TOPLEFT", f.label, "BOTTOMLEFT", 0, -5)
+        f.note = UI.Text(summary, "small", "muted")
+        f.note:SetPoint("TOPLEFT", f.value, "BOTTOMLEFT", 0, -4)
+        f.note:SetWidth(third - 24)
+        return f
+    end
+    screen.cost, screen.worth, screen.profit = Figure(1, "COST"), Figure(2, "WORTH"), Figure(3, "PROFIT")
+
+    local function SummaryLine(y)
+        local fs = UI.Text(summary, "small", "muted")
+        fs:SetPoint("BOTTOMLEFT", 16, y)
+        fs:SetPoint("RIGHT", summary, "RIGHT", -200, 0)
+        return fs
+    end
+    screen.warnLine = SummaryLine(64)
+    screen.compareLine = SummaryLine(46)
+    screen.spendLine = SummaryLine(28)
+    screen.noteLine = SummaryLine(10)
+
+    screen.shop = UI.Button(summary, "Send to Auctionator", 170, 28, function()
+        if not screen.current then return end
+        local ok, result = addon:SendShoppingList(screen.current)
+        if ok then
+            print("|cFF00FF00[Goldsmith]|r Shopping list \"" .. result .. "\" sent to Auctionator's Shopping tab.")
+            screen:Update()
+        else
+            print("|cFF00FF00[Goldsmith]|r Couldn't create the shopping list: " .. result)
+        end
+    end)
+    screen.shop:SetPoint("BOTTOMRIGHT", -14, 12)
+    UI.SetTooltip(screen.shop, function(tooltip)
+        tooltip:AddLine("Send to Auctionator", 1, 1, 1)
+        tooltip:AddLine("Makes a shopping list of what to buy. Items come off it as you buy them, and it's deleted once everything's bought.",
+            0.8, 0.8, 0.8, true)
+    end, "ANCHOR_TOP")
+
+    -- Salvage (one stack per click), like the Craft button on a plan
+    screen.action = UI.Button(summary, "Mill", 170, 28, function()
+        local state, t = screen.actionState, screen.target
+        if not (state and state.enabled and t) then return end
+        PerformCraftState(state, { recipeID = state.recipeID, profession = t.profession or "Inscription" }, function()
+            if screen.target == t and screen:IsVisible() then screen:Update() end
+        end)
+    end)
+    screen.action:SetPoint("BOTTOMRIGHT", screen.shop, "TOPRIGHT", 0, 8)
+    UI.Style(screen.action, "highlight", "borderGold")
+    screen.action.label:SetTextColor(addon:Color("gold"))
+    screen.action:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderGold")) end)
+    UI.SetTooltip(screen.action, function(tooltip)
+        local state = screen.actionState
+        if not state then return end
+        tooltip:AddLine(state.label or "Salvage", 1, 1, 1)
+        for _, line in ipairs(state.notes or {}) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
+        for _, line in ipairs(state.blockers or {}) do tooltip:AddLine(line, 1, 0.6, 0.2, true) end
+    end, "ANCHOR_TOP")
+
+    local function SetAction(state, label)
+        screen.actionState = state
+        screen.action:SetLabel((state and state.label) or label or "Salvage")
+        local enabled = state ~= nil and state.enabled == true
+        screen.action:SetEnabled(enabled)
+        screen.action:SetAlpha(enabled and 1 or 0.5)
+    end
+
+    local function Clear(message)
+        for _, f in ipairs({ screen.cost, screen.worth, screen.profit }) do
+            f.value:SetText("-")
+            f.value:SetTextColor(addon:Color("dim"))
+            f.note:SetText("")
+        end
+        screen.warnLine:SetText("")
+        screen.compareLine:SetText(message or "")
+        screen.compareLine:SetTextColor(addon:Color("muted"))
+        screen.spendLine:SetText("")
+        screen.noteLine:SetText("")
+        screen.shop:Disable()
+        screen.shop:SetAlpha(0.5)
+        SetAction(nil)
+    end
+
+    function screen:Open(target, quantity)
+        screen.target = target
+        local remembered = ui.salvageBatch and ui.salvageBatch[target.itemID]
+        screen.qty:SetText(tostring(quantity or remembered or 100))
+        screen.list:ScrollToTop()
+    end
+
+    function screen:Update()
+        local t = screen.target
+        if not t then return end
+        local mine = t.charKey == addon.charKey
+        screen.useHave:SetChecked(ui.planUseOnHand ~= false)
+        screen.useHave:SetShown(mine)
+        screen.queued = addon:FindQueueEntry(t.charKey, nil, nil, nil, t.itemID)
+        screen.queue:SetLabel(screen.queued and "Update queue" or "Add to queue")
+        screen.verbLabel:SetText(t.verb)
+        screen.title:SetText((t.profession and addon:ProfessionIconText(t.profession) or "") .. t.verb .. " " .. t.name)
+        local sub = {}
+        if t.estimated then table.insert(sub, "yields are an estimate") end
+        if not mine then table.insert(sub, "on " .. CharName(t.charKey)) end
+        screen.subtitle:SetText(table.concat(sub, ", "))
+
+        local quantity = tonumber(screen.qty:GetText()) or 0
+        if quantity <= 0 then
+            screen.current = nil
+            screen.list:SetItems({})
+            screen.casts:SetText("")
+            Clear("Enter how many to " .. t.verb:lower() .. ".")
+            return
+        end
+
+        local plan = addon:BuildSalvagePlan(t.itemID, quantity, mine and ui.planUseOnHand ~= false)
+        screen.current = plan
+        local found = plan.row.salvageRow
+        local s = found and found.salvage
+        local perCast = s and s.perCast or 1
+        local verb = t.verb:lower()
+        local castsText = string.format("%d %s at %d each", plan.crafts, verb .. (plan.crafts == 1 and "" or "s"), perCast)
+        if plan.casts - plan.crafts >= 1 then
+            castsText = castsText .. string.format(", about %.0f with resourcefulness", plan.casts)
+        end
+        if quantity % perCast ~= 0 then
+            castsText = castsText .. string.format(". %d at a time, so %d won't be used", perCast, quantity % perCast)
+        end
+        screen.casts:SetText(castsText)
+
+        -- Rows, and what each output costs by salvaging (the cost split by
+        -- AH value, so it's comparable with buying it)
+        local unit = s and s.unitPrice
+        local toBuy = math.max(quantity - plan.have, 0)
+        local items = { { itemID = t.itemID, name = t.name, amount = quantity, have = plan.have, toBuy = toBuy,
+                          unit = unit, total = unit and unit * quantity } }
+        local value, allPriced = 0, #plan.outputs > 0
+        for _, o in ipairs(plan.outputs) do
+            if o.value then value = value + o.value else allPriced = false end
+        end
+        for _, o in ipairs(plan.outputs) do
+            local item = { output = true, itemID = o.itemID, name = o.name, amount = o.quantity,
+                           unit = o.value and o.quantity > 0 and o.value / o.quantity or nil, total = o.value }
+            if allPriced and value > 0 and unit and o.quantity > 0 then
+                item.millUnit = plan.cost * (o.value / value) / o.quantity
+            end
+            table.insert(items, item)
+        end
+        screen.list:SetItems(items)
+
+        -- Figures
+        if unit then
+            screen.cost.value:SetText(Money(plan.cost))
+            screen.cost.value:SetTextColor(addon:Color("text"))
+            screen.cost.note:SetText(string.format("%s each, AH price %s", Money(unit), addon:PriceAgeText(t.itemID)))
+            screen.cost.note:SetTextColor(addon:Color("muted"))
+        else
+            screen.cost.value:SetText("-")
+            screen.cost.value:SetTextColor(addon:Color("dim"))
+            screen.cost.note:SetText("No AH price for " .. t.name .. ". Scan with Auctionator.")
+            screen.cost.note:SetTextColor(addon:Color("warning"))
+        end
+        if value > 0 then
+            screen.worth.value:SetText(Money(value) .. (allPriced and "" or "+"))
+            screen.worth.value:SetTextColor(addon:Color("text"))
+            screen.worth.note:SetText(allPriced and string.format("%s after the AH cut", Money(value * (1 - AH_CUT)))
+                or "Some of what comes out has no price.")
+        else
+            screen.worth.value:SetText("-")
+            screen.worth.value:SetTextColor(addon:Color("dim"))
+            screen.worth.note:SetText(#plan.outputs == 0 and ("No yields yet: " .. verb .. " some first.") or "No AH prices yet.")
+        end
+        if plan.profit then
+            screen.profit.value:SetText(Signed(plan.profit))
+            screen.profit.value:SetTextColor(addon:Color(addon:MoneyColor(plan.profit)))
+            screen.profit.note:SetText(plan.cost > 0 and string.format("%.0f%% ROI, selling what comes out", plan.profit / plan.cost * 100) or "")
+        else
+            screen.profit.value:SetText("-")
+            screen.profit.value:SetTextColor(addon:Color("dim"))
+            screen.profit.note:SetText("")
+        end
+
+        -- Buy or salvage: buying the same outputs on the AH (no AH cut) vs
+        -- the cost of salvaging for them
+        if allPriced and value > 0 and unit then
+            local cheaper = plan.cost < value
+            local pct = math.abs(value - plan.cost) / value * 100
+            local text
+            if #plan.outputs == 1 then
+                local o = items[2]
+                text = string.format("%sing makes %s for about %s each, vs %s each to buy: %s is %.0f%% cheaper.",
+                    t.verb, MaterialName(o.itemID, o.name), Money(o.millUnit), Money(o.unit),
+                    cheaper and verb .. "ing" or "buying", pct)
+            else
+                text = string.format("Buying what comes out would cost about %s, vs %s to %s it: %s is %.0f%% cheaper.",
+                    Money(value), Money(plan.cost), verb, cheaper and verb .. "ing" or "buying", pct)
+            end
+            screen.compareLine:SetText(text)
+            screen.compareLine:SetTextColor(addon:Color(cheaper and "profit" or "warning"))
+        else
+            screen.compareLine:SetText("")
+        end
+
+        -- Warnings: the list changed since it was sent, estimate or thin
+        -- yields, an old price
+        local warn
+        local more, extra = addon:ShoppingListChanges(plan)
+        if more and #more > 0 then
+            warn = "The plan changed since you sent the list (it needs more now): send it again."
+        elseif extra and #extra > 0 then
+            warn = "The plan changed since you sent the list (it needs less now)."
+        elseif found and found.whyNot then
+            warn = found.whyNot
+        else
+            local _, source, age = addon:GetAHPriceInfo(t.itemID)
+            if (source == "Auctionator" or source == "Blizzard") and (age or 0) >= 1 then
+                warn = "Old AH price for " .. t.name .. ". Scan the AH first, or the numbers may change after you buy."
+            end
+        end
+        screen.warnLine:SetText(warn or "")
+        screen.warnLine:SetTextColor(addon:Color("warning"))
+
+        local buy = plan.buyAH[1]
+        screen.spendLine:SetText(buy and string.format("To buy on the AH: %d %s, about %s", buy.quantity, t.name, Money(buy.cost))
+            or "Nothing to buy: you have enough.")
+        screen.shop:SetEnabled(buy ~= nil)
+        screen.shop:SetAlpha(buy and 1 or 0.5)
+
+        local profession = t.profession or "Inscription"
+        if mine and not ProfessionOpen({ profession = profession }) then
+            -- Opens the profession first, like a craft plan's button
+            screen.noteLine:SetText("")
+            local recipeID = KnownSalvageRecipe(t.itemID, profession)
+            SetAction({ label = "Open " .. profession, enabled = recipeID ~= nil, open = true, recipeID = recipeID,
+                        notes = { string.format("Opens %s so you can %s from here.", profession, verb) },
+                        blockers = recipeID and {} or { string.format("Open %s yourself (press K), then %s from here.", profession, verb) } })
+        elseif mine then
+            screen.noteLine:SetText("")
+            SetAction(addon.SalvageState(t.itemID, t.name, quantity, t.verb))
+        else
+            screen.noteLine:SetText(string.format("Planned with %s's yields. Log in on them to %s.", CharName(t.charKey), verb))
+            SetAction(nil, t.verb)
+        end
+    end
+
+    return screen
+end
+
 -- Concentration budget bar (Concentration switch on): concentration across
 -- your characters and the best way to spend it, as on the Overview
 
@@ -1653,12 +2080,12 @@ local function Create(parent)
         tooltip = CraftTooltip,
         onClick = function(item, button)
             if item.salvage then
-                -- Salvage has no plan: click for the input's page,
-                -- right-click to queue a batch
+                -- Click for the mill planner; right-click to queue a
+                -- batch or open the item's page
                 if button == "RightButton" and MenuUtil and MenuUtil.CreateContextMenu then
                     SalvageMenu(item)
                 else
-                    addon:OpenItem(item.salvage.inputName, item.salvage.inputID)
+                    addon:OpenSalvagePlan(item.salvage.inputID, item.charKey)
                 end
             elseif button == "LeftButton" then
                 addon:OpenCraftPlan(item.recipe, item.info, item.charKey)
@@ -1688,7 +2115,17 @@ local function Create(parent)
     view.budget:SetPoint("BOTTOMRIGHT", 0, 0)
 
     view.plan = CreatePlanScreen(parent)
+    view.salvage = CreateSalvageScreen(parent)
 
+    function view:CloseSalvage()
+        local returnTab = view.salvage.target and view.salvage.target.returnTab
+        view.salvage.target = nil
+        view.salvage.current = nil
+        view.salvage.qty:ClearFocus()
+        if returnTab then addon:ShowTab(returnTab) else addon.RefreshWindow() end
+    end
+
+    -- Back goes to the Queue tab for a plan opened from there
     function view:ClosePlan()
         local returnTab = view.plan.plan and view.plan.plan.returnTab
         view.plan.plan = nil
@@ -1703,9 +2140,14 @@ local function Refresh(v, state)
     local ui = GoldsmithDB.ui2
     if pending then
         if pending.plan then
+            v.salvage.target = nil
             v.plan:Open(pending.plan, pending.quantity)
+        elseif pending.salvage then
+            v.plan.plan = nil
+            v.salvage:Open(pending.salvage, pending.quantity)
         else
             v.plan.plan = nil
+            v.salvage.target = nil
             v.focus = pending.focus
             v.list:ScrollToTop()
         end
@@ -1713,10 +2155,15 @@ local function Refresh(v, state)
     end
 
     local planning = v.plan.plan ~= nil
+    local salvaging = not planning and v.salvage.target ~= nil
     v.plan:SetShown(planning)
-    v.listScreen:SetShown(not planning)
+    v.salvage:SetShown(salvaging)
+    v.listScreen:SetShown(not planning and not salvaging)
     if planning then
         v.plan:Update()
+        return
+    elseif salvaging then
+        v.salvage:Update()
         return
     end
 
@@ -1824,6 +2271,8 @@ end
 local function Reset(v)
     v.plan.plan, v.plan.current = nil, nil
     v.plan.qty:ClearFocus()
+    v.salvage.target, v.salvage.current = nil, nil
+    v.salvage.qty:ClearFocus()
     v.focus = nil
     v.list:ScrollToTop()
 end
@@ -1840,11 +2289,15 @@ for _, event in ipairs({ "TRADE_SKILL_SHOW", "TRADE_SKILL_CLOSE", "BAG_UPDATE_DE
 end
 local craftUpdatePending = false
 craftEvents:SetScript("OnEvent", function()
-    if craftUpdatePending or not (view and view.plan and view.plan:IsVisible() and view.plan.plan) then return end
+    if craftUpdatePending or not view then return end
+    local planShown = view.plan and view.plan:IsVisible() and view.plan.plan
+    local salvageShown = view.salvage and view.salvage:IsVisible() and view.salvage.target
+    if not (planShown or salvageShown) then return end
     craftUpdatePending = true
     C_Timer.After(0.3, function()
         craftUpdatePending = false
         if view.plan:IsVisible() and view.plan.plan then view.plan:Update() end
+        if view.salvage:IsVisible() and view.salvage.target then view.salvage:Update() end
     end)
 end)
 

@@ -282,6 +282,20 @@ local function SalvagePlan(row, salvageRows, useOnHand, pool)
     return plan
 end
 
+-- One salvage batch planned on its own, for the mill planner on the Crafts
+-- tab: SalvagePlan's plan plus row (verb, inputName, salvageRow) and what
+-- a shopping list needs (recipe, quantity, listName, listKey)
+function addon:BuildSalvagePlan(itemID, quantity, useOnHand)
+    local salvageRows = {}
+    for _, r in ipairs(addon:GetSalvageRows("All", {})) do salvageRows[r.itemID] = r end
+    local row = { entry = { salvageID = itemID }, remaining = quantity }
+    local plan = SalvagePlan(row, salvageRows, useOnHand, {})
+    plan.row, plan.recipe, plan.quantity = row, row.recipe, quantity
+    plan.listName = string.format("Goldsmith: %s x%d", row.recipe.outputName, quantity)
+    plan.listKey = "salvage:" .. itemID
+    return plan
+end
+
 -- The whole queue planned in order. Returns { charKey, mine, rows = { {
 -- entry, recipe, remaining, p, tierInfo, plan, state } }, cost, revenue,
 -- profit, complete, buyAH, buyVendor, spend, listName, listKey }.

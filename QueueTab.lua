@@ -82,7 +82,7 @@ local function SalvageTooltip(tooltip, item)
         for _, line in ipairs(s.blockers) do tooltip:AddLine(line, 1, 0.6, 0.2, true) end
     end
     tooltip:AddLine(" ")
-    tooltip:AddLine("Click to change how many. Right-click to move or remove it.", 0.37, 0.81, 0.48, true)
+    tooltip:AddLine("Click to open its plan (change how many there). Right-click to move or remove it.", 0.37, 0.81, 0.48, true)
 end
 
 local function FillRow(row, item)
@@ -146,7 +146,7 @@ local function RowTooltip(tooltip, item)
         for _, line in ipairs(s.blockers) do tooltip:AddLine(line, 1, 0.6, 0.2, true) end
     end
     tooltip:AddLine(" ")
-    tooltip:AddLine("Click to change how many. Right-click to move or remove it.", 0.37, 0.81, 0.48, true)
+    tooltip:AddLine("Click to open its plan (change how many there). Right-click to move or remove it.", 0.37, 0.81, 0.48, true)
 end
 
 local function RowMenu(item)
@@ -203,7 +203,7 @@ local function Create(parent)
             if button == "RightButton" then
                 if MenuUtil and MenuUtil.CreateContextMenu then RowMenu(item) end
             elseif item.entry.salvageID then
-                addon:AskSalvageBatch(view.q.charKey, item.entry.salvageID, item.inputName, item.verb)
+                addon:OpenSalvagePlan(item.entry.salvageID, view.q.charKey, item.remaining, "queue")
             elseif item.recipe then
                 addon:OpenCraftPlan(item.recipe, { tier = item.entry.tier, concentrate = item.entry.concentrate },
                     view.q.charKey, item.remaining, "queue")
