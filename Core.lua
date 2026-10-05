@@ -376,7 +376,7 @@ function addon:Initialize()
         -- First time on this account: say how to open it, once login spam
         -- has scrolled past
         C_Timer.After(8, function()
-            Print("Welcome! Type /gsm or click the gold coin on the minimap to open Goldsmith. Its Overview shows how to get started.")
+            Print("Welcome! Type /gsm or click the Goldsmith button on the minimap to open Goldsmith. Its Overview shows how to get started.")
         end)
     end
 

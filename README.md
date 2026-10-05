@@ -1,25 +1,45 @@
 # Goldsmith
 
-A World of Warcraft addon for crafting profitability: what to craft, how to get the materials (buy, craft or mill), where to spend concentration, and what you've actually earned.
+A World of Warcraft addon that tells you what to craft for gold, on which character, and how to get the materials, then tracks what you actually earned.
 
-## Features
-- Tracks AH purchases, vendor purchases, sales (after the AH cut) and AH deposits
-- Profit on sales, lost deposits, materials on hand
-- Crafting costs from your own stats (multicraft, resourcefulness, ingenuity), calibrated from your crafts
-- Quality tiers, mixed material qualities and concentration value (gold per concentration point)
-- Buy vs craft vs mill planner with Auctionator shopping lists
-- Milling yields, live AH order books, undercut and outlier protection
-- Price history and deals
+Most players don't want to study the auction house. Goldsmith gives you a short list: **Do this next**.
+
+## What it does
+- **Do this next:** the best crafts right now, where to spend concentration, salvage worth doing, and materials selling cheap. Suggestions are kept to solid bets: a craft has to make a profit *and* sell.
+- **Crafts:** every recipe your characters know, costed with each character's own stats (multicraft, resourcefulness, ingenuity) and the cheapest mix of material qualities. Search it, filter it, or ignore items you never want to see.
+- **Planner:** for any craft, whether to buy, craft or mill each material, a shopping list sent to Auctionator, and a Craft button that walks you through each step. Shopping lists cover the unlucky case, so one trip is always enough.
+- **Queue:** queue crafts on each character and shop for all of them at once. Then press Craft next (or its key binding) to work through them: mill, make materials, then craft.
+- **Salvage:** milling, prospecting and crushing as profit rows, from the yields you actually get. The mill planner shows whether milling beats buying the pigment.
+- **Characters:** a to-do list for each alt, with their professions and concentration.
+- **Items and History:** prices and price history, your stock across bags, banks and the warband bank, and every sale, purchase and deposit with real profit after the AH cut.
 
 ## Requirements
-- Auctionator or TSM for AH prices
+- English game client (other languages aren't supported yet)
+- Auctionator or TradeSkillMaster for AH prices. Shopping lists need Auctionator.
 
 ## Recommended
-- TSM, alongside Auctionator. It adds:
-  - Region sales per day for every item (without it, Sold/day comes from your own sales only)
-  - Sale rate: the share of listings that actually sell (the column is hidden without TSM)
-  - Outlier protection: a listing far above or below the usual price is replaced by TSM's market value
-  - Prices between Auctionator scans, updated about hourly by the TSM app
+- TradeSkillMaster with its desktop app, alongside Auctionator. It adds:
+  - Region sales per day and sale rate for every item, so Goldsmith knows what actually sells
+  - Prices between your Auctionator scans
+  - Protection against single listings priced far above or below the usual price
 
-## Usage
-`/gsm` opens the window. `/gsm help` lists commands.
+Without TSM, Goldsmith learns what sells from your own sales, so it recommends less at first.
+
+## Getting started
+1. Install Goldsmith and Auctionator, then log in.
+2. Open each of your professions once so Goldsmith can load your recipes.
+3. Run a full Auctionator scan at the auction house.
+4. Type `/gsm` or click the minimap button. The Overview shows a checklist until you're set up.
+
+Repeat steps 2 and 3 on each alt with professions.
+
+## Commands
+- `/gsm`: show or hide the window
+- `/gsm help`: list every command
+- `/gsm setup`: show the getting started checklist again
+
+You can also set keys for opening Goldsmith and for Craft next in the game's Key Bindings, under AddOns.
+
+## Good to know
+- Goldsmith never crafts, buys or posts on its own. Every craft is one press of a button or key.
+- Posting your crafts on the AH is up to you (TSM or Auctionator do that well).

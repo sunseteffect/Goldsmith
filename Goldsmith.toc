@@ -1,7 +1,7 @@
 ## Interface: 120100
 ## Title: Goldsmith
 ## Notes: Crafting profitability analyzer
-## Author: You
+## Author: sunseteffect
 ## SavedVariables: GoldsmithDB
 ## OptionalDeps: Auctionator, TradeSkillMaster
 ## Version: 2.2
