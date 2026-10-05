@@ -328,6 +328,193 @@ function addon:ListMilling()
     end
 end
 
+-- Salvage profit (Crafts tab)
+--
+-- Each item you've salvaged (milled, prospected, crushed...) is a row in
+-- the Crafts tab: one salvage's worth of it (e.g. 5 ore), what that costs
+-- at today's AH price, what comes out at today's prices, and the profit
+-- after the AH cut.
+-- Yields are your own: the character's salvage runs (GoldsmithDB.
+-- salvageRuns) once there are MIN_RUN_CASTS of them, else everyone's
+-- totals for that item (GoldsmithDB.milling). Resourcefulness saves some
+-- input: the character's latest resourcefulness times how much a proc
+-- saves, measured from every salvage run once enough procs are expected
+-- (else DEFAULT_PROC_SAVE). Yields from under SOLID_INPUTS items are a
+-- rough guess, so those rows aren't recommended.
+local MIN_RUN_CASTS = 10
+local SOLID_INPUTS = 200
+local DEFAULT_PROC_SAVE = 0.3
+local MIN_EXPECTED_PROCS = 5
+local SALVAGE_AH_CUT = 0.05
+
+-- Share of one salvage's input a resourcefulness proc saves
+local function ProcSave()
+    local saved, procs, units = 0, 0, 0
+    for _, run in ipairs(GoldsmithDB.salvageRuns or {}) do
+        if run.perCast and run.casts > 0 and run.resourcefulness then
+            saved = saved + math.max(run.casts * run.perCast - run.used, 0)
+            procs = procs + run.casts * run.resourcefulness / 100
+            units = units + run.casts * run.resourcefulness / 100 * run.perCast
+        end
+    end
+    if procs < MIN_EXPECTED_PROCS or units <= 0 then return DEFAULT_PROC_SAVE, false end
+    return math.min(saved / units, 1), true
+end
+
+-- "Prospect", "Mill"... from the salvage recipe's name
+local VERBS = { { "Prospect", "Prospect" }, { "Mill", "Mill" }, { "Crush", "Crush" },
+                { "Shatter", "Shatter" }, { "Recycl", "Recycle" } }
+local function SalvageVerb(recipeID, profession)
+    local name = recipeID and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(recipeID)
+    for _, v in ipairs(VERBS) do
+        if name and name:find(v[1]) then return v[2] end
+    end
+    if profession == "Inscription" then return "Mill" end
+    if profession == "Jewelcrafting" then return "Prospect" end
+    return "Salvage"
+end
+
+-- Salvage runs added up per item and character:
+-- [itemID][charKey] = { casts, used, outputs = { [id] = qty }, perCast, recipeID, last }
+local function RunTotals()
+    local totals = {}
+    for _, run in ipairs(GoldsmithDB.salvageRuns or {}) do
+        if run.itemID and run.character and run.casts > 0 then
+            totals[run.itemID] = totals[run.itemID] or {}
+            local t = totals[run.itemID][run.character]
+            if not t then
+                t = { casts = 0, used = 0, outputs = {} }
+                totals[run.itemID][run.character] = t
+            end
+            t.casts, t.used = t.casts + run.casts, t.used + run.used
+            for id, qty in pairs(run.outputs or {}) do t.outputs[id] = (t.outputs[id] or 0) + qty end
+            t.perCast, t.recipeID = run.perCast or t.perCast, run.recipeID or t.recipeID
+            if not t.last or run.time >= t.last.time then t.last = run end
+        end
+    end
+    return totals
+end
+
+-- The character's latest salvage run of another item in the same
+-- profession (milling one herb is like milling another), or nil
+local function SimilarRun(totals, charKey, profession)
+    local latest
+    for itemID, byChar in pairs(totals) do
+        local t = byChar[charKey]
+        local record = GoldsmithDB.milling[itemID]
+        if t and record and (record.profession or "Inscription") == profession
+            and (not latest or t.last.time > latest.time) then
+            latest = t.last
+        end
+    end
+    return latest
+end
+
+-- Who salvages an item: onlyMine, you; else the character who did it
+-- most recently (counted ones only); else one with its profession
+local function SalvagerFor(profession, byChar, onlyMine)
+    if onlyMine then return addon.charKey end
+    local best
+    for key, t in pairs(byChar or {}) do
+        if addon:IsCharacterIncluded(key) and (not best or t.last.time > byChar[best].last.time) then best = key end
+    end
+    if best then return best end
+    if addon.char.professions[profession] then return addon.charKey end
+    for key, c in pairs(GoldsmithDB.characters) do
+        if c.professions[profession] and addon:IsCharacterIncluded(key) then return key end
+    end
+end
+
+-- Crafts tab rows for salvage, in the same shape as GetCraftRows' rows,
+-- with item.salvage holding the details for the hover:
+--   { inputID, inputName, perCast, inputPerCast, resourcefulness, procSave,
+--     procMeasured, unitPrice, outputs = { { itemID, perCast, unit, value } },
+--     sample, sampleFrom }
+-- opts as for GetCraftRows (profitableOnly, onlyMine, showExpansion).
+function addon:GetSalvageRows(prof, opts)
+    local list = {}
+    local totals = RunTotals()
+    local procSave, procMeasured = ProcSave()
+    local minROI = addon:Setting("minROI")
+    for itemID, record in pairs(GoldsmithDB.milling or {}) do
+        local profession = record.profession or "Inscription"
+        local byChar = totals[itemID]
+        local charKey = (record.milled or 0) > 0 and (prof == "All" or profession == prof)
+            and (not opts.showExpansion or opts.showExpansion(addon:GetItemExpansion(itemID)))
+            and SalvagerFor(profession, byChar, opts.onlyMine)
+        local mine = charKey and byChar and byChar[charKey]
+        if charKey and (not opts.onlyMine or mine or addon.char.professions[profession]) then
+            -- Items salvaged before runs were saved: how many one salvage
+            -- uses, and the character's resourcefulness, from their other
+            -- salvage in the same profession
+            local similar = SimilarRun(totals, charKey, profession)
+            -- Yields per salvage: this character's runs, or everyone's totals
+            local perCast = (mine and mine.perCast) or record.perCast or (similar and similar.perCast) or 1
+            local outputs, sample, sampleFrom = {}, 0, nil
+            if mine and mine.casts >= MIN_RUN_CASTS then
+                for id, qty in pairs(mine.outputs) do
+                    local out = record.outputs and record.outputs[id]
+                    table.insert(outputs, { itemID = id, perCast = qty / mine.casts, name = out and out.name })
+                end
+                sample, sampleFrom = mine.used, charKey
+            else
+                for id, out in pairs(record.outputs or {}) do
+                    table.insert(outputs, { itemID = id, perCast = out.qty / record.milled * perCast, name = out.name })
+                end
+                sample = record.milled
+            end
+
+            local resourcefulness = (mine and mine.last.resourcefulness)
+                or (similar and similar.resourcefulness) or 0
+            local inputPerCast = perCast * (1 - resourcefulness / 100 * procSave)
+            local unitPrice = addon:GetMarketPrice(itemID)
+            local value, partial = 0, false
+            for _, o in ipairs(outputs) do
+                o.unit = addon:GetMarketPrice(o.itemID)
+                o.value = o.unit and o.unit * o.perCast
+                if o.value then value = value + o.value else partial = true end
+            end
+            table.sort(outputs, function(a, b) return (a.value or 0) > (b.value or 0) end)
+
+            local info = { price = value > 0 and value or nil, partial = partial }
+            if unitPrice then
+                info.cost = unitPrice * inputPerCast
+                if info.price then
+                    info.profit = info.price * (1 - SALVAGE_AH_CUT) - info.cost
+                    info.margin = info.cost > 0 and (info.profit / info.cost * 100) or nil
+                end
+            end
+
+            local inputName = record.name or C_Item.GetItemNameByID(itemID) or ("item " .. itemID)
+            local whyNot
+            if not unitPrice then
+                whyNot = "No AH price for " .. inputName .. "."
+            elseif sample < SOLID_INPUTS then
+                whyNot = string.format("Yields from only %d %s salvaged so far, a rough guess until about %d.",
+                    sample, inputName, SOLID_INPUTS)
+            end
+
+            if not opts.profitableOnly
+                or (info.profit and info.profit > 0 and (not info.margin or info.margin >= minROI)) then
+                local verb = SalvageVerb(mine and mine.recipeID, profession)
+                table.insert(list, {
+                    key = "salvage:" .. itemID,
+                    recipe = { outputName = string.format("%s %d %s", verb, perCast, inputName),
+                               profession = profession },
+                    info = info, charKey = charKey, itemID = itemID, whyNot = whyNot,
+                    salvage = {
+                        inputID = itemID, inputName = inputName, perCast = perCast,
+                        inputPerCast = inputPerCast, resourcefulness = resourcefulness,
+                        procSave = procSave, procMeasured = procMeasured, unitPrice = unitPrice,
+                        outputs = outputs, sample = sample, sampleFrom = sampleFrom,
+                    },
+                })
+            end
+        end
+    end
+    return list
+end
+
 -- Salvage stats check (/gsm salvage)
 --
 -- Salvage recipes (prospecting, crushing, milling, shattering, recycling)

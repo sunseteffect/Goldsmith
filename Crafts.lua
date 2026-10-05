@@ -49,6 +49,16 @@ local function ItemText(item)
     return addon:ProfessionIconText(item.recipe.profession) .. tier .. item.recipe.outputName
 end
 
+-- A material's name with its quality icon. fallbackName is used while the
+-- game hasn't loaded the item (asked to load it for next time).
+local function MaterialName(itemID, fallbackName)
+    local tier, tierCount = addon:GetItemTier(itemID)
+    local name = C_Item.GetItemNameByID(itemID)
+    if not name and C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(itemID) end
+    return (tier and (addon:TierIconText(tier, tierCount) .. " ") or "")
+        .. (name or fallbackName or ("item " .. itemID))
+end
+
 local function CharName(charKey)
     local c = GoldsmithDB.characters[charKey]
     return c and c.name or charKey
@@ -253,7 +263,56 @@ local function StatsText(stats)
     return "From your stats: " .. table.concat(parts, ", ") .. "."
 end
 
+-- Hover for a salvage row (see GetSalvageRows in Milling.lua)
+local function SalvageTooltip(tooltip, item)
+    local s, info = item.salvage, item.info
+    tooltip:AddLine(ItemText(item), 1, 1, 1)
+    if item.charKey ~= addon.charKey then
+        Note(tooltip, "Salvaged on " .. CharName(item.charKey) .. ", with their yields and resourcefulness.")
+    end
+    Line(tooltip, "Uses", s.resourcefulness > 0
+        and string.format("about %.1f %s (%d, less %.1f%% resourcefulness)", s.inputPerCast, s.inputName,
+            s.perCast, s.resourcefulness)
+        or string.format("%d %s", s.perCast, s.inputName))
+    Line(tooltip, "Cost", info.cost and string.format("%s (%s each, %s)", Money(info.cost), Money(s.unitPrice),
+        addon:PriceAgeText(s.inputID)) or "no AH price", (not info.cost) and "warning" or nil)
+
+    tooltip:AddLine(" ")
+    tooltip:AddLine("What comes out of one, on average", 1, 0.82, 0)
+    for _, o in ipairs(s.outputs) do
+        tooltip:AddDoubleLine("    " .. MaterialName(o.itemID, o.name),
+            o.value and string.format("%.2f x %s = %s", o.perCast, Money(o.unit), Money(o.value))
+                or string.format("%.2f, no price", o.perCast),
+            0.9, 0.9, 0.9, addon:Color(o.value and "text" or "dim"))
+    end
+    tooltip:AddLine(" ")
+    if info.price then
+        Line(tooltip, "Worth", string.format("%s, %s after the AH cut", Money(info.price), Money(info.price * 0.95)))
+    end
+    if info.profit then
+        Line(tooltip, "Profit each", string.format("%s%s%s", Signed(info.profit),
+            info.margin and string.format(" (%.0f%% ROI)", info.margin) or "", info.partial and ", at least" or ""),
+            addon:MoneyColor(info.profit))
+        Line(tooltip, "Per 1,000 " .. s.inputName, Signed(info.profit / s.inputPerCast * 1000),
+            addon:MoneyColor(info.profit))
+    end
+
+    tooltip:AddLine(" ")
+    Note(tooltip, string.format("Your yields from %d %s salvaged%s.", s.sample, s.inputName,
+        s.sampleFrom and (" on " .. CharName(s.sampleFrom)) or ", all characters"))
+    if s.resourcefulness > 0 then
+        Note(tooltip, s.procMeasured
+            and string.format("A resourcefulness proc saves about %.0f%% of the input (measured from your salvage).", s.procSave * 100)
+            or string.format("A resourcefulness proc is assumed to save %.0f%% of the input until there's enough of your salvage to measure it.", s.procSave * 100))
+    end
+    if item.whyNot then
+        Note(tooltip, "Not recommended: " .. item.whyNot, "warning")
+    end
+    Note(tooltip, "Click for " .. s.inputName .. "'s page.", "profit")
+end
+
 local function CraftTooltip(tooltip, item)
+    if item.salvage then return SalvageTooltip(tooltip, item) end
     local info, recipe = item.info, item.recipe
     tooltip:AddLine(ItemText(item), 1, 1, 1)
     if item.charKey ~= addon.charKey and info.concentrate then
@@ -608,11 +667,6 @@ local function UpdateWhenOpen(recipe, update, tries)
     end)
 end
 
-local function MaterialName(itemID)
-    local tier, tierCount = addon:GetItemTier(itemID)
-    return (tier and (addon:TierIconText(tier, tierCount) .. " ") or "")
-        .. (C_Item.GetItemNameByID(itemID) or ("item " .. itemID))
-end
 
 -- Materials whose AH price is missing or a day or more old. Every quality
 -- of the recipe's own materials is checked, not just what the plan buys:
@@ -1476,7 +1530,10 @@ local function Create(parent)
         fill = FillCraftRow,
         tooltip = CraftTooltip,
         onClick = function(item, button)
-            if button == "LeftButton" then
+            if item.salvage then
+                -- No plan for salvage yet: the input's page
+                addon:OpenItem(item.salvage.inputName, item.salvage.inputID)
+            elseif button == "LeftButton" then
                 addon:OpenCraftPlan(item.recipe, item.info, item.charKey)
             else
                 addon:OpenItem(item.recipe.outputName, item.itemID)
@@ -1547,12 +1604,17 @@ local function Refresh(v, state)
     local focus = v.focus
     v.profitable:SetShown(not focus)
     v.onlyMine:SetShown(not focus)
-    local items = addon:GetCraftRows(state.profession, {
+    local rowOpts = {
         concentration = concOn,
         profitableOnly = not focus and ui.profitableOnly,
         onlyMine = not focus and ui.craftsOnlyMine,
         showExpansion = not focus and IsExpansionShown or nil,
-    })
+    }
+    local items = addon:GetCraftRows(state.profession, rowOpts)
+    -- Milling, prospecting and other salvage, as rows of their own
+    for _, item in ipairs(addon:GetSalvageRows(state.profession, rowOpts)) do
+        table.insert(items, item)
+    end
     if focus then
         local kept = {}
         for _, item in ipairs(items) do
