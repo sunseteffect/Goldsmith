@@ -3,4 +3,7 @@
     <Binding name="GOLDSMITH_TOGGLE" header="GOLDSMITH" category="ADDONS">
         Goldsmith:ToggleWindow()
     </Binding>
+    <Binding name="GOLDSMITH_CRAFT_NEXT" category="ADDONS">
+        Goldsmith:CraftNext()
+    </Binding>
 </Bindings>

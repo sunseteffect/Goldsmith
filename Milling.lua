@@ -190,6 +190,7 @@ local function OnBagsChanged()
         session.used = session.used + used
         session.lastMill = t
         changed = true
+        addon:QueueSalvaged(herbID, used)
     end
 
     -- Only items that appear right after herbs were used up count as output,
@@ -346,6 +347,10 @@ local SOLID_INPUTS = 200
 local DEFAULT_PROC_SAVE = 0.3
 local MIN_EXPECTED_PROCS = 5
 local SALVAGE_AH_CUT = 0.05
+-- Do this next only suggests salvage that's clearly worth it: yields from
+-- SOLID_INPUTS+ items, every output priced, and at least this ROI (or the
+-- Worth crafting at setting, if higher), since yields swing from run to run
+local SALVAGE_MIN_ROI = 20
 
 -- Share of one salvage's input a resourcefulness proc saves
 local function ProcSave()
@@ -513,6 +518,23 @@ function addon:GetSalvageRows(prof, opts)
         end
     end
     return list
+end
+
+-- Salvage for Do this next: rows with no reason against them (whyNot),
+-- every output priced, and a clearly good ROI; best ROI first
+function addon:GetBestSalvage(prof)
+    local best = {}
+    local minROI = math.max(SALVAGE_MIN_ROI, addon:Setting("minROI") or 0)
+    local current = addon:GetCurrentExpansion()
+    for _, row in ipairs(addon:GetSalvageRows(prof, {})) do
+        local info = row.info
+        if not row.whyNot and addon:GetItemExpansion(row.itemID) == current and not info.partial and info.profit and info.profit > 0
+            and info.margin and info.margin >= minROI then
+            table.insert(best, row)
+        end
+    end
+    table.sort(best, function(a, b) return a.info.margin > b.info.margin end)
+    return best
 end
 
 -- Salvage stats check (/gsm salvage)

@@ -1122,6 +1122,7 @@ local function OnCraftResult(resultData)
     if not recipe then return end
     -- Ignore results that aren't this recipe's item (e.g. a different craft)
     if C_Item.GetItemNameByID(resultData.itemID) ~= recipe.outputName then return end
+    addon:QueueCrafted(currentCraftRecipeID, resultData.quantity)
 
     local stats = GoldsmithDB.craftStats[currentCraftRecipeID]
     if not stats then

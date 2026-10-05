@@ -25,6 +25,8 @@ Window.lua
 Minimap.lua
 Overview.lua
 Crafts.lua
+Queue.lua
+QueueTab.lua
 Items.lua
 History.lua
 CharactersTab.lua

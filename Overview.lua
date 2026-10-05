@@ -242,6 +242,41 @@ local function CraftsAction(crafts, prof)
     }
 end
 
+-- Milling, prospecting and other salvage that's clearly worth it (see
+-- GetBestSalvage in Milling.lua): profit per salvage, best ROI first
+local function SalvageAction(prof)
+    local rows = addon:GetBestSalvage(prof)
+    if #rows == 0 then return nil end
+    local parts = {}
+    for i = 1, math.min(#rows, CRAFTS_SHOWN) do
+        local r = rows[i]
+        local icon = prof == "All" and addon:ProfessionIconText(r.recipe.profession) or ""
+        local who = OnWho(r.charKey)
+        table.insert(parts, string.format("%s%s   %s (%.0f%%)%s", icon, ShortName(r.recipe.outputName, 30),
+            addon:Colorize(Signed(r.info.profit), "profit"), r.info.margin, who ~= "" and ("  ·" .. who) or ""))
+    end
+    return {
+        title = "Worth salvaging",
+        detail = table.concat(parts, "\n"),
+        tooltip = function(tooltip)
+            tooltip:AddLine("Worth salvaging", 1, 1, 1)
+            tooltip:AddLine("Milling, prospecting and crushing that pays: yields measured from 200+ of your own salvages, every output priced, and a 20%+ ROI (or your Worth crafting at setting, if higher). Profit is per salvage, after the AH cut on what comes out.",
+                0.6, 0.6, 0.6, true)
+            for _, r in ipairs(rows) do
+                tooltip:AddDoubleLine(r.recipe.outputName .. OnWho(r.charKey),
+                    string.format("%s (%.0f%% ROI)", Signed(r.info.profit), r.info.margin), 0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
+            end
+            tooltip:AddLine(" ")
+            tooltip:AddLine("Click to see these in Crafts.", 0.37, 0.81, 0.48)
+        end,
+        onClick = function()
+            local keys = {}
+            for _, r in ipairs(rows) do keys[r.key] = true end
+            addon:OpenCrafts({ keys = keys, label = "Worth salvaging" })
+        end,
+    }
+end
+
 -- How far below usual counts as cheap is a setting (dealPercent)
 local function DealsAction(prof)
     local deals, earliest, minDays = addon:GetDeals(prof)
@@ -713,6 +748,9 @@ local function Refresh(view, state)
     if concAction then table.insert(list, concAction) end
     local craftsAction = CraftsAction(addon:GetBestCrafts(prof, CRAFTS_LISTED), prof)
     if craftsAction then table.insert(list, craftsAction) end
+    -- Only ACTION_COUNT rows fit, so salvage goes before cheap materials
+    local salvageAction = SalvageAction(prof)
+    if salvageAction then table.insert(list, salvageAction) end
     local dealsAction = DealsAction(prof)
     if dealsAction then table.insert(list, dealsAction) end
     local top = -44

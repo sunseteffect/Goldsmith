@@ -308,7 +308,7 @@ local function SalvageTooltip(tooltip, item)
     if item.whyNot then
         Note(tooltip, "Not recommended: " .. item.whyNot, "warning")
     end
-    Note(tooltip, "Click for " .. s.inputName .. "'s page.", "profit")
+    Note(tooltip, "Click for " .. s.inputName .. "'s page, right-click to queue a batch.", "profit")
 end
 
 local function CraftTooltip(tooltip, item)
@@ -386,7 +386,7 @@ local function CraftTooltip(tooltip, item)
     end
     tooltip:AddLine(" ")
     Note(tooltip, "Click to plan: materials, quantity, shopping list", "profit")
-    Note(tooltip, "Right-click for the item's page")
+    Note(tooltip, "Right-click to add it to the queue, or for the item's page")
 end
 
 -- Planner
@@ -567,12 +567,13 @@ end
 
 -- Opens the planner for a craft. info is a Crafts row, tier row or
 -- concentration plan row; charKey whose stats to use; quantity optional.
-function addon:OpenCraftPlan(recipe, info, charKey, quantity)
+-- returnTab: where Back goes (e.g. "queue"), else the Crafts list.
+function addon:OpenCraftPlan(recipe, info, charKey, quantity, returnTab)
     pending = {
         plan = {
             recipe = recipe, charKey = charKey or addon:GetCrafter(recipe.recipeID) or addon.charKey,
             tier = info and info.tier, concentrate = info and info.concentrate == true or false,
-            scenario = info and info.scenario,
+            scenario = info and info.scenario, returnTab = returnTab,
         },
         quantity = quantity,
     }
@@ -806,19 +807,22 @@ local function StepLabel(verb, count, name)
     return label
 end
 
--- A mill step: mill enough herbs for the pigments still needed, from one
--- stack at a time
+-- A salvage step (mill, prospect, crush): salvage enough items for what's
+-- still needed, from one stack at a time. node.best = { herbID, herbName,
+-- perHerb (outputs per item), verb ("Mill" unless given) }.
 local function MillStepState(node, state)
     local herbID, herbName = node.best.herbID, node.best.herbName
+    local verb = node.best.verb or "Mill"
+    local lower = verb:lower()
     local record = GoldsmithDB.milling[herbID]
     local profession = record and record.profession or "Inscription"
     if not ProfessionOpen({ profession = profession }) then
-        table.insert(state.blockers, string.format("Open %s to mill %s first.", profession, herbName))
+        table.insert(state.blockers, string.format("Open %s to %s %s first.", profession, lower, herbName))
         return state
     end
     local recipeID, perCast = FindSalvageRecipe(herbID)
     if not recipeID then
-        table.insert(state.blockers, string.format("This character can't mill %s.", herbName))
+        table.insert(state.blockers, string.format("This character can't %s %s.", lower, herbName))
         return state
     end
     local location, stack = LargestBagStack(herbID)
@@ -828,23 +832,30 @@ local function MillStepState(node, state)
         local inBags = C_Item.GetItemCount(herbID) or 0
         local inBank = (C_Item.GetItemCount(herbID, true, false, true, true) or 0) - inBags
         if inBank >= perCast then
-            table.insert(state.blockers, string.format("Take %s out of the bank to mill it.", herbName))
+            table.insert(state.blockers, string.format("Take %s out of the bank to %s it.", herbName, lower))
         else
-            table.insert(state.blockers, string.format("Not enough %s to mill (%d at a time). Send the shopping list to Auctionator.",
-                herbName, perCast))
+            table.insert(state.blockers, string.format("Not enough %s to %s (%d at a time). Send the shopping list to Auctionator.",
+                herbName, lower, perCast))
         end
-        state.label = StepLabel("Mill", wanted * perCast, herbName)
+        state.label = StepLabel(verb, wanted * perCast, herbName)
         return state
     end
     local inBags = C_Item.GetItemCount(herbID) or 0
-    table.insert(state.notes, string.format("Uses %d %s per mill; you have %d in your bags.", perCast, herbName, inBags))
+    table.insert(state.notes, string.format("Uses %d %s per %s; you have %d in your bags.", perCast, herbName, lower, inBags))
     if casts < wanted and inBags >= (casts + 1) * perCast then
-        table.insert(state.notes, "Mills one stack per click.")
+        table.insert(state.notes, verb .. "s one stack per click.")
     end
     state.salvage = { recipeID = recipeID, casts = casts, location = location }
     state.enabled = #state.blockers == 0
-    state.label = StepLabel("Mill", casts * perCast, herbName)
+    state.label = StepLabel(verb, casts * perCast, herbName)
     return state
+end
+
+-- A queued salvage batch (Queue.lua): salvage `count` more of an item
+function addon.SalvageState(itemID, name, count, verb)
+    local node = { toGet = count, best = { herbID = itemID, herbName = name, perHerb = 1, verb = verb } }
+    local state = { label = verb, blockers = {}, notes = {} }
+    return MillStepState(node, state)
 end
 
 -- A craft step: make the material, using the qualities the plan picked
@@ -969,6 +980,38 @@ local function CraftState(p, tierInfo, plan)
     return state
 end
 
+-- Does what a CraftState says: opens the profession at the recipe (then
+-- calls onOpened once it's open), mills, or crafts. Needs a click or key
+-- press (the game only crafts from one).
+local function PerformCraftState(state, recipe, onOpened)
+    if not (state and state.enabled) then return end
+    if state.open then
+        if C_TradeSkillUI.OpenRecipe then
+            C_TradeSkillUI.OpenRecipe(recipe.recipeID)
+            if onOpened then UpdateWhenOpen(recipe, onOpened) end
+        else
+            print("|cFF00FF00[Goldsmith]|r Open " .. recipe.profession .. ", then click Craft.")
+        end
+        return
+    end
+    if state.salvage then
+        -- CraftSalvage(recipeID, casts, itemLocation)
+        C_TradeSkillUI.CraftSalvage(state.salvage.recipeID, state.salvage.casts, state.salvage.location)
+        return
+    end
+    -- CraftRecipe(recipeID, count, reagents, recipeLevel, orderID, concentrate)
+    C_TradeSkillUI.CraftRecipe(state.recipeID or recipe.recipeID, state.crafts, state.reagents, nil, nil,
+        state.concentrate)
+end
+
+-- For the queue (Queue.lua): the same plan lookups and Craft button
+addon.FindTierInfo = FindTierInfo
+addon.GetCraftState = CraftState
+addon.PerformCraftState = PerformCraftState
+addon.SyncProfessionWindow = SyncProfessionWindow
+addon.StalePrices = StalePrices
+addon.ProfessionOpen = ProfessionOpen
+
 local function CreatePlanScreen(parent)
     local ui = GoldsmithDB.ui2
     ui.planQty = ui.planQty or {}
@@ -991,6 +1034,32 @@ local function CreatePlanScreen(parent)
     end)
     screen.subtitle = UI.Text(screen, "small", "muted")
     screen.subtitle:SetPoint("LEFT", screen.title, "RIGHT", 10, 0)
+
+    -- Adds this plan (how many, tier, concentration) to the crafting
+    -- character's queue, or changes how many if it's already there
+    screen.queue = UI.Button(screen, "Add to queue", 130, 26, function()
+        local p = screen.plan
+        local quantity = tonumber(screen.qty:GetText()) or 0
+        if not p or quantity <= 0 then return end
+        local concentrate = screen.tierInfo and screen.tierInfo.concentrate == true or false
+        local updated = addon:AddToQueue(p.charKey, p.recipe.recipeID, quantity, p.tier, concentrate)
+        addon:Notify("info", "%s %d %s %s %s's queue.", updated and "Set" or "Added", quantity,
+            p.recipe.outputName, updated and "in" or "to", CharName(p.charKey))
+        screen:Update()
+    end)
+    screen.queue:SetPoint("TOPRIGHT", 0, 0)
+    UI.SetTooltip(screen.queue, function(tooltip)
+        local p = screen.plan
+        if not p then return end
+        tooltip:AddLine(screen.queue.label:GetText(), 1, 1, 1)
+        tooltip:AddLine(string.format("Queue this craft for %s: shop for everything in the queue at once, then craft it all from the Queue tab or the button on the profession window.",
+            CharName(p.charKey)), 0.8, 0.8, 0.8, true)
+        if screen.queued then
+            tooltip:AddLine(string.format("Already queued: %d (%d made so far). Clicking sets it to the number above.",
+                screen.queued.quantity, screen.queued.made or 0), 0.6, 0.6, 0.6, true)
+        end
+    end, "ANCHOR_BOTTOM")
+    screen.subtitle:SetPoint("RIGHT", screen.queue, "LEFT", -10, 0)
 
     local makeLabel = UI.Text(screen, "body", "muted")
     makeLabel:SetPoint("TOPLEFT", 2, -44)
@@ -1109,25 +1178,9 @@ local function CreatePlanScreen(parent)
     screen.craft = UI.Button(summary, "Craft", 170, 28, function()
         local state, p = screen.craftState, screen.plan
         if not (state and state.enabled and p) then return end
-        if state.open then
-            if C_TradeSkillUI.OpenRecipe then
-                C_TradeSkillUI.OpenRecipe(p.recipe.recipeID)
-                UpdateWhenOpen(p.recipe, function()
-                    if screen.plan == p and screen:IsVisible() then screen:Update() end
-                end)
-            else
-                print("|cFF00FF00[Goldsmith]|r Open " .. p.recipe.profession .. ", then click Craft.")
-            end
-            return
-        end
-        if state.salvage then
-            -- CraftSalvage(recipeID, casts, itemLocation)
-            C_TradeSkillUI.CraftSalvage(state.salvage.recipeID, state.salvage.casts, state.salvage.location)
-            return
-        end
-        -- CraftRecipe(recipeID, count, reagents, recipeLevel, orderID, concentrate)
-        C_TradeSkillUI.CraftRecipe(state.recipeID or p.recipe.recipeID, state.crafts, state.reagents, nil, nil,
-            state.concentrate)
+        PerformCraftState(state, p.recipe, function()
+            if screen.plan == p and screen:IsVisible() then screen:Update() end
+        end)
     end)
     screen.craft:SetPoint("BOTTOMRIGHT", screen.shop, "TOPRIGHT", 0, 8)
     UI.Style(screen.craft, "highlight", "borderGold")
@@ -1220,7 +1273,11 @@ local function CreatePlanScreen(parent)
         screen.useHave:SetChecked(ui.planUseOnHand ~= false)
 
         local tierInfo, tierNote = addon:WithCharacter(p.charKey, FindTierInfo, p)
+        screen.tierInfo = tierInfo
         screen.tierItemID = tierInfo and tierInfo.itemID or recipe.outputItemID
+        screen.queued = addon:FindQueueEntry(p.charKey, recipe.recipeID, p.tier,
+            tierInfo and tierInfo.concentrate == true or false)
+        screen.queue:SetLabel(screen.queued and "Update queue" or "Add to queue")
         local tierIcon = tierInfo and (addon:TierIconText(tierInfo.tier, tierInfo.tierCount) .. " ") or ""
         screen.title:SetText(addon:ProfessionIconText(recipe.profession) .. tierIcon .. recipe.outputName)
         -- The checkbox shows the way actually planned (a tier may need
@@ -1431,6 +1488,43 @@ local function CreateBudget(parent)
     return bar
 end
 
+-- Right-click a craft: queue it (as many as its plan last had) or open
+-- its item page
+local function RowMenu(item)
+    local recipe = item.recipe
+    local quantity = GoldsmithDB.ui2.planQty and GoldsmithDB.ui2.planQty[recipe.recipeID]
+        or math.max(math.floor(recipe.outputQty or 1), 1)
+    local concentrate = item.info and item.info.concentrate == true or false
+    local tier = item.info and item.info.tier
+    MenuUtil.CreateContextMenu(UIParent, function(_, root)
+        root:CreateTitle(recipe.outputName)
+        local queued = addon:FindQueueEntry(item.charKey, recipe.recipeID, tier, concentrate)
+        root:CreateButton(queued and string.format("In %s's queue (%d): set to %d", CharName(item.charKey), queued.quantity, quantity)
+            or string.format("Add %d to %s's queue", quantity, CharName(item.charKey)), function()
+            addon:AddToQueue(item.charKey, recipe.recipeID, quantity, tier, concentrate)
+            addon:Notify("info", "Queued %d %s for %s.", quantity, recipe.outputName, CharName(item.charKey))
+            addon.RefreshWindow()
+        end)
+        root:CreateButton("Item page", function() addon:OpenItem(recipe.outputName, item.itemID) end)
+    end)
+end
+
+-- Right-click a salvage row: queue a batch (asks how many) or open the
+-- input's page
+local function SalvageMenu(item)
+    local s = item.salvage
+    local verb = item.recipe.outputName:match("^(%S+)") or "Salvage"
+    MenuUtil.CreateContextMenu(UIParent, function(_, root)
+        root:CreateTitle(verb .. " " .. s.inputName)
+        local queued = addon:FindQueueEntry(item.charKey, nil, nil, nil, s.inputID)
+        root:CreateButton(queued and string.format("In %s's queue (%d): change...", CharName(item.charKey), queued.quantity)
+            or string.format("Add a batch to %s's queue...", CharName(item.charKey)), function()
+            addon:AskSalvageBatch(item.charKey, s.inputID, s.inputName, verb)
+        end)
+        root:CreateButton("Item page", function() addon:OpenItem(s.inputName, s.inputID) end)
+    end)
+end
+
 local function Create(parent)
     local ui = GoldsmithDB.ui2
     view = { focus = nil }
@@ -1531,10 +1625,17 @@ local function Create(parent)
         tooltip = CraftTooltip,
         onClick = function(item, button)
             if item.salvage then
-                -- No plan for salvage yet: the input's page
-                addon:OpenItem(item.salvage.inputName, item.salvage.inputID)
+                -- Salvage has no plan: click for the input's page,
+                -- right-click to queue a batch
+                if button == "RightButton" and MenuUtil and MenuUtil.CreateContextMenu then
+                    SalvageMenu(item)
+                else
+                    addon:OpenItem(item.salvage.inputName, item.salvage.inputID)
+                end
             elseif button == "LeftButton" then
                 addon:OpenCraftPlan(item.recipe, item.info, item.charKey)
+            elseif MenuUtil and MenuUtil.CreateContextMenu then
+                RowMenu(item)
             else
                 addon:OpenItem(item.recipe.outputName, item.itemID)
             end
@@ -1561,10 +1662,11 @@ local function Create(parent)
     view.plan = CreatePlanScreen(parent)
 
     function view:ClosePlan()
+        local returnTab = view.plan.plan and view.plan.plan.returnTab
         view.plan.plan = nil
         view.plan.current = nil
         view.plan.qty:ClearFocus()
-        addon.RefreshWindow()
+        if returnTab then addon:ShowTab(returnTab) else addon.RefreshWindow() end
     end
     return view
 end
@@ -1652,7 +1754,7 @@ local function Refresh(v, state)
         for _, item in ipairs(items) do
             if item.info.partial then partial = true break end
         end
-        v.footnote:SetText("Hover a craft for how its cost is worked out, click it to plan."
+        v.footnote:SetText("Hover a craft for how its cost is worked out, click it to plan, right-click to queue it."
             .. (partial and "   + some material costs unknown,  * profit is at most this" or ""))
     end
 end

@@ -240,7 +240,8 @@ end
 -- only built for the chosen method, for toGet.
 local function BuildNode(itemID, name, need, depth, ctx, quality)
     local options = GetOptions(itemID, name, depth, ctx.memo, {})
-    local have = ctx.useOnHand and GetOnHand(itemID) or 0
+    -- In a queue, what earlier crafts already count on isn't yours to use again
+    local have = ctx.useOnHand and math.max(GetOnHand(itemID) - (ctx.pool and ctx.pool[itemID] or 0), 0) or 0
     local node = {
         itemID = itemID,
         name = name,
@@ -252,6 +253,7 @@ local function BuildNode(itemID, name, need, depth, ctx, quality)
         best = options.best,
         children = {},
     }
+    if ctx.pool then ctx.pool[itemID] = (ctx.pool[itemID] or 0) + node.have end
     -- Quality tier of this exact item, so the plan and shopping list say
     -- which quality to buy. Herbs from milling aren't slot choices, so ask
     -- the game (Midnight materials have 2 tiers).
@@ -328,9 +330,11 @@ end
 --   price, revenue, profit, margin - selling `quantity` at the AH price
 --   demand, demandSource - units sold per day
 --   saleRate  - share of listings that sell (TSM region), or nil
-function addon:BuildPlan(recipe, quantity, useOnHand, tier)
+-- pool (optional, for the queue): itemID -> how many of what you have
+-- earlier plans already use; this plan uses what's left and adds its own.
+function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
     GoldsmithDB.ui.methodOverrides = GoldsmithDB.ui.methodOverrides or {}
-    local ctx = { memo = {}, useOnHand = useOnHand }
+    local ctx = { memo = {}, useOnHand = useOnHand, pool = pool }
     local outputQty, slots = GetCraftNumbers(recipe)
     local crafts = WholeCrafts(quantity, outputQty)
 
@@ -481,7 +485,8 @@ local function DeleteOldLists(keep)
 end
 
 -- Sends the plan's AH purchases to Auctionator as a shopping list named
--- "Goldsmith: <item> x<qty>", replacing Goldsmith's previous list.
+-- "Goldsmith: <item> x<qty>", replacing Goldsmith's previous list. A queue
+-- passes its own listName and listKey (see BuildQueue in Queue.lua).
 -- Returns true on success, or false and a reason.
 function addon:SendShoppingList(plan)
     local api = ShoppingAPI()
@@ -500,13 +505,13 @@ function addon:SendShoppingList(plan)
                               quantity = entry.quantity, bought = 0, search = search })
     end
 
-    local listName = string.format("Goldsmith: %s x%d", plan.recipe.outputName, plan.quantity)
+    local listName = plan.listName or string.format("Goldsmith: %s x%d", plan.recipe.outputName, plan.quantity)
     local ok, err = pcall(api.CreateShoppingList, "Goldsmith", listName, searchStrings)
     if not ok then
         return false, tostring(err)
     end
     DeleteOldLists(listName)
-    GoldsmithDB.shoppingList = { name = listName, items = items, recipeID = plan.recipe.recipeID }
+    GoldsmithDB.shoppingList = { name = listName, items = items, recipeID = plan.listKey or plan.recipe.recipeID }
     return true, listName
 end
 
@@ -518,7 +523,7 @@ end
 -- sent for this recipe.
 function addon:ShoppingListChanges(plan)
     local list = GoldsmithDB.shoppingList
-    if not (list and list.recipeID == plan.recipe.recipeID) then return nil end
+    if not (list and list.recipeID == (plan.listKey or plan.recipe.recipeID)) then return nil end
     local left, names = {}, {}
     for _, item in ipairs(list.items) do
         left[item.itemID] = (left[item.itemID] or 0) + math.max(item.quantity - item.bought, 0)

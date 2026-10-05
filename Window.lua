@@ -4,7 +4,7 @@ local UI = addon.UI
 -- The window
 --
 -- A header (title, profession and date filters, where prices come from,
--- settings), five tabs, and the tab's screen below. Each screen is a view
+-- settings), six tabs, and the tab's screen below. Each screen is a view
 -- registered with addon:RegisterView; the window creates it the first time
 -- its tab is opened and refreshes it when shown or when data changes.
 --
@@ -18,6 +18,7 @@ local TAB_HEIGHT = 32
 local TABS = {
     { key = "overview", label = "Overview" },
     { key = "crafts", label = "Crafts" },
+    { key = "queue", label = "Queue" },
     { key = "items", label = "Items" },
     { key = "history", label = "History" },
     { key = "characters", label = "Characters" },
