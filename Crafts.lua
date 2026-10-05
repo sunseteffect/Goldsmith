@@ -1575,6 +1575,18 @@ local function Create(parent)
     end)
     view.onlyMine:SetPoint("LEFT", view.profitable, "RIGHT", 16, 0)
 
+    -- Search by craft or salvage name. Ignores the expansion and Profitable
+    -- only filters, so whatever you type for is found.
+    view.search = ""
+    view.searchBox = UI.SearchBox(list, 200, "Find a craft", function(text)
+        view.search = text
+        view.list:ScrollToTop()
+        addon.RefreshWindow()
+    end)
+    -- Far left, before the filters (see Refresh, which moves the filters
+    -- over while it's hidden)
+    view.searchBox:SetPoint("TOPLEFT", 0, 0)
+
     -- "Showing: Best crafts right now (5)  x" after following a link from
     -- the Overview; click to show everything again
     view.focusChip = UI.Button(list, "", 260, 24, function()
@@ -1616,6 +1628,11 @@ local function Create(parent)
             and string.format("Shows only crafts with an ROI of at least %d%% at current AH prices. Hides the rest, and crafts with no AH price yet.", minROI)
             or "Hides crafts that lose gold at current AH prices, and ones with no AH price yet.")
         Note(tooltip, "Change the ROI under Settings: Worth crafting at.")
+    end)
+    Explain(view.searchBox, function(tooltip)
+        tooltip:AddLine("Find a craft", 1, 1, 1)
+        Note(tooltip, "Matches crafts by name, and salvage by what's salvaged or what it gives, across every expansion and whether or not they're profitable.")
+        Note(tooltip, "Only " .. (addon.char.name or "me") .. " and the profession picked at the top still apply. Escape clears it.")
     end)
     Explain(view.onlyMine, function(tooltip)
         tooltip:AddLine(view.onlyMine.label and view.onlyMine.label:GetText() or "Only this character", 1, 1, 1)
@@ -1712,16 +1729,44 @@ local function Refresh(v, state)
     local focus = v.focus
     v.profitable:SetShown(not focus)
     v.onlyMine:SetShown(not focus)
+    v.searchBox:SetShown(not focus)
+    v.expansion:ClearAllPoints()
+    if focus then
+        v.expansion:SetPoint("TOPLEFT", 0, 0)
+    else
+        v.expansion:SetPoint("LEFT", v.searchBox, "RIGHT", 16, 0)
+    end
+    local needle = not focus and v.search:lower():match("^%s*(.-)%s*$") or ""
+    local searching = needle ~= ""
     local rowOpts = {
         concentration = concOn,
-        profitableOnly = not focus and ui.profitableOnly,
+        profitableOnly = not focus and not searching and ui.profitableOnly,
         onlyMine = not focus and ui.craftsOnlyMine,
-        showExpansion = not focus and IsExpansionShown or nil,
+        showExpansion = not focus and not searching and IsExpansionShown or nil,
     }
     local items = addon:GetCraftRows(state.profession, rowOpts)
     -- Milling, prospecting and other salvage, as rows of their own
     for _, item in ipairs(addon:GetSalvageRows(state.profession, rowOpts)) do
         table.insert(items, item)
+    end
+    if searching then
+        local kept = {}
+        for _, item in ipairs(items) do
+            local names = { item.recipe and item.recipe.outputName, item.recipe and item.recipe.name,
+                            item.salvage and item.salvage.inputName }
+            -- Salvage also matches what it gives (Powder Pigment finds
+            -- Tranquility Bloom)
+            for _, o in ipairs(item.salvage and item.salvage.outputs or {}) do
+                table.insert(names, o.name or C_Item.GetItemNameByID(o.itemID))
+            end
+            for _, name in pairs(names) do
+                if name:lower():find(needle, 1, true) then
+                    table.insert(kept, item)
+                    break
+                end
+            end
+        end
+        items = kept
     end
     if focus then
         local kept = {}
@@ -1743,6 +1788,10 @@ local function Refresh(v, state)
         v.list:SetEmptyText("No recipes yet. Open your professions so Goldsmith can load them.")
     elseif focus then
         v.list:SetEmptyText("Those crafts aren't worth it any more. Click the button above to see everything.")
+    elseif searching then
+        v.list:SetEmptyText(ui.craftsOnlyMine
+            and "No craft matches. " .. (addon.char.name or "This character") .. " may not know it: untick Only " .. (addon.char.name or "me") .. ", or pick All professions at the top."
+            or "No craft matches. Try All professions at the top, or open the profession that makes it so Goldsmith can load the recipe.")
     else
         v.list:SetEmptyText(ui.craftsOnlyMine
             and "No crafts match. This character may not know these recipes: untick Only " .. (addon.char.name or "me") .. ", try All expansions, or turn off Profitable only."
