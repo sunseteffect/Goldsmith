@@ -428,7 +428,9 @@ local function FillPlanRow(row, node)
         cells.source:SetText(best.method .. (node.options.override and "*" or ""))
         cells.source:SetTextColor(addon:Color(METHOD_COLORS[best.method] or "text"))
         cells.each:SetText(Money(best.unit))
-        cells.total:SetText(Money(best.unit * node.need))
+        -- Priced on what's expected to be used up (node.use, the craft's own
+        -- materials), so the totals add up to the craft's cost
+        cells.total:SetText(Money(best.unit * (node.use or node.need)))
     else
         cells.source:SetText("no price")
         cells.source:SetTextColor(addon:Color("loss"))
@@ -451,6 +453,10 @@ local function PlanTooltip(tooltip, node)
             addon:TierIconText(node.qualityTier, node.tierCount or 2)))
     end
     Line(tooltip, "Need", tostring(Whole(node.need)))
+    if node.use and node.need - node.use >= 0.5 then
+        tooltip:AddLine(string.format("Each craft takes the full amount. About %s come back from resourcefulness and stay in your bags; the cost counts only what's used up.",
+            Whole(node.need - node.use)), 0.6, 0.6, 0.6, true)
+    end
     if node.have > 0 then
         Line(tooltip, "You have", tostring(Whole(node.have)))
         Line(tooltip, "To get", tostring(Whole(node.toGet)))

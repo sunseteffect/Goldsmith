@@ -48,13 +48,23 @@ local function WholeCrafts(wanted, outputPerCraft)
     return math.ceil(wanted / outputPerCraft - 0.0001)
 end
 
--- Materials needed for `crafts` crafts. Starting a craft takes the full
--- amount; resourcefulness only returns some afterwards, which then goes
--- into later crafts. So: at least one full craft's worth, and the expected
--- (resourcefulness-reduced) amount across the whole batch.
+-- Items a craft is sure to make, without multicraft. Plans count crafts on
+-- this, so you don't have to shop again when multicraft doesn't proc;
+-- extras are a bonus. (expectedOutput still says what to expect.)
+local function SurePerCraft(recipe, outputPerCraft)
+    local sure = recipe.outputMin
+    if sure and sure > 0 and sure < outputPerCraft then return sure end
+    return outputPerCraft
+end
+
+-- Materials needed for `crafts` crafts: the full amount for every craft.
+-- Starting a craft takes the full amount, and resourcefulness returns are
+-- luck (three crafts in a row can return nothing), so counting on them
+-- left the last craft short. What comes back stays in your bags for next
+-- time. Costs still use the expected amount (see PartUse).
 local function MaterialNeed(s, crafts)
     if crafts <= 0 then return 0 end
-    return math.max(s.slot.quantity, s.quantity * crafts)
+    return s.slot.quantity * crafts
 end
 
 -- All the ways to get one unit of an item, and the cheapest. memo avoids
@@ -226,13 +236,19 @@ local function TopSlotParts(slot, tier, memo, recipe)
     return choice and { { units = slot.quantity, choice = choice } } or {}
 end
 
--- Materials needed for `crafts` crafts of one part of a slot (see
--- MaterialNeed): at least one full craft's worth, and the expected
--- resourcefulness-reduced amount across the batch
+-- Materials needed for `crafts` crafts of one part of a slot: the full
+-- amount for every craft (see MaterialNeed)
 local function PartNeed(s, units, crafts)
     if crafts <= 0 then return 0 end
+    return units * crafts
+end
+
+-- What those crafts are expected to use up, after resourcefulness returns.
+-- The craft's cost is priced on this.
+local function PartUse(s, units, crafts)
+    if crafts <= 0 then return 0 end
     local useFactor = s.slot.quantity > 0 and (s.quantity / s.slot.quantity) or 1
-    return math.max(units, units * useFactor * crafts)
+    return units * useFactor * crafts
 end
 
 -- One row of the plan tree. need is how many the parent needs; toGet is
@@ -269,7 +285,7 @@ local function BuildNode(itemID, name, need, depth, ctx, quality)
     local best = options.best
     if best and best.method == "Craft" and node.toGet > 0 then
         local outputQty, slots = GetCraftNumbers(best.recipe)
-        local crafts = WholeCrafts(node.toGet, outputQty)
+        local crafts = WholeCrafts(node.toGet, SurePerCraft(best.recipe, outputQty))
         for _, s in ipairs(slots) do
             local choice = GetSlotChoice(s.slot, depth + 1, ctx.memo, {})
             if choice then
@@ -336,7 +352,7 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
     GoldsmithDB.ui.methodOverrides = GoldsmithDB.ui.methodOverrides or {}
     local ctx = { memo = {}, useOnHand = useOnHand, pool = pool }
     local outputQty, slots = GetCraftNumbers(recipe)
-    local crafts = WholeCrafts(quantity, outputQty)
+    local crafts = WholeCrafts(quantity, SurePerCraft(recipe, outputQty))
 
     -- expectedOutput: what `crafts` whole crafts should make on average
     local plan = { recipe = recipe, quantity = quantity, crafts = crafts, nodes = {}, cost = 0, complete = true,
@@ -345,9 +361,10 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
         for _, part in ipairs(TopSlotParts(s.slot, tier, ctx.memo, recipe)) do
             local choice = part.choice
             local node = BuildNode(choice.itemID, choice.name, PartNeed(s, part.units, crafts), 1, ctx, choice)
+            node.use = PartUse(s, part.units, crafts)
             table.insert(plan.nodes, node)
             if node.best then
-                plan.cost = plan.cost + node.best.unit * node.need
+                plan.cost = plan.cost + node.best.unit * node.use
             else
                 plan.complete = false
             end
@@ -361,7 +378,7 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
     for _, s in ipairs(slots) do
         for _, part in ipairs(TopSlotParts(s.slot, tier, cheapestMemo, recipe)) do
             if part.choice.options.best then
-                cheapestCost = cheapestCost + part.choice.options.best.unit * PartNeed(s, part.units, crafts)
+                cheapestCost = cheapestCost + part.choice.options.best.unit * PartUse(s, part.units, crafts)
             else
                 cheapestComplete = false
             end
