@@ -337,7 +337,10 @@ frame:RegisterEvent("AUCTION_HOUSE_AUCTION_CREATED")
 
 frame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
+        -- Timed for /gsm perf
+        local start = debugprofilestop()
         addon:Initialize()
+        addon.initMs = debugprofilestop() - start
         self:UnregisterEvent("ADDON_LOADED")
 
     elseif event == "COMMODITY_PURCHASE_SUCCEEDED" then
@@ -377,6 +380,13 @@ function addon:Initialize()
         -- has scrolled past
         C_Timer.After(8, function()
             Print("Welcome! Type /gsm or click the Goldsmith button on the minimap to open Goldsmith. Its Overview shows how to get started.")
+        end)
+    end
+
+    -- Fake data from Tools\Stress-Swap.ps1: say so, so nobody plays on it
+    if GoldsmithDB.stressTest then
+        C_Timer.After(8, function()
+            Print("|cffff8040Fake test data is loaded.|r Run /gsm perf, then close WoW and run Stress-Swap.ps1 -Restore. Anything you do now will be lost.")
         end)
     end
 
@@ -467,6 +477,7 @@ local function PrintHelp()
     print("  /gsm chars - list your characters, professions and concentration")
     print("  /gsm data - check the numbers behind the window")
     print("  /gsm setup - show the getting started checklist again")
+    print("  /gsm perf - time each tab and show memory use (freezes the game briefly)")
     print("  /gsm reset - delete all transactions")
     print("  Right-click an entry on the History tab to delete it.")
 end
@@ -509,6 +520,8 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:DumpCraftingStats()
     elseif cmd == "salvage" then
         addon:DumpSalvageStats()
+    elseif cmd == "perf" then
+        addon:RunPerfCheck()
     elseif cmd == "reset" then
         StaticPopup_Show("GOLDSMITH_RESET")
     else
