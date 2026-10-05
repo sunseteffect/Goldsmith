@@ -12,11 +12,12 @@ local WIDTH = 860
 local GAP = 12
 local TILE_WIDTH = (WIDTH - 3 * GAP) / 4
 local MIDDLE_TOP = -(76 + GAP)
-local MIDDLE_HEIGHT = 290
+-- Tall enough for four Do this next cards
+local MIDDLE_HEIGHT = 380
 local HALF_WIDTH = (WIDTH - GAP) / 2
 local BOTTOM_TOP = MIDDLE_TOP - MIDDLE_HEIGHT - GAP
 local BOTTOM_HEIGHT = 116
-local ACTION_COUNT = 3
+local ACTION_COUNT = 4
 local CRAFTS_SHOWN = 3
 local ACTION_ROW_GAP = 8
 local CRAFTS_LISTED = 5
@@ -748,20 +749,25 @@ local function Refresh(view, state)
     if concAction then table.insert(list, concAction) end
     local craftsAction = CraftsAction(addon:GetBestCrafts(prof, CRAFTS_LISTED), prof)
     if craftsAction then table.insert(list, craftsAction) end
-    -- Only ACTION_COUNT rows fit, so salvage goes before cheap materials
+    -- Order: concentration, best crafts, salvage, cheap materials
     local salvageAction = SalvageAction(prof)
     if salvageAction then table.insert(list, salvageAction) end
     local dealsAction = DealsAction(prof)
     if dealsAction then table.insert(list, dealsAction) end
+    -- A card that wouldn't fit in the panel is left out rather than spill
+    -- over the profession strip
     local top = -44
     for i, row in ipairs(view.actionRows) do
+        local shown = false
         if list[i] and not inSetup then
             FillActionRow(row, list[i])
-            row:SetPoint("TOPLEFT", 16, top)
-            top = top - row:GetHeight() - ACTION_ROW_GAP
-        else
-            row:Hide()
+            if top - row:GetHeight() >= -(MIDDLE_HEIGHT - 12) then
+                row:SetPoint("TOPLEFT", 16, top)
+                top = top - row:GetHeight() - ACTION_ROW_GAP
+                shown = true
+            end
         end
+        row:SetShown(shown)
     end
     view.actionsEmpty:SetShown(#list == 0 and not inSetup)
 

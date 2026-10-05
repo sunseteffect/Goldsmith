@@ -11,7 +11,9 @@ local UI = addon.UI
 -- Remembered in GoldsmithDB.ui2: position, open or closed, tab,
 -- profession ("All" or one) and date range key.
 
-local WIDTH, HEIGHT = 900, 620
+local WIDTH, HEIGHT = 900, 710
+-- Height left for a tab's content (header, tabs and padding taken off)
+addon.CONTENT_HEIGHT = HEIGHT - 114
 local HEADER_HEIGHT = 48
 local TAB_HEIGHT = 32
 

@@ -896,7 +896,7 @@ local function Create(parent)
     view.note:SetPoint("TOPRIGHT", 0, -7)
 
     local boardWidth = (WIDTH - GAP) / 2
-    local boardHeight = (506 - TOP_HEIGHT - GAP - GAP) / 2
+    local boardHeight = (addon.CONTENT_HEIGHT - TOP_HEIGHT - GAP - GAP) / 2
     view.boards = {}
     for i, def in ipairs(BOARDS) do
         local board = CreateBoard(landing, def)
