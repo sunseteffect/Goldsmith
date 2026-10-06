@@ -406,6 +406,7 @@ function addon:Initialize()
     addon:InitializePricing()
     addon:InitializeMilling()
     addon:InitializeQuality()
+    addon:InitializeCooldowns()
 
     addon.ledger = addon:CreateLedger(GoldsmithDB)
     addon:CreateWindow()
@@ -477,6 +478,7 @@ local function PrintHelp()
     print("  /gsm chars - list your characters, professions and concentration")
     print("  /gsm data - check the numbers behind the window")
     print("  /gsm setup - show the getting started checklist again")
+    print("  /gsm cooldowns - craft cooldowns on every character")
     print("  /gsm perf - time each tab and show memory use (freezes the game briefly)")
     print("  /gsm reset - delete all transactions")
     print("  Right-click an entry on the History tab to delete it.")
@@ -520,6 +522,8 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:DumpCraftingStats()
     elseif cmd == "salvage" then
         addon:DumpSalvageStats()
+    elseif cmd == "cooldowns" or cmd == "cd" then
+        addon:ListCooldowns()
     elseif cmd == "perf" then
         addon:RunPerfCheck()
     elseif cmd == "reset" then

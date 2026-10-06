@@ -137,13 +137,58 @@ local function HeldSince(itemID, count)
     return acquired[#acquired].time
 end
 
+-- Held time only means something for stock you're trying to sell, so it's
+-- only worked out for items that are (user, 2026-10-06: vendor items,
+-- soulbound treatises and inks kept for crafting made it noise):
+--   crafted by you (craft lots), and
+--   sellable on the AH (not soulbound or warbound, not sold by vendors), and
+--   not a material for your own crafts, unless some are listed on the AH
+--     now or were posted in the last LISTED_DAYS days (then it's for sale)
+local LISTED_DAYS = 7
+local postedCache = addon:NewCache()
+
+-- Names of items you posted on the AH in the last LISTED_DAYS days
+local function RecentlyPosted()
+    local store = postedCache:Get()
+    if not store.names then
+        local names, since = {}, time() - LISTED_DAYS * 86400
+        for _, e in ipairs(addon.ledger:getAll()) do
+            if e.type == "COST" and e.kind == "DEPOSIT" and e.timestamp >= since and e.item then
+                names[e.item] = true
+            end
+        end
+        store.names = names
+    end
+    return store.names
+end
+
+local function ListedNow(itemID)
+    for _, c in pairs(GoldsmithDB.characters) do
+        if c.auctions and (c.auctions[itemID] or 0) > 0 then return true end
+    end
+    return false
+end
+
+-- materials: GetTrackedMaterials(), passed in when the caller has it
+local function IsForSale(itemID, name, materials)
+    local lots = GoldsmithDB.craftLots[itemID]
+    if not lots or #lots == 0 then return false end
+    if addon:CanAuction(itemID) == false or addon:IsVendorItem(itemID) then return false end
+    materials = materials or addon:GetTrackedMaterials()
+    if materials[itemID] then
+        return ListedNow(itemID) or (name ~= nil and RecentlyPosted()[name] == true)
+    end
+    return true
+end
+
 -- Gold in stock: everything Goldsmith tracks, on every character and in the
 -- warband bank, valued at what it cost you (crafted items at your latest
 -- crafts' cost, materials at what you paid or milled), or the AH price when
 -- there's no cost.
 -- Returns { value, items = { { itemID, name, count, unitValue, value,
 -- crafted, heldSince, byCharacter } } (most valuable first),
--- heldLong = crafted items held the heldDays setting or more, heldLongValue }.
+-- heldLong = items for sale (IsForSale) held the heldDays setting or more,
+-- heldLongValue }. heldSince is only set for items for sale.
 -- Cached until data changes, per profession and which characters count.
 local stockCache = addon:NewCache()
 local StockValue
@@ -190,7 +235,7 @@ StockValue = function(prof)
                 }
                 result.value = result.value + item.value
                 table.insert(result.items, item)
-                if recipe then
+                if recipe and IsForSale(itemID, name, materials) then
                     item.heldSince = HeldSince(itemID, count)
                     if item.heldSince and item.heldSince <= cutoff then
                         table.insert(result.heldLong, item)
@@ -450,7 +495,11 @@ function addon:GetBestCrafts(prof, count)
                     -- In bags, banks or listed on the AH, on any character
                     local have = itemID and addon:GetHeld(itemID, row.tier) or 0
                     if have == 0 then
-                        local make, makeReason = addon:SuggestedQuantity(recipe.outputName)
+                        -- Region sales only: your own are what the batch
+                        -- size follows already
+                        local demand, source = addon:GetDemand(itemID, recipe.outputName)
+                        local make, makeReason = addon:SuggestedQuantity(recipe.outputName,
+                            source == "TSM region" and demand or nil)
                         table.insert(list, {
                             key = addon:CraftKey(recipeID, row),
                             recipe = recipe, row = row, charKey = charKey, itemID = itemID,
@@ -464,6 +513,35 @@ function addon:GetBestCrafts(prof, count)
     end
     table.sort(list, function(a, b) return a.profit > b.profit end)
     for i = #list, count + 1, -1 do list[i] = nil end
+    return list
+end
+
+-- Cooldown crafts ready now that are worth making: the same rules as Best
+-- crafts (profit at the "Worth crafting at" ROI, every cost known, worth
+-- recommending), on the character whose cooldown it is, with their stats.
+-- Unlike Best crafts they don't wait until you've sold out: a cooldown not
+-- used is lost. Returns { recipe, row, charKey, itemID, crafts (charges
+-- ready), outputPerCraft, profit (each item), cooldown (see GetCooldowns) },
+-- most total profit first.
+function addon:GetCooldownCrafts(prof)
+    local list = {}
+    for _, cd in ipairs(addon.GetCooldowns and addon:GetCooldowns(prof) or {}) do
+        local recipe = cd.recipe
+        if cd.ready and recipe and addon:CanAuction(recipe.outputItemID) ~= false then
+            local row, outputPerCraft = PlainRowFor(cd.charKey, recipe)
+            if row and row.profit and row.profit > 0 and not row.partial
+                and (row.margin or 0) >= addon:Setting("minROI") and IsRecommendable(recipe, row) then
+                table.insert(list, {
+                    recipe = recipe, row = row, charKey = cd.charKey, cooldown = cd,
+                    itemID = row.itemID or recipe.outputItemID, crafts = math.max(cd.charges or 1, 1),
+                    outputPerCraft = outputPerCraft, profit = row.profit,
+                })
+            end
+        end
+    end
+    table.sort(list, function(a, b)
+        return a.profit * a.crafts * a.outputPerCraft > b.profit * b.crafts * b.outputPerCraft
+    end)
     return list
 end
 
@@ -505,45 +583,168 @@ end
 
 -- How many to make
 --
--- Deliberately cautious: better to sell out and make more than to sit on
--- items the market has moved away from. Region sales (TSM) are every
--- seller's, so they aren't used; your own are:
---   sold some in the last SALES_DAYS days: a day's worth of your sales
---     (the average, rounded down, at least 1)
---   never sold it: a first batch of FIRST_BATCH
--- Capped at ENOUGH_STOCK_CAP. Returns the count and why, in plain words.
+-- Follows how fast your own batches sell, both ways. Region sales (TSM)
+-- are every seller's, so they only cap it. A craft is only suggested once
+-- you hold none (GetBestCrafts), so the last batch you made has sold or
+-- gone by then; its pace sets the next one:
+--   sold out within SELL_OUT_FAST_DAYS: GROWTH times as many (at least one
+--     more), so a fast seller ramps up batch by batch
+--   slower: a day's worth at the pace it sold (at least 1), so a slowdown
+--     shrinks the next batch straight away
+-- Up to MAX_BATCH, and never more than the region sells in a day (TSM).
+-- Without a batch sold in the last STALE_DAYS days, the cautious default:
+-- a day's worth of your sales over SALES_DAYS days, else a first batch of
+-- FIRST_BATCH, capped at ENOUGH_STOCK_CAP.
+-- Returns the count and why, in plain words.
 local SALES_DAYS = 7
 local FIRST_BATCH = 3
+local SELL_OUT_FAST_DAYS = 1
+local GROWTH = 1.5
+local MAX_BATCH = 100
+local STALE_DAYS = 30
+-- Crafts this close together are one batch (a queue, or crafting 5 at once)
+local BATCH_GAP = 3600
+-- Units still unsold this long after crafting went another way (used,
+-- mailed, vendored), so later sales aren't put down to them
+local MAX_SELL_DAYS = 14
+-- A batch that sold within minutes still counts as this long
+local MIN_SELL_DAYS = 1 / 24
 local salesCache = addon:NewCache()
 
--- Units of each item (by name) you sold in the last SALES_DAYS days
-local function RecentSales()
+-- Your sales, by item name: { { time, qty } }, oldest first
+local function SalesByName()
     local store = salesCache:Get()
-    if not store.sold then
-        local sold, since = {}, time() - SALES_DAYS * 86400
+    if not store.sales then
+        local sales = {}
         for _, e in ipairs(addon.ledger:getAll()) do
-            if e.type == "REVENUE" and e.timestamp >= since and e.item then
-                sold[e.item] = (sold[e.item] or 0) + (e.quantity or 1)
+            if e.type == "REVENUE" and e.item then
+                sales[e.item] = sales[e.item] or {}
+                table.insert(sales[e.item], { time = e.timestamp, qty = e.quantity or 1 })
             end
         end
-        store.sold = sold
+        for _, list in pairs(sales) do
+            table.sort(list, function(a, b) return a.time < b.time end)
+        end
+        store.sales = sales
     end
-    return store.sold
+    return store.sales
 end
 
-function addon:SuggestedQuantity(itemName)
-    local sold = itemName and RecentSales()[itemName] or 0
-    if sold > 0 then
-        local perDay = math.max(math.floor(sold / SALES_DAYS), 1)
-        return math.min(perDay, ENOUGH_STOCK_CAP),
-            string.format("a day's worth (you sold %d in the last %d days)", sold, SALES_DAYS)
+-- Units of an item you sold in the last SALES_DAYS days
+local function RecentSold(itemName)
+    local sold, since = 0, time() - SALES_DAYS * 86400
+    for _, s in ipairs(SalesByName()[itemName] or {}) do
+        if s.time >= since then sold = sold + s.qty end
     end
-    return FIRST_BATCH, string.format("a first batch of %d (you haven't sold any in the last %d days)", FIRST_BATCH, SALES_DAYS)
+    return sold
+end
+
+-- Your batches of an item (every quality, by name), oldest first, with
+-- your sales matched to them oldest first: { time, qty, sold, last (time
+-- of its last sale) }. Crafts for orders aren't in craftLots, so they
+-- don't count.
+local function Batches(itemName)
+    local store = salesCache:Get()
+    store.batches = store.batches or {}
+    if store.batches[itemName] then return store.batches[itemName] end
+
+    local lots = {}
+    for _, list in pairs(GoldsmithDB.craftLots or {}) do
+        for _, lot in ipairs(list) do
+            if lot.name == itemName and lot.time and (lot.qty or 0) > 0 then table.insert(lots, lot) end
+        end
+    end
+    table.sort(lots, function(a, b) return a.time < b.time end)
+    local batches = {}
+    for _, lot in ipairs(lots) do
+        local b = batches[#batches]
+        if b and lot.time - b.lastCraft <= BATCH_GAP then
+            b.qty, b.left, b.lastCraft = b.qty + lot.qty, b.left + lot.qty, lot.time
+        else
+            table.insert(batches, { time = lot.time, lastCraft = lot.time, qty = lot.qty, left = lot.qty, sold = 0 })
+        end
+    end
+
+    local i = 1
+    for _, sale in ipairs(SalesByName()[itemName] or {}) do
+        local units = sale.qty
+        while units > 0 and batches[i] and batches[i].time <= sale.time do
+            local b = batches[i]
+            if b.left == 0 or sale.time - b.time > MAX_SELL_DAYS * 86400 then
+                b.left, i = 0, i + 1
+            else
+                local take = math.min(b.left, units)
+                b.left, b.sold, b.last = b.left - take, b.sold + take, sale.time
+                units = units - take
+            end
+        end
+    end
+    store.batches[itemName] = batches
+    return batches
+end
+
+-- "5 hours", "2 days"
+local function Duration(days)
+    if days < 1 then
+        local hours = math.max(math.floor(days * 24 + 0.5), 1)
+        return string.format("%d hour%s", hours, hours == 1 and "" or "s")
+    end
+    local whole = math.floor(days + 0.5)
+    return string.format("%d day%s", whole, whole == 1 and "" or "s")
+end
+
+-- itemName: the craft's output; regionDemand: units sold per day across
+-- the region (TSM), or nil
+function addon:SuggestedQuantity(itemName, regionDemand)
+    local make, why, cap
+    local last
+    for _, b in ipairs(itemName and Batches(itemName) or {}) do
+        if b.sold > 0 then last = b end
+    end
+    if last and time() - last.last <= STALE_DAYS * 86400 then
+        local days = math.max((last.last - last.time) / 86400, MIN_SELL_DAYS)
+        if last.sold >= last.qty and days <= SELL_OUT_FAST_DAYS then
+            -- Never below a first batch: selling out is better than no data
+            make = math.max(math.ceil(last.qty * GROWTH), last.qty + 1, FIRST_BATCH)
+            why = string.format("more than last time: your last %d sold out in %s", last.qty, Duration(days))
+        else
+            -- A day's worth, counted over at least a day, so a batch that
+            -- didn't sell out never suggests more than it sold
+            make = math.max(math.floor(last.sold / math.max(days, 1)), 1)
+            if last.sold >= last.qty then
+                why = string.format("a day's worth at your pace: your last %d took %s to sell", last.qty, Duration(days))
+            else
+                why = string.format("a day's worth at your pace: only %d of your last %d sold", last.sold, last.qty)
+            end
+        end
+        cap = MAX_BATCH
+    else
+        local sold = itemName and RecentSold(itemName) or 0
+        if sold > 0 then
+            make = math.max(math.floor(sold / SALES_DAYS), 1)
+            why = string.format("a day's worth (you sold %d in the last %d days)", sold, SALES_DAYS)
+        else
+            make = FIRST_BATCH
+            why = string.format("a first batch of %d (you haven't sold any in the last %d days)", FIRST_BATCH, SALES_DAYS)
+        end
+        cap = ENOUGH_STOCK_CAP
+    end
+    if make > cap then
+        make = cap
+        why = why .. string.format(", capped at %d", cap)
+    end
+    -- More than the whole region buys in a day would sit unsold
+    if regionDemand and regionDemand >= 1 and make > regionDemand then
+        make = math.floor(regionDemand)
+        why = why .. string.format(", capped at the region's %d sold a day", make)
+    end
+    return make, why
 end
 
 -- A to-do list per character: what "Do this next" suggests, split by who
 -- should do it. Each character's concentration plan (see
--- GetConcentrationOverview), and the best crafts (GetBestCrafts) they make
+-- GetConcentrationOverview), cooldown crafts ready to use
+-- (GetCooldownCrafts; item.cooldown set), and the best crafts (GetBestCrafts) they make
 -- best, as many as cover about a day's sales less what you hold. Items
 -- already in a concentration plan count toward that, so the two don't add
 -- up to more than sells.
@@ -570,6 +771,17 @@ function addon:GetCharacterTodo(prof, conc)
                 crafts = p.crafts, quantity = quantity, profit = p.profit, concentration = p.points,
             })
         end
+    end
+
+    -- Cooldowns ready to use, before best crafts so the same item isn't
+    -- suggested twice
+    for _, c in ipairs(addon:GetCooldownCrafts(prof)) do
+        local quantity = math.max(math.floor(c.crafts * (c.outputPerCraft or 1)), 1)
+        if c.itemID then planned[c.itemID] = (planned[c.itemID] or 0) + quantity end
+        Add(c.charKey, {
+            recipe = c.recipe, row = c.row, itemID = c.itemID, tierCount = c.row.tierCount,
+            crafts = c.crafts, quantity = quantity, profit = c.profit * quantity, cooldown = c.cooldown,
+        })
     end
 
     for _, c in ipairs(addon:GetBestCrafts(prof, math.huge)) do
@@ -1008,7 +1220,7 @@ function addon:GetItemDetails(name, itemID)
         d.demand, d.demandSource = addon:GetDemand(itemID, name)
         d.saleRate = addon:GetSaleRate(itemID)
         d.have, d.byCharacter = addon:GetStock(itemID)
-        d.heldSince = d.have > 0 and HeldSince(itemID, d.have) or nil
+        d.heldSince = d.have > 0 and IsForSale(itemID, name) and HeldSince(itemID, d.have) or nil
     else
         d.history, d.have, d.byCharacter = {}, 0, {}
     end

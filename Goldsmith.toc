@@ -18,6 +18,7 @@ Characters.lua
 Pricing.lua
 Milling.lua
 Stock.lua
+Cooldowns.lua
 Planner.lua
 Quality.lua
 Insights.lua

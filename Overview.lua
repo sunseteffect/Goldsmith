@@ -17,7 +17,7 @@ local MIDDLE_HEIGHT = 380
 local HALF_WIDTH = (WIDTH - GAP) / 2
 local BOTTOM_TOP = MIDDLE_TOP - MIDDLE_HEIGHT - GAP
 local BOTTOM_HEIGHT = 116
-local ACTION_COUNT = 4
+local ACTION_COUNT = 5
 local CRAFTS_SHOWN = 3
 local ACTION_ROW_GAP = 8
 local CRAFTS_LISTED = 5
@@ -188,6 +188,45 @@ local function ConcentrationAction(conc)
         onClick = function()
             addon:OpenCraftPlan(first.recipe, first.row, best.key,
                 math.max(math.floor(first.crafts * (first.row.outputPerCraft or 1)), 1))
+        end,
+    }
+end
+
+-- Cooldown crafts ready now and worth making (GetCooldownCrafts): time
+-- matters, since a cooldown not used is lost, so it goes near the top
+local function CooldownAction(prof)
+    local crafts = addon:GetCooldownCrafts(prof)
+    if #crafts == 0 then return nil end
+    local parts = {}
+    for i = 1, math.min(#crafts, CRAFTS_SHOWN) do
+        local c = crafts[i]
+        local icon = prof == "All" and addon:ProfessionIconText(c.recipe.profession) or ""
+        local who = OnWho(c.charKey)
+        table.insert(parts, string.format("%s%dx %s   %s%s", icon, c.crafts,
+            ItemText(c.itemID, ShortName(c.recipe.outputName, 26), c.row.tier, c.row.tierCount),
+            addon:Colorize(Signed(c.profit * c.crafts * (c.outputPerCraft or 1)), "profit"),
+            who ~= "" and ("  ·" .. who) or ""))
+    end
+    local first = crafts[1]
+    return {
+        title = addon:CooldownsLabel() .. " ready",
+        detail = table.concat(parts, "\n"),
+        tooltip = function(tooltip)
+            tooltip:AddLine(addon:CooldownsLabel() .. " ready", 1, 1, 1)
+            tooltip:AddLine("Crafts with a cooldown that can be made now and are worth it (the same rules as Best crafts). A cooldown not used is lost.",
+                0.6, 0.6, 0.6, true)
+            for _, c in ipairs(crafts) do
+                tooltip:AddDoubleLine(string.format("%dx %s%s", c.crafts,
+                    ItemText(c.itemID, c.recipe.outputName, c.row.tier, c.row.tierCount), OnWho(c.charKey)),
+                    Signed(c.profit * c.crafts * (c.outputPerCraft or 1)), 0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
+            end
+            tooltip:AddLine(" ")
+            tooltip:AddLine("Click to plan the first one. Every character's cooldowns are on the Characters tab.",
+                0.37, 0.81, 0.48, true)
+        end,
+        onClick = function()
+            addon:OpenCraftPlan(first.recipe, first.row, first.charKey,
+                math.max(math.floor(first.crafts * (first.outputPerCraft or 1)), 1))
         end,
     }
 end
@@ -747,9 +786,12 @@ local function Refresh(view, state)
     local list = {}
     local concAction = ConcentrationAction(conc)
     if concAction then table.insert(list, concAction) end
+    local cooldownAction = CooldownAction(prof)
+    if cooldownAction then table.insert(list, cooldownAction) end
     local craftsAction = CraftsAction(addon:GetBestCrafts(prof, CRAFTS_LISTED), prof)
     if craftsAction then table.insert(list, craftsAction) end
-    -- Order: concentration, best crafts, salvage, cheap materials
+    -- Order: concentration, cooldowns, best crafts, salvage, cheap
+    -- materials; the last ones are left out when they don't fit
     local salvageAction = SalvageAction(prof)
     if salvageAction then table.insert(list, salvageAction) end
     local dealsAction = DealsAction(prof)

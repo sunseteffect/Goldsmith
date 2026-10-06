@@ -487,13 +487,13 @@ local HELP_SECTIONS = {
     { "Opening Goldsmith",
       "/gsm, the gold coin on the minimap, the addons button by the minimap, or a key of your own (Settings > Key to open Goldsmith)." },
     { "The tabs",
-      "Overview: how you're doing and what to do next. Crafts: every recipe you know with its cost, profit and ROI; click one for a shopping plan. Items: any item's page, and In my bags for everything you hold. History: every purchase, sale, craft and deposit; right-click an entry to fix it. Characters: a to-do list for each character, and which characters count." },
+      "Overview: how you're doing and what to do next. Crafts: every recipe you know with its cost, profit and ROI; click one for a shopping plan. Items: any item's page, and In my bags for everything you hold. History: every purchase, sale, craft and deposit; right-click an entry to fix it. Characters: a to-do list for each character, its craft cooldowns, and which characters count." },
     { "Item tooltips",
       "Show your cost, profit and break-even price. Hold Shift for each material's cost. Settings > Item tooltips makes them shorter or turns them off." },
     { "Recommended: TSM",
       "Goldsmith works with Auctionator alone. TSM alongside it adds region sales per day, sale rates, a check on listings far from the usual price, and prices between Auctionator scans." },
     { "Commands",
-      "/gsm help lists them all. Handy ones: /gsm chars (your characters and concentration), /gsm recipes, /gsm milling, /gsm setup (the getting started checklist)." },
+      "/gsm help lists them all. Handy ones: /gsm chars (your characters and concentration), /gsm cooldowns (craft cooldowns on every character), /gsm recipes, /gsm milling, /gsm setup (the getting started checklist)." },
 }
 
 function addon:CreateHelpPanel(parent, settings)

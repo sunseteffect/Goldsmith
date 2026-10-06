@@ -394,7 +394,7 @@ local function FillStockRow(row, item)
     if item.heldSince then
         local days = DaysSince(item.heldSince)
         c.held:SetText(Plural(days, "day"))
-        if days >= addon:Setting("heldDays") then c.held:SetTextColor(addon:Color("warning")) end
+        c.held:SetTextColor(addon:Color(days >= addon:Setting("heldDays") and "warning" or "text"))
     else
         c.held:SetText("-")
         c.held:SetTextColor(addon:Color("dim"))
@@ -681,7 +681,10 @@ local function CreatePage(parent)
             end
             if d.have == 0 then tooltip:AddLine("None on any character or in the warband bank.", 0.6, 0.6, 0.6, true) end
             if heldDays then
-                tooltip:AddLine("Held since your oldest copy was made or bought (oldest sold first).", 0.6, 0.6, 0.6, true)
+                tooltip:AddLine("Held since your oldest copy was made (oldest sold first).", 0.6, 0.6, 0.6, true)
+            elseif d.have > 0 then
+                tooltip:AddLine("No held time: only shown for things you craft to sell, not materials you keep for your own crafts (unless you've listed some this week).",
+                    0.6, 0.6, 0.6, true)
             end
         end
 

@@ -93,6 +93,19 @@ function addon:RecordPriceHistory(isFullScan)
     for _, recipe in pairs(GoldsmithDB.recipes) do
         items[recipe.outputItemID] = recipe.outputName
     end
+    -- Each quality tier of a crafted item is its own item (gold Draught of
+    -- Rampant Abandon isn't the silver one), known from any character's
+    -- tier data
+    for _, c in pairs(GoldsmithDB.characters) do
+        for recipeID, td in pairs(c.tierData or {}) do
+            local recipe = GoldsmithDB.recipes[recipeID]
+            for _, out in pairs(td.outputs or {}) do
+                if out.itemID and not items[out.itemID] then
+                    items[out.itemID] = recipe and recipe.outputName or true
+                end
+            end
+        end
+    end
 
     for itemID in pairs(items) do
         -- Only prices Auctionator saw today, so old prices aren't saved as new

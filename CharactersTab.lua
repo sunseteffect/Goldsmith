@@ -36,11 +36,27 @@ local function TodoText(item)
         ItemText(item.itemID, item.recipe.outputName, item.row.tier, item.tierCount))
 end
 
--- Profit, with "conc" in front for concentration crafts (on the right, so a
--- long item name cut short never hides it)
+-- Profit, with "conc" in front for concentration crafts and "cd" for
+-- cooldowns (on the right, so a long item name cut short never hides it)
 local function TodoProfitText(item)
     local profit = addon:Colorize(Signed(item.profit), "profit")
-    return item.concentration and (addon:Colorize("conc ", "conc") .. profit) or profit
+    if item.concentration then return addon:Colorize("conc ", "conc") .. profit end
+    if item.cooldown then return addon:Colorize("cd ", "gold") .. profit end
+    return profit
+end
+
+-- "1 cooldown ready", "2 cooldowns, next in 5h"; nil without any
+local function CooldownSummary(cooldowns)
+    if not cooldowns or #cooldowns == 0 then return nil end
+    local ready = 0
+    for _, cd in ipairs(cooldowns) do
+        if cd.ready then ready = ready + 1 end
+    end
+    if ready > 0 then
+        return addon:Colorize(string.format("%d cooldown%s ready", ready, ready == 1 and "" or "s"), "gold")
+    end
+    return string.format("%d cooldown%s, next %s", #cooldowns, #cooldowns == 1 and "" or "s",
+        addon:CooldownStatusText(cooldowns[1]))
 end
 
 local function DaysAgo(t)
@@ -154,7 +170,12 @@ local function CreateTodoLine(card, i)
             tooltip:AddDoubleLine("Sale rate", addon:FormatSaleRate(saleRate) .. " of listings sell",
                 0.8, 0.8, 0.8, r, g, b)
         end
-        if item.concentration then
+        if item.cooldown then
+            tooltip:AddLine(item.cooldown.maxCharges
+                and string.format("A cooldown craft with %d of %d charges ready. Charges not used are wasted once it's full.",
+                    item.cooldown.charges, item.cooldown.maxCharges)
+                or "A cooldown craft, ready now. Every day it waits is a craft lost.", 0.6, 0.6, 0.6, true)
+        elseif item.concentration then
             tooltip:AddLine("The best use of this character's concentration right now.", 0.6, 0.6, 0.6, true)
             if perPoint and addon:ConcentrationValueColor(perPoint) == "warning" then
                 local r, g, b = addon:Color("warning")
@@ -238,6 +259,15 @@ local function CreateCard(parent)
                 tooltip:AddDoubleLine(TodoText(item), TodoProfitText(item), 0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
             end
         end
+        if card.cooldowns and #card.cooldowns > 0 then
+            tooltip:AddLine(" ")
+            tooltip:AddLine(addon:CooldownsLabel(), 1, 1, 1)
+            for _, cd in ipairs(card.cooldowns) do
+                local r, g, b = addon:Color(cd.ready and "gold" or "muted")
+                tooltip:AddDoubleLine(addon:ProfessionIconText(cd.profession or "") .. addon:CooldownName(cd),
+                    addon:CooldownStatusText(cd), 0.9, 0.9, 0.9, r, g, b)
+            end
+        end
         tooltip:AddLine(" ")
         if card.key ~= addon.charKey then
             tooltip:AddLine("Right-click to leave it out or remove it.", 0.6, 0.6, 0.6, true)
@@ -247,10 +277,10 @@ local function CreateCard(parent)
     return card
 end
 
-local function FillCard(card, entry, todo)
+local function FillCard(card, entry, todo, cooldowns)
     local key, c = entry.key, entry.data
     local included = addon:IsCharacterIncluded(key)
-    card.key, card.data, card.todo = key, c, included and todo or nil
+    card.key, card.data, card.todo, card.cooldowns = key, c, included and todo or nil, cooldowns
 
     UI.Style(card, key == addon.charKey and "highlight" or "panel",
         key == addon.charKey and "borderGold" or "border")
@@ -259,7 +289,8 @@ local function FillCard(card, entry, todo)
     card.name:SetTextColor(ClassColor(c.class))
     card.exclude:SetChecked(not included)
     local seen, seenColor = SeenText(key, c)
-    card.seen:SetText(seen)
+    local cooldownText = CooldownSummary(cooldowns)
+    card.seen:SetText(cooldownText and (seen .. "  ·  " .. cooldownText) or seen)
     card.seen:SetTextColor(addon:Color(seenColor))
 
     local names = {}
@@ -352,6 +383,11 @@ end
 
 local function Refresh(view, state)
     local todo = addon:GetCharacterTodo(state.profession)
+    local cooldowns = {}
+    for _, cd in ipairs(addon:GetCooldowns(state.profession, true)) do
+        cooldowns[cd.charKey] = cooldowns[cd.charKey] or {}
+        table.insert(cooldowns[cd.charKey], cd)
+    end
     -- You first, then the others by name, excluded characters at the bottom
     local list = addon:GetCharacters()
     table.sort(list, function(a, b)
@@ -365,7 +401,7 @@ local function Refresh(view, state)
     for i, card in ipairs(view.cards) do
         local entry = list[view.offset + i]
         if entry then
-            FillCard(card, entry, todo[entry.key])
+            FillCard(card, entry, todo[entry.key], cooldowns[entry.key])
         else
             card.key = nil
             card:Hide()
