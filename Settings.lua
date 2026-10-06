@@ -94,20 +94,17 @@ end
 --   - loop over a list, not pairs() of a shared table (addon:Keys)
 local FRAME_BUDGET_MS = 6
 addon.noYield = 0
--- /gsm perf runs everything at once
-addon.syncWork = false
 local current            -- the newest work
 local works = setmetatable({}, { __mode = "k" }) -- coroutine -> its work
 
 -- True when running as work that can wait for frames
 function addon:InWork()
-    if addon.syncWork then return false end
     local co = coroutine.running()
     return co ~= nil and works[co] ~= nil
 end
 
 function addon:Yield()
-    if addon.syncWork or addon.noYield > 0 then return end
+    if addon.noYield > 0 then return end
     local co = coroutine.running()
     local work = co and works[co]
     if not work then return end
@@ -117,15 +114,34 @@ function addon:Yield()
 end
 
 -- The longest single frame any work has taken this session, by label
--- (the tab), for /gsm perf: { [label] = ms }
+-- (the tab), for /gsm perf: { [label] = ms }, and where that frame's
+-- work stopped (where to look for a hitch): { [label] = "file:line < ..." }
 addon.workLongest = {}
+addon.workLongestWhere = {}
+
+-- Where a paused or failed coroutine is, as "File.lua:123 < File.lua:45"
+-- (the game's debugstack, else Lua's traceback; "" if neither works)
+local function WhereIs(co)
+    local ok, stack = false, nil
+    if debugstack then ok, stack = pcall(debugstack, co, 1, 8, 0) end
+    if not ok and debug and debug.traceback then ok, stack = pcall(debug.traceback, co) end
+    if not ok or type(stack) ~= "string" then return "" end
+    local places = {}
+    for place in stack:gmatch("([%w_]+%.lua\"?%]?:%d+)") do
+        place = place:gsub("[\"%]]", "")
+        if not place:match("^Settings%.lua") and #places < 5 then table.insert(places, place) end
+    end
+    return table.concat(places, " < ")
+end
 
 -- Runs fn spread over frames. Newer work stops older work where it is.
 -- onSlow() runs the first time it has to wait for a frame (show loading);
--- onDone() when it finishes. Errors go to the game's error display.
--- label names it in addon.workLongest.
+-- onDone(work) when it finishes, with work.totalMs, work.longestMs and
+-- work.frames. Errors go to the game's error display. label names it in
+-- addon.workLongest.
 function addon:RunWork(fn, onSlow, onDone, label)
-    local work = { co = coroutine.create(fn), statsChar = addon.statsChar }
+    local work = { co = coroutine.create(fn), statsChar = addon.statsChar,
+        totalMs = 0, longestMs = 0, frames = 0 }
     works[work.co] = work
     current = work
     local slow = false
@@ -138,19 +154,23 @@ function addon:RunWork(fn, onSlow, onDone, label)
         local ok, err = coroutine.resume(work.co)
         work.statsChar = addon.statsChar
         addon.statsChar = outside
-        if label and not addon.syncWork then
-            local ms = debugprofilestop() - work.sliceStart
-            if ms > (addon.workLongest[label] or 0) then addon.workLongest[label] = ms end
+        local ms = debugprofilestop() - work.sliceStart
+        work.totalMs, work.frames = work.totalMs + ms, work.frames + 1
+        work.longestMs = math.max(work.longestMs, ms)
+        if label and ms > (addon.workLongest[label] or 0) then
+            addon.workLongest[label] = ms
+            addon.workLongestWhere[label] = WhereIs(work.co)
         end
         if not ok then
             if current == work then current = nil end
-            geterrorhandler()(debug.traceback(work.co, tostring(err)))
-            if onDone then onDone() end
+            local where = WhereIs(work.co)
+            geterrorhandler()(tostring(err) .. (where ~= "" and ("\nin " .. where) or ""))
+            if onDone then onDone(work) end
             return
         end
         if coroutine.status(work.co) == "dead" then
             if current == work then current = nil end
-            if onDone then onDone() end
+            if onDone then onDone(work) end
             return
         end
         if current ~= work then return end

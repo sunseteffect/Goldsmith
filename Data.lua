@@ -281,6 +281,11 @@ local function EstimateSaleCost(itemName)
     return cost or nil
 end
 
+-- For other files that estimate old sales' cost (SalesByItem)
+function addon:EstimateSaleCost(itemName)
+    return EstimateSaleCost(itemName)
+end
+
 -- Both read the whole ledger, and the Overview asks again every time it's
 -- shown, so results are kept until data changes (caches are made on first
 -- use: Settings.lua, which has NewCache, loads after this file). Callers

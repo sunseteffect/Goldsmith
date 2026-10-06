@@ -1076,7 +1076,19 @@ end
 -- units, sales, cost, deposits, profit, roi, salesCount, firstSale } }.
 -- Sales without cost data use today's estimate; if there's none they're
 -- left out of profit (as in the Overview's summary).
+-- Kept until data changes (every item page asked for all of it); callers
+-- may add fields to an item but not change its numbers.
+local salesByItemCache = addon:NewCache()
+local BuildSalesByItem
+
 local function SalesByItem(prof, since)
+    local store = salesByItemCache:Get()
+    local id = prof .. "|" .. tostring(since)
+    store[id] = store[id] or BuildSalesByItem(prof, since)
+    return store[id]
+end
+
+BuildSalesByItem = function(prof, since)
     local items = {}
     local function Item(e)
         local item = items[e.item]
@@ -1088,7 +1100,7 @@ local function SalesByItem(prof, since)
         return item
     end
     for i, e in ipairs(addon.ledger:getAll()) do
-        if i % 64 == 0 then addon:Yield() end
+        if i % 8 == 0 then addon:Yield() end
         if e.item and (prof == "All" or e.profession == prof) and (not since or e.timestamp >= since) then
             if e.type == "REVENUE" then
                 local item = Item(e)
@@ -1098,7 +1110,8 @@ local function SalesByItem(prof, since)
                 item.firstSale = math.min(item.firstSale or e.timestamp, e.timestamp)
                 local cost = e.costBasis
                 if not cost then
-                    local unit = addon:GetUnitCostBasis(e.item)
+                    -- Once per item, cached (Data.lua)
+                    local unit = addon:EstimateSaleCost(e.item)
                     cost = unit and unit * e.quantity
                 end
                 if cost then

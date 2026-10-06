@@ -464,14 +464,17 @@ function addon:CreateWindow()
             loading = this,
         }
         if not screen.def.ownLoading then this:Begin(screen.frame) end
+        local tab = ui.tab
         addon:RunWork(function()
             screen.def.refresh(screen.view, state)
         end, function()
             this:ShowAll()
-        end, function()
+        end, function(work)
             this:HideAll()
             if loading == this then loading = nil end
-        end, ui.tab)
+            -- /gsm perf waits for this to time a tab
+            if addon.OnTabRefreshed then addon.OnTabRefreshed(tab, work) end
+        end, tab)
         -- Parts the replaced refresh was loading that this one has already
         -- filled in, or doesn't cover (another tab)
         if previous then
