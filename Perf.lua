@@ -51,14 +51,26 @@ local function Run()
     local ui = GoldsmithDB.ui2
     local wasShown, oldTab = addon.window:IsShown(), ui.tab
     local run = { time = time(), steps = {}, stressTest = GoldsmithDB.stressTest and true or nil }
+    -- Saved before anything is timed, so a step that errors still leaves
+    -- the steps before it (and the error) in the saved file
+    GoldsmithDB.perfRuns = GoldsmithDB.perfRuns or {}
+    table.insert(GoldsmithDB.perfRuns, run)
+    while #GoldsmithDB.perfRuns > PERF_RUNS do table.remove(GoldsmithDB.perfRuns, 1) end
 
     -- Open every tab once first, so building its frames isn't timed
     addon.window:Show()
-    for _, key in ipairs(TABS) do addon:ShowTab(key) end
+    for _, key in ipairs(TABS) do
+        local ok, err = pcall(addon.ShowTab, addon, key)
+        if not ok then run.openError = run.openError or (key .. ": " .. tostring(err)) end
+    end
 
     local function Step(label, fn)
-        local cold, warm = Measure(fn)
-        table.insert(run.steps, { label = label, cold = cold, warm = warm })
+        local ok, cold, warm = pcall(Measure, fn)
+        if ok then
+            table.insert(run.steps, { label = label, cold = cold, warm = warm })
+        else
+            table.insert(run.steps, { label = label, error = tostring(cold) })
+        end
     end
     for _, key in ipairs(TABS) do
         Step(key:sub(1, 1):upper() .. key:sub(2) .. " tab", function() addon:ShowTab(key) end)
@@ -71,7 +83,7 @@ local function Run()
     end)
     Step("Salvage rows", function() addon:GetSalvageRows("All", {}) end)
 
-    addon:ShowTab(oldTab)
+    pcall(addon.ShowTab, addon, oldTab)
     if not wasShown then addon.window:Hide() end
 
     local points = 0
@@ -83,13 +95,14 @@ local function Run()
         entries = #(GoldsmithDB.entries or {}), priceHistory = points,
     }
 
-    GoldsmithDB.perfRuns = GoldsmithDB.perfRuns or {}
-    table.insert(GoldsmithDB.perfRuns, run)
-    while #GoldsmithDB.perfRuns > PERF_RUNS do table.remove(GoldsmithDB.perfRuns, 1) end
-
     print("|cffffd040Goldsmith performance|r" .. (run.stressTest and " (fake test data)" or ""))
+    if run.openError then print("  |cffff4040Error opening a tab:|r " .. run.openError) end
     for _, s in ipairs(run.steps) do
-        print(string.format("  %s: cold %d ms, warm %d ms, %s", s.label, s.cold, s.warm, Verdict(s.cold, s.warm)))
+        if s.error then
+            print(string.format("  %s: |cffff4040error:|r %s", s.label, s.error))
+        else
+            print(string.format("  %s: cold %d ms, warm %d ms, %s", s.label, s.cold, s.warm, Verdict(s.cold, s.warm)))
+        end
     end
     local d = run.data
     print(string.format("  Data: %d characters, %d recipes, %d transactions, %d price history points",
