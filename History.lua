@@ -281,6 +281,9 @@ local function Refresh(view, state)
     view.itemChip:SetShown(view.item ~= nil)
     if view.item then view.itemChip:SetLabel("Item: " .. view.item .. "   x") end
 
+    -- Runs as work over frames (Window.lua): the list shows "Loading" if
+    -- it takes more than a frame; the filters above stay usable
+    state.loading:Begin(view.list)
     -- One item's history (from its page) covers every date and profession
     local rows, totals = addon:GetHistory({
         prof = view.item and "All" or state.profession, since = not view.item and state.since or nil,
@@ -290,6 +293,7 @@ local function Refresh(view, state)
         and "Nothing recorded yet. Purchases, sales and AH deposits are recorded as you make them."
         or "Nothing matches. Try another type, All characters, or a longer date range at the top.")
     view.list:SetItems(rows)
+    state.loading:Done(view.list)
     view.summary:SetText(string.format("%d entr%s  ·  in %s  ·  out %s", #rows, #rows == 1 and "y" or "ies",
         addon:Colorize(Money(totals.goldIn), "profit"), addon:Colorize(Money(totals.goldOut), "loss")))
 
@@ -314,6 +318,6 @@ local function Reset(view)
     view.list:ScrollToTop()
 end
 
-addon:RegisterView("history", { create = Create, refresh = Refresh, reset = Reset })
+addon:RegisterView("history", { create = Create, refresh = Refresh, reset = Reset, ownLoading = true })
 
 _G.Goldsmith = addon

@@ -622,7 +622,10 @@ function addon:PlanConcentration(profession, budget, accept)
     -- of a profession has its own)
     local currencyID = GoldsmithDB.concentrationCurrency and GoldsmithDB.concentrationCurrency[profession]
     local found, caps = {}, {}
-    for _, recipe in pairs(GoldsmithDB.recipes) do
+    -- A list, since the work may wait for a frame between recipes
+    for _, recipeID in ipairs(addon:Keys(GoldsmithDB.recipes)) do
+        addon:Yield()
+        local recipe = GoldsmithDB.recipes[recipeID] or {}
         local stats = addon:StatsChar().recipeStats[recipe.recipeID]
         if recipe.profession == profession and stats and stats.concentrationCurrencyID == currencyID then
             local rows = addon:GetTierRows(recipe) or {}
@@ -728,6 +731,7 @@ function addon:PlanConcentration(profession, budget, accept)
     end
 
     for _ = 1, MAX_IMPROVEMENTS do
+        addon:Yield()
         local bestValue, bestMove = 1, nil -- at least 1 copper better
         local add = BestAdd(left)
         if add and add.gain > bestValue then

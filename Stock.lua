@@ -171,16 +171,30 @@ end
 -- Materials with enough history, for the Deals tab, and the earliest date
 -- any history was saved (so the tab can say how long until it's ready).
 -- prof filters to one profession's materials, or "All". Vendor items are
--- left out.
+-- left out. Kept until data changes (the Overview asks every time it's
+-- shown); callers mustn't change the list or its entries.
+local dealsCache = addon:NewCache()
+local Deals
+
 function addon:GetDeals(prof)
+    local store = dealsCache:Get()
+    store[prof] = store[prof] or { Deals(prof) }
+    return store[prof][1], store[prof][2], store[prof][3]
+end
+
+Deals = function(prof)
     local list = {}
     local earliest
-    for _, days in pairs(GoldsmithDB.priceHistory) do
-        for day in pairs(days) do
+    -- A list rather than pairs(), so the work can wait for a frame
+    local history = GoldsmithDB.priceHistory
+    for n, itemID in ipairs(addon:Keys(history)) do
+        if n % 64 == 0 then addon:Yield() end
+        for day in pairs(history[itemID] or {}) do
             if not earliest or day < earliest then earliest = day end
         end
     end
     for itemID, name in pairs(addon:GetTrackedMaterials()) do
+        addon:Yield()
         local materialProf = GoldsmithDB.reagents[name]
         if (prof == "All" or materialProf == prof) and not addon:IsVendorItem(itemID) then
             local insight = addon:GetPriceInsight(itemID)

@@ -208,8 +208,12 @@ local CHEAP_COLUMNS = {
 local function GetCheapMaterials(prof)
     local threshold = -addon:Setting("dealPercent") / 100
     local items = {}
-    for _, d in ipairs((addon:GetDeals(prof))) do
-        if d.diff <= threshold then
+    for _, deal in ipairs((addon:GetDeals(prof))) do
+        addon:Yield()
+        if deal.diff <= threshold then
+            -- A copy: GetDeals' list is cached and shared
+            local d = {}
+            for k, v in pairs(deal) do d[k] = v end
             d.have = addon:GetHeld(d.itemID)
             d.recipes = addon:GetRecipesUsing(d.itemID)
             d.profitable = 0
@@ -363,7 +367,8 @@ local function SortItems(items, mode)
     local getValue = SORTS[mode][sort.key].value
     local values = {}
     for _, item in ipairs(items) do values[item] = getValue(item) or false end
-    table.sort(items, function(a, b)
+    -- Can wait for a frame on long lists (Settings.lua)
+    addon:Sort(items, function(a, b)
         local va, vb = values[a], values[b]
         if va and vb and va ~= vb then
             if sort.descending then return va > vb end
@@ -962,8 +967,14 @@ local function Refresh(v, state)
     local onPage = v.page.item ~= nil
     v.page:SetShown(onPage)
     v.landing:SetShown(not onPage)
+    -- Runs as work over frames (Window.lua): the part being worked out
+    -- shows "Loading" if it takes more than a frame; the search box and
+    -- ticks above stay usable
+    local loading = state.loading
     if onPage then
+        loading:Begin(v.page)
         v.page:Fill()
+        loading:Done(v.page)
         return
     end
 
@@ -978,15 +989,18 @@ local function Refresh(v, state)
     v.footer:SetShown(showList)
 
     if not showList then
+        for _, board in ipairs(v.boards) do loading:Begin(board) end
         local boards = addon:GetItemBoards(state.profession, state.range)
         local rangeLabel = addon:GetDateRange(state.range).label:lower()
         for _, board in ipairs(v.boards) do
             local key = board.def.key
             board:Set(boards[key], key == "held" and "all characters" or rangeLabel)
+            loading:Done(board)
         end
         v.note:SetText("Click an item for its page")
         return
     end
+    loading:Begin(v.list)
 
     if cheap then
         local items = {}
@@ -1038,6 +1052,7 @@ local function Refresh(v, state)
         v.note:SetText(state.profession ~= "All" and ("Only " .. state.profession .. ", click a column to sort")
             or "Click a column to sort")
     end
+    loading:Done(v.list)
 end
 
 -- Clicking the Items tab again: back to the leaderboards, from an item's
@@ -1052,6 +1067,6 @@ local function Reset(v)
     v.list:ScrollToTop()
 end
 
-addon:RegisterView("items", { create = Create, refresh = Refresh, reset = Reset })
+addon:RegisterView("items", { create = Create, refresh = Refresh, reset = Reset, ownLoading = true })
 
 _G.Goldsmith = addon

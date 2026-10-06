@@ -678,6 +678,7 @@ local function Create(parent)
 
     -- Do this next
     local actions = UI.Panel(parent)
+    view.actionsPanel = actions
     actions:SetPoint("TOPLEFT", 0, MIDDLE_TOP)
     actions:SetSize(HALF_WIDTH, MIDDLE_HEIGHT)
     view.actionsTitle = UI.Text(actions, "heading")
@@ -702,6 +703,7 @@ local function Create(parent)
 
     -- Chart
     local chartPanel = UI.Panel(parent)
+    view.chartPanel = chartPanel
     chartPanel:SetPoint("TOPLEFT", HALF_WIDTH + GAP, MIDDLE_TOP)
     chartPanel:SetSize(HALF_WIDTH, MIDDLE_HEIGHT)
     view.chartTitle = UI.Text(chartPanel, "heading")
@@ -739,6 +741,7 @@ local function Create(parent)
 
     -- By profession
     local professions = UI.Panel(parent)
+    view.professionsPanel = professions
     professions:SetPoint("TOPLEFT", 0, BOTTOM_TOP)
     professions:SetSize(WIDTH, BOTTOM_HEIGHT)
     local professionsTitle = UI.Text(professions, "heading")
@@ -754,16 +757,28 @@ local function Create(parent)
     return view
 end
 
+-- Runs as work spread over frames (Window.lua): each part is filled in as
+-- soon as its numbers are worked out, and shows "Loading" until then if
+-- that takes more than a frame
 local function Refresh(view, state)
     local prof, range = state.profession, state.range
+    local loading = state.loading
+    for _, tile in ipairs(view.tiles) do loading:Begin(tile) end
+    loading:Begin(view.actionsPanel)
+    loading:Begin(view.chartPanel)
+    loading:Begin(view.professionsPanel)
 
     local summary = addon:GetSummary(prof, range)
-    local stock = addon:GetStockValue(prof)
-    local conc = addon:GetConcentrationOverview(prof)
     FillProfitTile(view.tiles[1], summary)
     FillSalesTile(view.tiles[2], summary)
+    loading:Done(view.tiles[1])
+    loading:Done(view.tiles[2])
+    local stock = addon:GetStockValue(prof)
     FillStockTile(view.tiles[3], stock, prof)
+    loading:Done(view.tiles[3])
+    local conc = addon:GetConcentrationOverview(prof)
     FillConcentrationTile(view.tiles[4], conc)
+    loading:Done(view.tiles[4])
 
     -- Getting started, until it's closed
     local inSetup, allDone = false, false
@@ -812,6 +827,7 @@ local function Refresh(view, state)
         row:SetShown(shown)
     end
     view.actionsEmpty:SetShown(#list == 0 and not inSetup)
+    loading:Done(view.actionsPanel)
 
     -- Chart
     local index = GoldsmithDB.ui2.chart or 1
@@ -831,6 +847,7 @@ local function Refresh(view, state)
     local first, last = points[1], points[#points]
     view.chartStart:SetText((not empty and first) and ShortDay(first.day) or "")
     view.chartEnd:SetText((not empty and last) and ShortDay(last.day) or "")
+    loading:Done(view.chartPanel)
 
     -- By profession
     local breakdown = addon:GetProfessionBreakdown(range, prof == "All" and conc or addon:GetConcentrationOverview("All"))
@@ -854,8 +871,9 @@ local function Refresh(view, state)
             cell:Hide()
         end
     end
+    loading:Done(view.professionsPanel)
 end
 
-addon:RegisterView("overview", { create = Create, refresh = Refresh })
+addon:RegisterView("overview", { create = Create, refresh = Refresh, ownLoading = true })
 
 _G.Goldsmith = addon

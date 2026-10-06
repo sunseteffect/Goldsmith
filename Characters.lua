@@ -498,11 +498,25 @@ function addon:StatsChar()
     return addon.statsChar or addon.char
 end
 
--- Runs fn(...) using charKey's stats and returns what it returns
+local function Pack(...) return { n = select("#", ...), ... } end
+
+-- Runs fn(...) using charKey's stats and returns what it returns.
+-- Inside work spread over frames (Settings.lua) it may wait for a frame:
+-- the work keeps its stats to itself while it waits, and it runs without
+-- a pcall (Lua can't pause in one); if it errors, the work stops and puts
+-- the stats back. Elsewhere a pcall puts them back, and nothing pauses
+-- inside (addon.noYield).
 function addon:WithCharacter(charKey, fn, ...)
     local previous = addon.statsChar
     addon.statsChar = GoldsmithDB.characters[charKey] or addon.char
+    if addon:InWork() then
+        local results = Pack(fn(...))
+        addon.statsChar = previous
+        return unpack(results, 1, results.n)
+    end
+    addon.noYield = addon.noYield + 1
     local results = { pcall(fn, ...) }
+    addon.noYield = addon.noYield - 1
     addon.statsChar = previous
     if not results[1] then error(results[2], 0) end
     return unpack(results, 2)

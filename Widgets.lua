@@ -39,6 +39,44 @@ function UI.Panel(parent, style)
     return frame
 end
 
+-- "Loading" with moving dots over part of a screen that's still being
+-- worked out (see addon:RunWork). It dims what's under it (the old
+-- numbers stay visible until the new ones are in) and takes the mouse, so
+-- nothing half-loaded gets clicked. One per frame: UI.Loading(frame)
+-- makes it the first time and returns the same one after.
+local DOT_SECONDS = 0.35
+function UI.Loading(parent)
+    if parent.goldsmithLoading then return parent.goldsmithLoading end
+    local cover = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    cover:SetAllPoints()
+    cover:SetFrameLevel(parent:GetFrameLevel() + 50)
+    UI.Style(cover, "window")
+    local r, g, b = addon:Color("window")
+    cover:SetBackdropColor(r, g, b, 0.8)
+    cover:EnableMouse(true)
+    local text = UI.Text(cover, "body", "muted", "LEFT")
+    -- Anchored left of centre so the dots grow without moving the word
+    text:SetPoint("LEFT", cover, "CENTER", -28, 0)
+    local dots, elapsed = 1, 0
+    local function Draw() text:SetText("Loading" .. string.rep(".", dots)) end
+    cover:SetScript("OnShow", function()
+        dots, elapsed = 1, 0
+        Draw()
+    end)
+    cover:SetScript("OnUpdate", function(_, delta)
+        elapsed = elapsed + delta
+        if elapsed >= DOT_SECONDS then
+            elapsed = 0
+            dots = dots % 3 + 1
+            Draw()
+        end
+    end)
+    Draw()
+    cover:Hide()
+    parent.goldsmithLoading = cover
+    return cover
+end
+
 -- A 1px line in a theme color
 function UI.Line(parent, colorName)
     local line = parent:CreateTexture(nil, "ARTWORK")

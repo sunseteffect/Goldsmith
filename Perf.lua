@@ -57,6 +57,9 @@ local function Run()
     table.insert(GoldsmithDB.perfRuns, run)
     while #GoldsmithDB.perfRuns > PERF_RUNS do table.remove(GoldsmithDB.perfRuns, 1) end
 
+    -- Refreshes normally spread over frames (addon:RunWork); here each runs
+    -- at once so the whole of it is timed
+    addon.syncWork = true
     -- Open every tab once first, so building its frames isn't timed
     addon.window:Show()
     for _, key in ipairs(TABS) do
@@ -85,6 +88,11 @@ local function Run()
 
     pcall(addon.ShowTab, addon, oldTab)
     if not wasShown then addon.window:Hide() end
+    addon.syncWork = false
+    -- What players feel: the longest single frame each tab's loading took
+    -- in normal use this session (over FRAME_MS is a hitch)
+    run.longestFrame = {}
+    for label, ms in pairs(addon.workLongest or {}) do run.longestFrame[label] = ms end
 
     local points = 0
     for _, days in pairs(GoldsmithDB.priceHistory or {}) do points = points + Count(days) end
@@ -111,6 +119,13 @@ local function Run()
         run.memoryKB and string.format("%.1f MB", run.memoryKB / 1024) or "unknown",
         run.loginMs and string.format("%d ms", run.loginMs) or "unknown"))
     print(string.format("  Cold = after data changes, warm = switching tabs. Over %d ms stutters.", FRAME_MS))
+    local longest = {}
+    for label, ms in pairs(run.longestFrame) do
+        table.insert(longest, string.format("%s %d ms", label, ms))
+    end
+    table.sort(longest)
+    print("  Longest frame of loading this session (what you feel): "
+        .. (#longest > 0 and table.concat(longest, ", ") or "none yet, open some tabs first"))
 end
 
 function addon:RunPerfCheck()

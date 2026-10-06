@@ -8,6 +8,10 @@ local function FormatGold(copper)
     return string.format("%.2fg", copper / 10000)
 end
 
+-- Bumped whenever a recipe is saved or removed, for indexes of recipes
+-- (FindRecipeByOutput, GetRecipesUsing)
+addon.recipesVersion = 0
+
 -- Average cost
 
 -- What the ones you hold cost you, from recorded AH purchases: the newest
@@ -18,16 +22,15 @@ end
 -- (GetCraftedCost).
 -- Returns copper per unit and units covered, or nil if never bought.
 function addon:GetAverageCost(itemName)
+    -- Oldest first (the ledger's index)
     local purchases, ids = {}, {}
-    for _, e in ipairs(addon.ledger:getAll()) do
-        if e.type == "COST" and (e.kind or "PURCHASE") == "PURCHASE" and e.item == itemName
-            and (e.quantity or 0) > 0 then
+    for _, e in ipairs(addon.ledger:index().purchases[itemName] or {}) do
+        if (e.quantity or 0) > 0 then
             table.insert(purchases, e)
             if e.itemID then ids[e.itemID] = true end
         end
     end
     if #purchases == 0 then return nil end
-    table.sort(purchases, function(a, b) return (a.timestamp or 0) < (b.timestamp or 0) end)
 
     local held = 0
     for itemID in pairs(ids) do
@@ -816,6 +819,7 @@ local function SaveRecipe(recipeID, quiet, attempt, profession)
 
     local isNew = GoldsmithDB.recipes[recipeID] == nil
 
+    addon.recipesVersion = addon.recipesVersion + 1
     GoldsmithDB.recipes[recipeID] = {
         recipeID = recipeID,
         name = schematic.name,
@@ -1185,6 +1189,8 @@ end
 -- isn't included.
 local CRAFT_LOT_LIMIT = 30
 local ORDER_CRAFT_LIMIT = 100
+-- Bumped whenever craftLots changes (see GetCraftLotsByName)
+local craftLotsVersion = 0
 
 -- Crafts for crafting orders go to GoldsmithDB.orderCrafts instead
 -- ({ time, qty, unitCost (your materials only), partial, name, itemID,
@@ -1204,6 +1210,7 @@ function addon:MarkCraftAsOrder(itemID, lot)
     local lots = GoldsmithDB.craftLots[itemID] or {}
     for i, l in ipairs(lots) do
         if l == lot then
+            craftLotsVersion = craftLotsVersion + 1
             table.remove(lots, i)
             if #lots == 0 then GoldsmithDB.craftLots[itemID] = nil end
             lot.itemID = itemID
@@ -1377,6 +1384,7 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTe
     end
     local lots = GoldsmithDB.craftLots[resultData.itemID] or {}
     GoldsmithDB.craftLots[resultData.itemID] = lots
+    craftLotsVersion = craftLotsVersion + 1
     table.insert(lots, lot)
     while #lots > CRAFT_LOT_LIMIT do
         table.remove(lots, 1)
@@ -1401,6 +1409,36 @@ local function LotAverage(lots, units)
     return total / covered, covered, partial
 end
 
+-- Craft lots grouped by item name, built once per change instead of every
+-- caller reading every lot (with many lots, costing every recipe that way
+-- was slow). Rebuilt when a craft is recorded or moved to orders.
+-- Returns { lots (every quality, oldest first), itemIDs = { [itemID] = true } }
+-- or nil if never crafted. Don't change what it returns.
+local lotIndex, lotIndexVersion
+
+function addon:GetCraftLotsByName(itemName)
+    if not lotIndex or lotIndexVersion ~= craftLotsVersion then
+        lotIndex, lotIndexVersion = {}, craftLotsVersion
+        for itemID, lots in pairs(GoldsmithDB.craftLots) do
+            for _, lot in ipairs(lots) do
+                if lot.name then
+                    local entry = lotIndex[lot.name]
+                    if not entry then
+                        entry = { lots = {}, itemIDs = {} }
+                        lotIndex[lot.name] = entry
+                    end
+                    table.insert(entry.lots, lot)
+                    entry.itemIDs[itemID] = true
+                end
+            end
+        end
+        for _, entry in pairs(lotIndex) do
+            table.sort(entry.lots, function(a, b) return (a.time or 0) < (b.time or 0) end)
+        end
+    end
+    return lotIndex[itemName]
+end
+
 -- What the copies of this exact item (quality tier) in your bags and banks
 -- cost you to craft, from your latest crafts of it (or the newest `units`
 -- of them). nil if never crafted.
@@ -1415,21 +1453,13 @@ end
 -- material costs only know the name). Newest crafts first, covering what
 -- you have on hand, or `units` if given.
 function addon:GetCraftedCostByName(itemName, units)
-    local combined, onHand, counted = {}, 0, {}
-    for itemID, lots in pairs(GoldsmithDB.craftLots) do
-        for _, lot in ipairs(lots) do
-            if lot.name == itemName then
-                table.insert(combined, lot)
-                if not counted[itemID] then
-                    counted[itemID] = true
-                    onHand = onHand + (C_Item.GetItemCount(itemID, true, false, true, true) or 0)
-                end
-            end
-        end
+    local byName = addon:GetCraftLotsByName(itemName)
+    if not byName then return nil end
+    local onHand = 0
+    for itemID in pairs(byName.itemIDs) do
+        onHand = onHand + (C_Item.GetItemCount(itemID, true, false, true, true) or 0)
     end
-    if #combined == 0 then return nil end
-    table.sort(combined, function(a, b) return a.time < b.time end)
-    return LotAverage(combined, units or onHand)
+    return LotAverage(byName.lots, units or onHand)
 end
 
 -- What an item has cost you: purchases, your own milling and your own
@@ -1462,7 +1492,23 @@ end
 --   1. what it cost you (purchases and milling)
 --   2. Auctionator's current AH price
 -- Returns cost, source and the item name used, or nil.
+local SlotCost
+-- The same for every character and recipe using the slot, so it's kept
+-- until data changes (the costing of every recipe on every character
+-- asked for the same materials over and over)
+local slotCostCache = addon:NewCache()
+
 local function GetSlotCost(slot)
+    local store = slotCostCache:Get()
+    local cached = store[slot]
+    if not cached then
+        cached = { SlotCost(slot) }
+        store[slot] = cached
+    end
+    return cached[1], cached[2], cached[3], cached[4]
+end
+
+SlotCost = function(slot)
     local best, bestSource, bestName
     for _, name in ipairs(slot.names) do
         local cost, source = addon:GetOwnCost(name)
@@ -1605,12 +1651,21 @@ function addon:SetFreeItem(itemName, free)
     if addon.Refresh then addon.Refresh() end
 end
 
+-- By output name (profit numbers ask once per sale), rebuilt when a recipe
+-- is saved or removed. Like the loop it replaced, the first recipe found
+-- wins when two make the same item.
+local outputIndex, outputIndexVersion
+
 function addon:FindRecipeByOutput(itemName)
-    for _, recipe in pairs(GoldsmithDB.recipes) do
-        if recipe.outputName == itemName then
-            return recipe
+    if not outputIndex or outputIndexVersion ~= addon.recipesVersion then
+        outputIndex, outputIndexVersion = {}, addon.recipesVersion
+        for _, recipe in pairs(GoldsmithDB.recipes) do
+            if recipe.outputName and outputIndex[recipe.outputName] == nil then
+                outputIndex[recipe.outputName] = recipe
+            end
         end
     end
+    return itemName and outputIndex[itemName] or nil
 end
 
 function addon:ListRecipes()
@@ -2045,6 +2100,7 @@ function addon:InitializePricing()
     for recipeID, recipe in pairs(GoldsmithDB.recipes) do
         local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
         if ok and schematic and not IsCraftRecipe(schematic) then
+            addon.recipesVersion = addon.recipesVersion + 1
             GoldsmithDB.recipes[recipeID] = nil
             GoldsmithDB.products[recipe.outputName] = nil
         end

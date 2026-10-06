@@ -92,6 +92,14 @@ local function IsRecommendable(recipe, row)
     return addon:WhyNotRecommended(recipe, row) == nil
 end
 
+-- Only current-expansion items are recommended (WhyNotRecommended), so
+-- lists of recommendations skip other recipes before costing them: costing
+-- every expansion's recipes on every character was most of the work
+local function MakesCurrentItem(recipe)
+    return recipe.outputItemID ~= nil
+        and addon:GetItemExpansion(recipe.outputItemID) == addon:GetCurrentExpansion()
+end
+
 -- Crafted items: item ID -> recipe, for every recipe output including each
 -- quality tier's item (from any character's tier data)
 local function GetOutputRecipes()
@@ -99,10 +107,14 @@ local function GetOutputRecipes()
     for _, recipe in pairs(GoldsmithDB.recipes) do
         if recipe.outputItemID then outputs[recipe.outputItemID] = recipe end
     end
-    for _, c in pairs(GoldsmithDB.characters) do
-        for recipeID, td in pairs(c.tierData) do
+    -- Lists rather than pairs(), so the work can wait for a frame
+    for _, key in ipairs(addon:Keys(GoldsmithDB.characters)) do
+        local tierData = GoldsmithDB.characters[key].tierData
+        for n, recipeID in ipairs(addon:Keys(tierData)) do
+            if n % 64 == 0 then addon:Yield() end
+            local td = tierData[recipeID]
             local recipe = GoldsmithDB.recipes[recipeID]
-            if recipe then
+            if recipe and td then
                 for _, out in pairs(td.outputs or {}) do
                     if out.itemID then outputs[out.itemID] = recipe end
                 end
@@ -122,10 +134,8 @@ local function HeldSince(itemID, count)
     for _, lot in ipairs(GoldsmithDB.craftLots[itemID] or {}) do
         table.insert(acquired, { time = lot.time, qty = lot.qty })
     end
-    for _, e in ipairs(addon.ledger:getAll()) do
-        if e.type == "COST" and (e.kind or "PURCHASE") == "PURCHASE" and e.itemID == itemID then
-            table.insert(acquired, { time = e.timestamp, qty = e.quantity })
-        end
+    for _, e in ipairs(addon.ledger:index().purchasesByID[itemID] or {}) do
+        table.insert(acquired, { time = e.timestamp, qty = e.quantity })
     end
     if #acquired == 0 then return nil end
     table.sort(acquired, function(a, b) return a.time > b.time end)
@@ -215,6 +225,7 @@ StockValue = function(prof)
     local result = { value = 0, items = {}, heldLong = {}, heldLongValue = 0 }
     local cutoff = time() - addon:Setting("heldDays") * 86400
     for itemID in pairs(ids) do
+        addon:Yield()
         local recipe = outputs[itemID]
         local name = materials[itemID] or (recipe and recipe.outputName) or C_Item.GetItemNameByID(itemID)
         local itemProf = recipe and recipe.profession or (name and GoldsmithDB.reagents[name])
@@ -304,7 +315,9 @@ function addon:GetConcentrationOverview(prof)
     for _, entry in ipairs(addon:GetCharacters()) do
         -- Characters excluded in Settings have no professions here
         local professions = addon:IsCharacterIncluded(entry.key) and entry.data.professions or {}
-        for profession in pairs(professions) do
+        for _, profession in ipairs(addon:Keys(professions)) do
+            -- A plan for each, so work may wait for a frame between them
+            addon:Yield()
             if prof == "All" or profession == prof then
                 local current, max, minutesToFull, updated
                 if entry.key == addon.charKey then
@@ -484,8 +497,11 @@ end
 -- have, make (items to make), makeReason, outputPerCraft }.
 function addon:GetBestCrafts(prof, count)
     local list = {}
-    for recipeID, recipe in pairs(GoldsmithDB.recipes) do
-        if (prof == "All" or recipe.profession == prof) and addon:CanAuction(recipe.outputItemID) ~= false then
+    for _, recipeID in ipairs(addon:Keys(GoldsmithDB.recipes)) do
+        addon:Yield()
+        local recipe = GoldsmithDB.recipes[recipeID]
+        if recipe and (prof == "All" or recipe.profession == prof) and MakesCurrentItem(recipe)
+            and addon:CanAuction(recipe.outputItemID) ~= false then
             local charKey = CrafterFor(recipeID)
             if charKey and addon:IsCharacterIncluded(charKey) then
                 local row, outputPerCraft = PlainRowFor(charKey, recipe)
@@ -545,6 +561,25 @@ function addon:GetCooldownCrafts(prof)
     return list
 end
 
+-- Recipes by the materials they use: { [itemID] = { [recipeID] = recipe } },
+-- rebuilt when a recipe is saved or removed (the cheap materials list
+-- looked up every recipe for each material, every time it was shown)
+local byMaterial, byMaterialVersion
+local function RecipesByMaterial()
+    if not byMaterial or byMaterialVersion ~= addon.recipesVersion then
+        byMaterial, byMaterialVersion = {}, addon.recipesVersion
+        for recipeID, recipe in pairs(GoldsmithDB.recipes) do
+            for _, slot in ipairs(recipe.reagents or {}) do
+                for _, id in ipairs(slot.itemIDs or {}) do
+                    byMaterial[id] = byMaterial[id] or {}
+                    byMaterial[id][recipeID] = recipe
+                end
+            end
+        end
+    end
+    return byMaterial
+end
+
 -- Recipes a material goes into, that a counted character knows, each made
 -- by whoever makes it best, with its profit without concentration. Only
 -- crafts worth recommending (WhyNotRecommended): gear nobody buys and
@@ -553,14 +588,11 @@ end
 -- per day), saleRate } }, most profit first.
 function addon:GetRecipesUsing(itemID)
     local list = {}
-    for recipeID, recipe in pairs(GoldsmithDB.recipes) do
-        local uses = false
-        for _, slot in ipairs(recipe.reagents or {}) do
-            for _, id in ipairs(slot.itemIDs or {}) do
-                if id == itemID then uses = true end
-            end
-        end
-        local charKey = uses and CrafterFor(recipeID)
+    -- The index is never changed once built, so pairs() is safe while the
+    -- work waits for a frame
+    for recipeID, recipe in pairs(RecipesByMaterial()[itemID] or {}) do
+        addon:Yield()
+        local charKey = MakesCurrentItem(recipe) and CrafterFor(recipeID)
         if charKey and addon:IsCharacterIncluded(charKey) then
             local row = PlainRowFor(charKey, recipe)
             if row and IsRecommendable(recipe, row) then
@@ -615,15 +647,12 @@ local salesCache = addon:NewCache()
 local function SalesByName()
     local store = salesCache:Get()
     if not store.sales then
+        -- The ledger's index is already by name, oldest first
         local sales = {}
-        for _, e in ipairs(addon.ledger:getAll()) do
-            if e.type == "REVENUE" and e.item then
-                sales[e.item] = sales[e.item] or {}
-                table.insert(sales[e.item], { time = e.timestamp, qty = e.quantity or 1 })
-            end
-        end
-        for _, list in pairs(sales) do
-            table.sort(list, function(a, b) return a.time < b.time end)
+        for name, list in pairs(addon.ledger:index().sales) do
+            local out = {}
+            for i, e in ipairs(list) do out[i] = { time = e.timestamp, qty = e.quantity or 1 } end
+            sales[name] = out
         end
         store.sales = sales
     end
@@ -648,13 +677,12 @@ local function Batches(itemName)
     store.batches = store.batches or {}
     if store.batches[itemName] then return store.batches[itemName] end
 
+    -- Oldest first (GetCraftLotsByName)
     local lots = {}
-    for _, list in pairs(GoldsmithDB.craftLots or {}) do
-        for _, lot in ipairs(list) do
-            if lot.name == itemName and lot.time and (lot.qty or 0) > 0 then table.insert(lots, lot) end
-        end
+    local byName = addon:GetCraftLotsByName(itemName)
+    for _, lot in ipairs(byName and byName.lots or {}) do
+        if lot.time and (lot.qty or 0) > 0 then table.insert(lots, lot) end
     end
-    table.sort(lots, function(a, b) return a.time < b.time end)
     local batches = {}
     for _, lot in ipairs(lots) do
         local b = batches[#batches]
@@ -827,8 +855,10 @@ local craftRowsCache = addon:NewCache()
 
 function addon:GetCraftRows(prof, opts)
     local list = {}
-    for recipeID, recipe in pairs(GoldsmithDB.recipes) do
-        if (prof == "All" or recipe.profession == prof)
+    for _, recipeID in ipairs(addon:Keys(GoldsmithDB.recipes)) do
+        addon:Yield()
+        local recipe = GoldsmithDB.recipes[recipeID]
+        if recipe and (prof == "All" or recipe.profession == prof)
             and (not opts.onlyMine or addon.char.knownRecipes[recipeID])
             and addon:CanAuction(recipe.outputItemID) ~= false
             and (not opts.showExpansion or opts.showExpansion(addon:GetRecipeExpansion(recipe)))
@@ -920,7 +950,8 @@ function addon:GetProfessionBreakdown(rangeKey, concentration)
         for profession in pairs(c.professions) do seen[profession] = true end
     end
     local since = addon:DateRangeStart(rangeKey)
-    for _, e in ipairs(addon.ledger:getAll()) do
+    for i, e in ipairs(addon.ledger:getAll()) do
+        if i % 64 == 0 then addon:Yield() end
         if e.profession and e.profession ~= "Unassigned" and (not since or e.timestamp >= since) then
             seen[e.profession] = true
         end
@@ -962,7 +993,6 @@ local PRICE_DAYS = 30
 -- bought. Returns byID[itemID] = { itemID, name, recipe, tier, tierCount,
 -- profession, material } and byName[name] = { itemID, ... } (lowest tier
 -- first).
-local indexFrame, indexByID, indexByName
 local function BuildItemIndex()
     local byID, byName = {}, {}
     local function Add(itemID, name, fields)
@@ -978,10 +1008,14 @@ local function BuildItemIndex()
             if item[k] == nil then item[k] = v end
         end
     end
-    for _, c in pairs(GoldsmithDB.characters) do
-        for recipeID, td in pairs(c.tierData) do
+    -- Lists rather than pairs(), so the work can wait for a frame
+    for _, key in ipairs(addon:Keys(GoldsmithDB.characters)) do
+        local tierData = GoldsmithDB.characters[key].tierData
+        for n, recipeID in ipairs(addon:Keys(tierData)) do
+            if n % 64 == 0 then addon:Yield() end
+            local td = tierData[recipeID]
             local recipe = GoldsmithDB.recipes[recipeID]
-            if recipe then
+            if recipe and td then
                 -- Gear shares one item ID across tiers, so it has no single tier
                 local shared = td.outputs[1] and td.outputs[#td.qualities]
                     and td.outputs[1].itemID == td.outputs[#td.qualities].itemID
@@ -994,7 +1028,9 @@ local function BuildItemIndex()
             end
         end
     end
-    for _, recipe in pairs(GoldsmithDB.recipes) do
+    for n, recipeID in ipairs(addon:Keys(GoldsmithDB.recipes)) do
+        if n % 64 == 0 then addon:Yield() end
+        local recipe = GoldsmithDB.recipes[recipeID] or { reagents = {} }
         Add(recipe.outputItemID, recipe.outputName, { recipe = recipe, profession = recipe.profession })
         for _, slot in ipairs(recipe.reagents) do
             local ids = slot.itemIDs or {}
@@ -1009,7 +1045,8 @@ local function BuildItemIndex()
     for herbID, record in pairs(GoldsmithDB.milling) do
         Add(herbID, record.name, { material = true, profession = GoldsmithDB.reagents[record.name] })
     end
-    for _, e in ipairs(addon.ledger:getAll()) do
+    for i, e in ipairs(addon.ledger:getAll()) do
+        if i % 64 == 0 then addon:Yield() end
         if e.type == "COST" and e.itemID then
             Add(e.itemID, e.item, { profession = e.profession ~= "Unassigned" and e.profession or nil })
         end
@@ -1020,14 +1057,13 @@ local function BuildItemIndex()
     return byID, byName
 end
 
--- Built at most once a frame; lists look items up row by row
+-- Kept until data changes (it was rebuilt every frame, and every item
+-- page and list asks for it); lists look items up row by row
+local itemIndexCache = addon:NewCache()
 local function ItemIndex()
-    local now = GetTime()
-    if indexFrame ~= now then
-        indexByID, indexByName = BuildItemIndex()
-        indexFrame = now
-    end
-    return indexByID, indexByName
+    local store = itemIndexCache:Get()
+    if not store.byID then store.byID, store.byName = BuildItemIndex() end
+    return store.byID, store.byName
 end
 
 -- An item's quality tier and how many tiers it has, or nil
@@ -1051,7 +1087,8 @@ local function SalesByItem(prof, since)
         end
         return item
     end
-    for _, e in ipairs(addon.ledger:getAll()) do
+    for i, e in ipairs(addon.ledger:getAll()) do
+        if i % 64 == 0 then addon:Yield() end
         if e.item and (prof == "All" or e.profession == prof) and (not since or e.timestamp >= since) then
             if e.type == "REVENUE" then
                 local item = Item(e)
@@ -1084,7 +1121,18 @@ end
 -- The Items tab's landing page: four leaderboards for a profession and
 -- date range key. Returns { profit, roi, fastest, held, days }; each list
 -- holds up to BOARD_SIZE { name, itemID (may be nil), value, ... }.
+-- Kept until data changes; callers mustn't change it.
+local boardsCache = addon:NewCache()
+local ItemBoards
+
 function addon:GetItemBoards(prof, rangeKey)
+    local store = boardsCache:Get()
+    local id = prof .. "|" .. tostring(rangeKey)
+    store[id] = store[id] or ItemBoards(prof, rangeKey)
+    return store[id]
+end
+
+ItemBoards = function(prof, rangeKey)
     local since = addon:DateRangeStart(rangeKey)
     local _, byName = ItemIndex()
     local sold = SalesByItem(prof, since)
@@ -1136,14 +1184,16 @@ function addon:SearchItems(text, prof, limit)
     local byID, byName = ItemIndex()
     local needle = text:lower()
     local list = {}
+    -- The index is never changed once built, so pairs() is safe while the
+    -- work waits for a frame
+    local n = 0
     for name, ids in pairs(byName) do
+        n = n + 1
+        if n % 256 == 0 then addon:Yield() end
         local profession = byID[ids[#ids]].profession
         if name:lower():find(needle, 1, true) and (prof == "All" or profession == prof) then
             for _, id in ipairs(ids) do
-                table.insert(list, {
-                    name = name, itemID = id, tier = byID[id].tier, profession = profession,
-                    have = (addon:GetStock(id)), price = addon:GetMarketPrice(id), demand = addon:GetDemand(id, name),
-                })
+                table.insert(list, { name = name, itemID = id, tier = byID[id].tier, profession = profession })
             end
         end
     end
@@ -1152,6 +1202,14 @@ function addon:SearchItems(text, prof, limit)
         return (a.tier or 0) < (b.tier or 0)
     end)
     for i = #list, limit + 1, -1 do list[i] = nil end
+    -- Stock, price and sales only for the rows shown (a short search can
+    -- match thousands of items)
+    for i, item in ipairs(list) do
+        if i % 16 == 0 then addon:Yield() end
+        item.have = (addon:GetStock(item.itemID))
+        item.price = addon:GetMarketPrice(item.itemID)
+        item.demand = addon:GetDemand(item.itemID, item.name)
+    end
     return list
 end
 
@@ -1257,7 +1315,8 @@ function addon:GetItemDetails(name, itemID)
     d.activity = {}
     local own = {}
     for _, id in ipairs(ids) do own[id] = true end
-    for _, e in ipairs(addon.ledger:getAll()) do
+    for i, e in ipairs(addon.ledger:getAll()) do
+        if i % 64 == 0 then addon:Yield() end
         if e.item == name or (e.itemID and own[e.itemID]) then
             local kind = e.type == "REVENUE" and "Sold" or (e.kind == "DEPOSIT" and "Posted" or "Bought")
             table.insert(d.activity, { time = e.timestamp, kind = kind, qty = e.quantity,
@@ -1288,7 +1347,20 @@ end
 -- "today" for today's estimate), profitEstimated, cost (crafts: per item),
 -- partial, profession, character (key), entry (the ledger entry), lot
 -- (crafts) }, and totals { gold in, gold out }.
+-- Kept until data changes (it reads the whole ledger, and the tab asks
+-- every time it's shown); callers may sort the rows but not change them.
+local historyCache = addon:NewCache()
+local History
+
 function addon:GetHistory(filters)
+    local store = historyCache:Get()
+    local id = string.format("%s|%s|%s|%s|%s", tostring(filters.prof), tostring(filters.since),
+        tostring(filters.kind), tostring(filters.character), tostring(filters.item))
+    store[id] = store[id] or { History(filters) }
+    return store[id][1], store[id][2]
+end
+
+History = function(filters)
     -- Once per session, when prices are in (see RepairOrderLots)
     if not addon.orderLotsRepaired then
         addon.orderLotsRepaired = true
@@ -1320,7 +1392,8 @@ function addon:GetHistory(filters)
             and (not filters.character or filters.character == character)
     end
 
-    for _, e in ipairs(addon.ledger:getAll()) do
+    for i, e in ipairs(addon.ledger:getAll()) do
+        if i % 64 == 0 then addon:Yield() end
         local kind = e.type == "REVENUE" and "Sale" or (e.kind == "DEPOSIT" and "Deposit" or "Purchase")
         local character = e.character and e.realm and (e.character .. "-" .. e.realm)
         if Keep(kind, e.timestamp, e.item, e.profession, character) then
@@ -1383,13 +1456,18 @@ function addon:GetHistory(filters)
             end
         end
     end
-    table.sort(rows, function(a, b) return a.time > b.time end)
+    -- Can be thousands of rows: a sort that can wait for a frame
+    addon:Sort(rows, function(a, b) return a.time > b.time end)
     return rows, totals
 end
 
 -- Characters with ledger entries, for History's filter: { { key, name } }
 -- by name
+local historyCharsCache = addon:NewCache()
+
 function addon:GetHistoryCharacters()
+    local store = historyCharsCache:Get()
+    if store.list then return store.list end
     local seen, list = {}, {}
     for _, e in ipairs(addon.ledger:getAll()) do
         if e.character and e.realm then
@@ -1401,6 +1479,7 @@ function addon:GetHistoryCharacters()
         end
     end
     table.sort(list, function(a, b) return a.name < b.name end)
+    store.list = list
     return list
 end
 

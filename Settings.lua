@@ -57,18 +57,164 @@ function addon:DataChanged()
 end
 
 -- cache:Get() returns a table to keep results in, emptied when data has
--- changed since; cache:Clear() empties it now
+-- changed since; cache:Clear() empties it now. A new table rather than
+-- wiping the old one: work paused across frames (addon:Yield) may still
+-- hold the old one, and must not put results from old data in the new.
 function addon:NewCache()
     local cache = { store = {}, version = -1, time = 0 }
     function cache:Get()
         if self.version ~= addon.dataVersion or GetTime() - self.time > CACHE_SECONDS then
-            wipe(self.store)
+            self.store = {}
             self.version, self.time = addon.dataVersion, GetTime()
         end
         return self.store
     end
     function cache:Clear() self.version = -1 end
     return cache
+end
+
+-- Work spread over frames
+--
+-- Never a stutter: the user would rather see something load than have
+-- the game freeze, even if it takes a little longer (2026-10-06). A
+-- window refresh runs as work (addon:RunWork), in a coroutine: loops that
+-- can run long call addon:Yield(), which waits for the next frame once
+-- this frame's FRAME_BUDGET_MS is used. Outside work, Yield does nothing,
+-- so the same functions still answer at once for tooltips and events.
+--
+-- Rules for code that yields:
+--   - never inside a pcall (Lua can't pause there): code that needs one
+--     counts itself in addon.noYield and Yield waits until it's 0.
+--     WithCharacter skips its pcall inside work (addon:InWork) instead
+--   - whose stats are in use (addon.statsChar) belongs to the work: it's
+--     put back while the work waits and restored when it carries on, so
+--     other code never sees an alt's stats
+--   - build shared indexes in a local and store them when complete, so
+--     nothing else sees half of one while the work is paused
+--   - loop over a list, not pairs() of a shared table (addon:Keys)
+local FRAME_BUDGET_MS = 6
+addon.noYield = 0
+-- /gsm perf runs everything at once
+addon.syncWork = false
+local current            -- the newest work
+local works = setmetatable({}, { __mode = "k" }) -- coroutine -> its work
+
+-- True when running as work that can wait for frames
+function addon:InWork()
+    if addon.syncWork then return false end
+    local co = coroutine.running()
+    return co ~= nil and works[co] ~= nil
+end
+
+function addon:Yield()
+    if addon.syncWork or addon.noYield > 0 then return end
+    local co = coroutine.running()
+    local work = co and works[co]
+    if not work then return end
+    -- Replaced by newer work: stop here for good
+    if work ~= current then coroutine.yield() end
+    if debugprofilestop() - work.sliceStart >= FRAME_BUDGET_MS then coroutine.yield() end
+end
+
+-- The longest single frame any work has taken this session, by label
+-- (the tab), for /gsm perf: { [label] = ms }
+addon.workLongest = {}
+
+-- Runs fn spread over frames. Newer work stops older work where it is.
+-- onSlow() runs the first time it has to wait for a frame (show loading);
+-- onDone() when it finishes. Errors go to the game's error display.
+-- label names it in addon.workLongest.
+function addon:RunWork(fn, onSlow, onDone, label)
+    local work = { co = coroutine.create(fn), statsChar = addon.statsChar }
+    works[work.co] = work
+    current = work
+    local slow = false
+    local function Step()
+        if current ~= work then return end
+        work.sliceStart = debugprofilestop()
+        -- The work's own stats while it runs (see the rules above)
+        local outside = addon.statsChar
+        addon.statsChar = work.statsChar
+        local ok, err = coroutine.resume(work.co)
+        work.statsChar = addon.statsChar
+        addon.statsChar = outside
+        if label and not addon.syncWork then
+            local ms = debugprofilestop() - work.sliceStart
+            if ms > (addon.workLongest[label] or 0) then addon.workLongest[label] = ms end
+        end
+        if not ok then
+            if current == work then current = nil end
+            geterrorhandler()(debug.traceback(work.co, tostring(err)))
+            if onDone then onDone() end
+            return
+        end
+        if coroutine.status(work.co) == "dead" then
+            if current == work then current = nil end
+            if onDone then onDone() end
+            return
+        end
+        if current ~= work then return end
+        if not slow then
+            slow = true
+            if onSlow then onSlow() end
+        end
+        C_Timer.After(0, Step)
+    end
+    Step()
+end
+
+-- A table's keys as a list (in pairs order), for loops that yield:
+-- something may add to the table while the work waits, which a pairs()
+-- loop can't survive
+function addon:Keys(t)
+    local list = {}
+    for k in pairs(t) do list[#list + 1] = k end
+    return list
+end
+
+-- table.sort, except for long lists inside work: table.sort can't wait for
+-- a frame, so those get a merge sort that can (stable, so equal items may
+-- come out in a different order than table.sort would give)
+local SORT_IN_ONE_GO = 1000
+function addon:Sort(list, less)
+    local n = #list
+    if n <= SORT_IN_ONE_GO or not addon:InWork() then
+        table.sort(list, less)
+        return
+    end
+    local from, to = list, {}
+    local width, steps = 1, 0
+    while width < n do
+        for left = 1, n, 2 * width do
+            local mid, right = math.min(left + width, n + 1), math.min(left + 2 * width, n + 1)
+            local i, j, k = left, mid, left
+            while i < mid and j < right do
+                if less(from[j], from[i]) then
+                    to[k], j = from[j], j + 1
+                else
+                    to[k], i = from[i], i + 1
+                end
+                k = k + 1
+            end
+            while i < mid do to[k], i, k = from[i], i + 1, k + 1 end
+            while j < right do to[k], j, k = from[j], j + 1, k + 1 end
+            steps = steps + (right - left)
+            if steps >= 512 then
+                steps = 0
+                addon:Yield()
+            end
+        end
+        from, to = to, from
+        width = width * 2
+    end
+    if from ~= list then
+        for i = 1, n do list[i] = from[i] end
+    end
+end
+
+-- True while work is waiting for the next frame
+function addon:IsWorking()
+    return current ~= nil
 end
 
 -- False for a character excluded (Settings or the Characters tab)

@@ -46,10 +46,14 @@ function addon:CreateLedger(store)
     store.nextId = store.nextId or 1
 
     local entries = store.entries
+    -- Bumped on every change, so the index below knows when to rebuild
+    local version = 0
+    local index, indexVersion, indexCount
 
     return {
         -- kind is "PURCHASE" (default) or "DEPOSIT"
         addCost = function(self, prof, item, qty, totalCopper, kind, itemID)
+            version = version + 1
             table.insert(entries, {
                 id = store.nextId,
                 type = "COST",
@@ -71,6 +75,7 @@ function addon:CreateLedger(store)
         -- depositRefund is the deposit returned inside this sale's amount
         -- costSource says where costBasis came from (see GetUnitCostBasis)
         addRevenue = function(self, prof, item, qty, totalCopper, costBasis, costPartial, depositRefund, costSource)
+            version = version + 1
             table.insert(entries, {
                 costBasis = costBasis,
                 costPartial = costPartial,
@@ -93,9 +98,45 @@ function addon:CreateLedger(store)
             return entries
         end,
 
+        -- Entries grouped by item, built once per change instead of every
+        -- caller reading the whole ledger (with a big ledger, costing every
+        -- recipe that way ran long enough for WoW to stop the script):
+        --   purchases[name] / purchasesByID[itemID] = { entries }, oldest first
+        --   sales[name] = { entries }, oldest first
+        -- Rebuilt when the ledger changes (or its length does, if
+        -- something changed it directly). Don't change what it returns.
+        index = function(self)
+            if index and indexVersion == version and indexCount == #entries then return index end
+            local idx = { purchases = {}, purchasesByID = {}, sales = {} }
+            local function Add(map, key, e)
+                local list = map[key]
+                if not list then
+                    list = {}
+                    map[key] = list
+                end
+                list[#list + 1] = e
+            end
+            for i, e in ipairs(entries) do
+                if i % 64 == 0 then addon:Yield() end
+                if e.type == "COST" and (e.kind or "PURCHASE") == "PURCHASE" then
+                    if e.item then Add(idx.purchases, e.item, e) end
+                    if e.itemID then Add(idx.purchasesByID, e.itemID, e) end
+                elseif e.type == "REVENUE" and e.item then
+                    Add(idx.sales, e.item, e)
+                end
+            end
+            local function Oldest(a, b) return (a.timestamp or 0) < (b.timestamp or 0) end
+            for _, map in ipairs({ idx.purchases, idx.purchasesByID, idx.sales }) do
+                for _, list in pairs(map) do table.sort(list, Oldest) end
+            end
+            index, indexVersion, indexCount = idx, version, #entries
+            return index
+        end,
+
         remove = function(self, id)
             for i, e in ipairs(entries) do
                 if e.id == id then
+                    version = version + 1
                     table.remove(entries, i)
                     return true
                 end
@@ -104,6 +145,7 @@ function addon:CreateLedger(store)
         end,
 
         clear = function(self)
+            version = version + 1
             -- wipe in place so every reference to entries stays valid
             wipe(entries)
         end,
@@ -126,7 +168,8 @@ function addon:CreateLedger(store)
                 -- refunds only known for sales recorded since refunds were saved
                 refunds = 0, refundsKnown = true,
             }
-            for _, e in ipairs(entries) do
+            for i, e in ipairs(entries) do
+                if i % 4 == 0 then addon:Yield() end
                 if (prof == "All" or e.profession == prof) and (not since or e.timestamp >= since) then
                     s.count = s.count + 1
                     if e.type == "REVENUE" then
@@ -174,7 +217,8 @@ function addon:CreateLedger(store)
                 table.insert(list, d)
                 byDay[day] = d
             end
-            for _, e in ipairs(entries) do
+            for i, e in ipairs(entries) do
+                if i % 4 == 0 then addon:Yield() end
                 local d = byDay[date("%Y-%m-%d", e.timestamp)]
                 if d and (prof == "All" or e.profession == prof) then
                     if e.type == "REVENUE" then
@@ -221,18 +265,44 @@ function addon:DateRangeStart(key)
     return time({ year = t.year, month = t.month, day = t.day, hour = 0 })
 end
 
--- Sales recorded before sales kept their cost get today's cost estimate
+-- Sales recorded before sales kept their cost get today's cost estimate,
+-- worked out once per item until data changes (summaries ask once per
+-- sale). false = no estimate.
+local estimateCache
 local function EstimateSaleCost(itemName)
-    return (addon:GetUnitCostBasis(itemName))
+    if not itemName then return nil end
+    estimateCache = estimateCache or addon:NewCache()
+    local store = estimateCache:Get()
+    local cost = store[itemName]
+    if cost == nil then
+        cost = addon:GetUnitCostBasis(itemName) or false
+        store[itemName] = cost
+    end
+    return cost or nil
 end
+
+-- Both read the whole ledger, and the Overview asks again every time it's
+-- shown, so results are kept until data changes (caches are made on first
+-- use: Settings.lua, which has NewCache, loads after this file). Callers
+-- may add fields to what's returned (GetGoldPerHour) but not change the
+-- ledger's numbers in it.
+local summaryCache, dailyCache
 
 -- Profit summary for a profession ("All" for every one) and date range key
 function addon:GetSummary(prof, rangeKey)
-    return addon.ledger:getSummary(prof, EstimateSaleCost, addon:DateRangeStart(rangeKey))
+    summaryCache = summaryCache or addon:NewCache()
+    local store = summaryCache:Get()
+    local id = prof .. "|" .. tostring(rangeKey)
+    store[id] = store[id] or addon.ledger:getSummary(prof, EstimateSaleCost, addon:DateRangeStart(rangeKey))
+    return store[id]
 end
 
 function addon:GetDailyProfit(prof, days)
-    return addon.ledger:getDailyProfit(prof, EstimateSaleCost, days)
+    dailyCache = dailyCache or addon:NewCache()
+    local store = dailyCache:Get()
+    local id = prof .. "|" .. days
+    store[id] = store[id] or addon.ledger:getDailyProfit(prof, EstimateSaleCost, days)
+    return store[id]
 end
 
 -- Profit per hour of goldmaking for each of the last `days` days (oldest

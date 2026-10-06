@@ -137,7 +137,8 @@ end
 local function SortItems(items)
     local sort = GetSort()
     local getValue = SORTS[sort.key].value
-    table.sort(items, function(a, b)
+    -- Can wait for a frame on long lists (Settings.lua)
+    addon:Sort(items, function(a, b)
         local va, vb = getValue(a), getValue(b)
         if va ~= nil and vb ~= nil and va ~= vb then
             if sort.descending then return va > vb end
@@ -2231,13 +2232,22 @@ local function Refresh(v, state)
     v.plan:SetShown(planning)
     v.salvage:SetShown(salvaging)
     v.listScreen:SetShown(not planning and not salvaging)
+    -- Runs as work over frames (Window.lua): the part being worked out
+    -- shows "Loading" if it takes more than a frame; the filters and
+    -- search box above the list stay usable
+    local loading = state.loading
     if planning then
+        loading:Begin(v.plan)
         v.plan:Update()
+        loading:Done(v.plan)
         return
     elseif salvaging then
+        loading:Begin(v.salvage)
         v.salvage:Update()
+        loading:Done(v.salvage)
         return
     end
+    loading:Begin(v.list)
 
     local concOn = ui.craftsConcentration == true
     -- The Cost column says which cost it shows (Settings: Show cost as)
@@ -2323,11 +2333,14 @@ local function Refresh(v, state)
     end
     v.list:SetItems(items)
     v.count:SetText(string.format("%d craft%s", #items, #items == 1 and "" or "s"))
+    loading:Done(v.list)
 
     v.budget:SetShown(concOn)
     v.footnote:SetShown(not concOn)
     if concOn then
+        loading:Begin(v.budget)
         v.budget:Set(addon:GetConcentrationOverview(state.profession))
+        loading:Done(v.budget)
     else
         local partial = false
         for _, item in ipairs(items) do
@@ -2349,7 +2362,7 @@ local function Reset(v)
     v.list:ScrollToTop()
 end
 
-addon:RegisterView("crafts", { create = Create, refresh = Refresh, reset = Reset })
+addon:RegisterView("crafts", { create = Create, refresh = Refresh, reset = Reset, ownLoading = true })
 
 -- Keep the planner's Craft button current while it's showing: the
 -- profession opening or closing, bags changing as you craft or buy,

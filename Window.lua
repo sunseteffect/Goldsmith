@@ -27,8 +27,11 @@ local TABS = {
 }
 
 -- Views: key -> { create = function(parent) -> view, refresh = function(view, state),
---                 reset = function(view) (optional: back to the home view) }
--- state = { profession, range, since, setProfession(prof) }
+--                 reset = function(view) (optional: back to the home view),
+--                 ownLoading = true (optional: the view marks its own parts
+--                 as loading; otherwise the whole screen is covered) }
+-- state = { profession, range, since, setProfession(prof), loading (see
+-- NewLoading) }. refresh runs as work spread over frames (addon:RunWork).
 local views = {}
 
 function addon:RegisterView(key, view)
@@ -393,6 +396,37 @@ function addon:CreateWindow()
         if screen and screen.def.reset then screen.def.reset(screen.view) end
     end
 
+    -- Parts of the screen still being worked out. A view calls
+    -- state.loading:Begin(part) before the work for a part (a frame) and
+    -- :Done(part) once it's filled in; views without ownLoading are
+    -- covered whole. The "Loading" covers (UI.Loading) only show once the
+    -- work has had to wait for a frame, so a quick refresh never flickers.
+    local function HideLoading(part)
+        if part.goldsmithLoading then part.goldsmithLoading:Hide() end
+    end
+    local function NewLoading(previous)
+        -- Still loading from the refresh this replaces: keep showing it
+        local loading = { pending = {}, slow = previous ~= nil and previous.slow }
+        function loading:Begin(part)
+            self.pending[part] = true
+            if self.slow then UI.Loading(part):Show() end
+        end
+        function loading:Done(part)
+            self.pending[part] = nil
+            HideLoading(part)
+        end
+        function loading:ShowAll()
+            self.slow = true
+            for part in pairs(self.pending) do UI.Loading(part):Show() end
+        end
+        function loading:HideAll()
+            for part in pairs(self.pending) do HideLoading(part) end
+            self.pending = {}
+        end
+        return loading
+    end
+    local loading -- the refresh in progress, if any
+
     Refresh = function()
         if not frame:IsShown() then return end
         local valid = false
@@ -414,7 +448,12 @@ function addon:CreateWindow()
         end
         local screen = GetScreen(ui.tab)
         screen.frame:Show()
-        screen.def.refresh(screen.view, {
+        -- Worked out over as many frames as it takes (addon:RunWork); a
+        -- newer refresh stops this one
+        local previous = loading
+        local this = NewLoading(previous)
+        loading = this
+        local state = {
             profession = ui.profession,
             range = ui.range,
             since = addon:DateRangeStart(ui.range),
@@ -422,7 +461,24 @@ function addon:CreateWindow()
                 ui.profession = prof
                 Refresh()
             end,
-        })
+            loading = this,
+        }
+        if not screen.def.ownLoading then this:Begin(screen.frame) end
+        addon:RunWork(function()
+            screen.def.refresh(screen.view, state)
+        end, function()
+            this:ShowAll()
+        end, function()
+            this:HideAll()
+            if loading == this then loading = nil end
+        end, ui.tab)
+        -- Parts the replaced refresh was loading that this one has already
+        -- filled in, or doesn't cover (another tab)
+        if previous then
+            for part in pairs(previous.pending) do
+                if not this.pending[part] then HideLoading(part) end
+            end
+        end
     end
 
     frame:SetScript("OnShow", function()
