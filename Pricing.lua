@@ -179,9 +179,10 @@ local UNDERCUT_RATIO = 0.6
 
 -- Blizzard AH data
 --
--- PriceData.lua is written outside the game by Tools\Fetch-PriceData.ps1
--- (a scheduled task, hourly) from the Blizzard API: region-wide commodities
--- only, so no gear. It loads at login or /reload. Used when neither
+-- From the Goldsmith Data addon (its own repo, GoldsmithData): a workflow
+-- fetches the Blizzard API hourly and releases it daily, one file per
+-- region, and only your region's file builds the table. Region-wide
+-- commodities only, so no gear. It loads at login or /reload. Used when neither
 -- Auctionator nor TSM has a price for the item, or when Auctionator's price
 -- is a day or more old and this data is newer (not with TSM installed).
 --   GoldsmithPriceData.items[itemID] = { min, market, median, quantity }

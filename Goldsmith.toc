@@ -3,13 +3,12 @@
 ## Notes: Crafting profitability analyzer
 ## Author: sunseteffect
 ## SavedVariables: GoldsmithDB
-## OptionalDeps: Auctionator, TradeSkillMaster
+## OptionalDeps: Auctionator, TradeSkillMaster, GoldsmithData
 ## Version: 2.2
 ## IconTexture: Interface\AddOns\Goldsmith\Media\Logo
 ## AddonCompartmentFunc: Goldsmith_OnAddonCompartmentClick
 
 Core.lua
-PriceData.lua
 Data.lua
 Theme.lua
 Widgets.lua
