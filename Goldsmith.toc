@@ -13,6 +13,7 @@ Data.lua
 Theme.lua
 Widgets.lua
 Settings.lua
+Report.lua
 Characters.lua
 Pricing.lua
 Milling.lua

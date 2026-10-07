@@ -37,9 +37,14 @@ Repeat steps 2 and 3 on each alt with professions.
 - `/gsm`: show or hide the window
 - `/gsm help`: list every command
 - `/gsm setup`: show the getting started checklist again
+- `/gsm report`: copy a bug report to paste into a GitHub issue
 
 You can also set keys for opening Goldsmith and for Craft next in the game's Key Bindings, under AddOns.
 
 ## Good to know
 - Goldsmith never crafts, buys or posts on its own. Every craft is one press of a button or key.
 - Posting your crafts on the AH is up to you (TSM or Auctionator do that well).
+
+## Support and feedback
+- Found a bug or have an idea? [Open an issue on GitHub](https://github.com/sunseteffect/Goldsmith/issues). In game, Settings > Support and feedback has the link and a Copy bug report button that gathers the details for you.
+- Goldsmith is free. If it makes you gold and you'd like to say thanks, you can [buy me a coffee on Ko-fi](https://ko-fi.com/sunseteffect).

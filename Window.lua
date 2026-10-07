@@ -4,7 +4,8 @@ local UI = addon.UI
 -- The window
 --
 -- A header (title, profession, date and expansion filters, where prices
--- come from, settings), six tabs, and the tab's screen below. Each screen
+-- come from, close), six tabs with Settings at their right end, and the
+-- tab's screen below. Each screen
 -- is a view registered with addon:RegisterView; the window creates it the
 -- first time its tab is opened and refreshes it when shown or when data
 -- changes.
@@ -152,6 +153,8 @@ function addon:CreateWindow()
         frame:Lower()
         if GoldsmithSettings then GoldsmithSettings:Hide() end
         if GoldsmithHelp then GoldsmithHelp:Hide() end
+        if GoldsmithSupport then GoldsmithSupport:Hide() end
+        if GoldsmithReport then GoldsmithReport:Hide() end
     end
     hooksecurefunc("ShowUIPanel", function(panel)
         if panel and panel ~= frame then StepBack() end
@@ -238,6 +241,10 @@ function addon:CreateWindow()
         local handled = false
         if GoldsmithHelp and GoldsmithHelp:IsShown() then
             GoldsmithHelp:Hide(); handled = true
+        elseif GoldsmithSupport and GoldsmithSupport:IsShown() then
+            GoldsmithSupport:Hide(); handled = true
+        elseif GoldsmithReport and GoldsmithReport:IsShown() then
+            GoldsmithReport:Hide(); handled = true
         elseif GoldsmithSettings and GoldsmithSettings:IsShown() then
             GoldsmithSettings:Hide(); handled = true
         elseif InFront() then
@@ -359,23 +366,11 @@ function addon:CreateWindow()
         { font = "close", hoverColor = "loss" })
     closeButton:SetPoint("RIGHT", -8, 0)
 
-    local settings = addon:CreateSettingsPanel(frame)
-    settings:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -(HEADER_HEIGHT + 4))
-    local settingsButton = UI.Button(header, "Settings", 80, 24, function()
-        -- Help sits in the same spot (Settings > Help)
-        if GoldsmithHelp then GoldsmithHelp:Hide() end
-        settings:SetShown(not settings:IsShown())
-    end)
-    settingsButton:SetPoint("RIGHT", closeButton, "LEFT", -8, 0)
-    UI.SetTooltip(settingsButton, function(tooltip)
-        tooltip:AddLine("Settings", 1, 1, 1)
-        tooltip:AddLine("Costs, prices and thresholds, item tooltips, chat messages, which characters count, and Help.", 0.8, 0.8, 0.8, true)
-    end, "ANCHOR_BOTTOM")
-
-    -- Between the filters and Settings, on two lines when it doesn't fit
+    -- Between the filters and the close button, on two lines when it
+    -- doesn't fit
     local priceText = UI.Text(header, "small", "muted", "RIGHT")
     priceText:SetPoint("LEFT", expansionButton, "RIGHT", 12, 0)
-    priceText:SetPoint("RIGHT", settingsButton, "LEFT", -12, 0)
+    priceText:SetPoint("RIGHT", closeButton, "LEFT", -12, 0)
     priceText:SetWordWrap(true)
     priceText:SetMaxLines(2)
 
@@ -405,6 +400,26 @@ function addon:CreateWindow()
     end)
     tabBar:SetPoint("TOPLEFT", 10, 0)
     tabBar:SetPoint("TOPRIGHT", 0, 0)
+
+    -- Settings: at the right end of the tabs, under the close button (user,
+    -- 2026-10-06: the header was crowded). The panel opens below the tabs,
+    -- so the button stays visible to close it again.
+    local settings = addon:CreateSettingsPanel(frame)
+    settings:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -(HEADER_HEIGHT + TAB_HEIGHT + 4))
+    local settingsButton = UI.Button(tabArea, "Settings", 80, 24, function()
+        -- Help, Support and the bug report sit in the same spot
+        if GoldsmithHelp then GoldsmithHelp:Hide() end
+        if GoldsmithSupport then GoldsmithSupport:Hide() end
+        if GoldsmithReport then GoldsmithReport:Hide() end
+        settings:SetShown(not settings:IsShown())
+    end)
+    settingsButton:SetPoint("RIGHT", -8, 0)
+    -- Above the tab bar, which spans the whole row
+    settingsButton:SetFrameLevel(tabBar:GetFrameLevel() + 5)
+    UI.SetTooltip(settingsButton, function(tooltip)
+        tooltip:AddLine("Settings", 1, 1, 1)
+        tooltip:AddLine("Costs, prices and thresholds, item tooltips, chat messages, which characters count, and Help.", 0.8, 0.8, 0.8, true)
+    end, "ANCHOR_BOTTOM")
 
     -- Screens
     local content = CreateFrame("Frame", nil, frame)

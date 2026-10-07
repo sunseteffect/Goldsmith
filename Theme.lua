@@ -22,6 +22,9 @@ addon.themes = {
     clean = {
         colors = {
             window      = Hex("17181d", 0.97),
+            -- Pop-ups over the window (Settings, Help, Support, Bug report):
+            -- solid, so their text never sits over the list behind
+            dialog      = Hex("17181d"),
             header      = Hex("24252c"),
             panel       = Hex("1f2027"),
             panelRaised = Hex("26272e"),

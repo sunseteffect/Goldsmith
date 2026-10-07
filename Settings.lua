@@ -36,6 +36,23 @@ function addon:Setting(key)
     return value
 end
 
+-- Settings that differ from the defaults, as "key = value" lines for the
+-- bug report (Report.lua). Characters and items are counted, not named.
+function addon:ChangedSettings()
+    local list = {}
+    for key, default in pairs(DEFAULTS) do
+        local value = addon:Setting(key)
+        if value ~= default then table.insert(list, key .. " = " .. tostring(value)) end
+    end
+    table.sort(list)
+    local excluded = 0
+    for _ in pairs(addon:Setting("excluded") or {}) do excluded = excluded + 1 end
+    if excluded > 0 then table.insert(list, excluded .. " characters excluded") end
+    local ignored = #addon:GetIgnoredItems()
+    if ignored > 0 then table.insert(list, ignored .. " items ignored") end
+    return list
+end
+
 function addon:SetSetting(key, value)
     GoldsmithDB.settings = GoldsmithDB.settings or {}
     GoldsmithDB.settings[key] = value
@@ -502,7 +519,7 @@ local COLUMNS = {
 function addon:CreateSettingsPanel(parent)
     local panel = CreateFrame("Frame", "GoldsmithSettings", parent, "BackdropTemplate")
     panel:SetWidth(WIDTH)
-    UI.Style(panel, "window", "borderGold")
+    UI.Style(panel, "dialog", "borderGold")
     panel:SetFrameStrata("DIALOG")
     panel:EnableMouse(true)
     panel:Hide()
@@ -610,12 +627,29 @@ function addon:CreateSettingsPanel(parent)
         tooltip:AddLine("How to get started, what each tab is for, and the /gsm commands.", 0.8, 0.8, 0.8, true)
     end, "ANCHOR_LEFT")
 
+    local support = addon:CreateSupportPanel(parent, panel)
+    local supportButton = UI.Button(panel, "Support and feedback", 160, 24, function()
+        panel:Hide()
+        support:Show()
+    end)
+    supportButton:SetPoint("RIGHT", helpButton, "LEFT", -8, 0)
+    UI.SetTooltip(supportButton, function(tooltip)
+        tooltip:AddLine("Support and feedback", 1, 1, 1)
+        tooltip:AddLine("Report a bug or suggest an idea on GitHub.", 0.8, 0.8, 0.8, true)
+        local errors = #addon:GetErrors()
+        if errors > 0 then
+            tooltip:AddLine(string.format("Goldsmith has saved %d error%s. Copy bug report there includes them.",
+                errors, errors == 1 and "" or "s"), 1, 0.6, 0.2, true)
+        end
+    end, "ANCHOR_LEFT")
+
     local footer = UI.Text(panel, "label", "dim")
     footer:SetPoint("BOTTOMLEFT", 16, 16)
     footer:SetText("Saved for all your characters. Hover a setting for details.")
 
     function panel:Update()
         for _, row in pairs(rows) do row:Update() end
+        supportButton.label:SetTextColor(addon:Color(#addon:GetErrors() > 0 and "warning" or "text"))
 
         -- Price source only matters with both price addons installed. Laid
         -- out here rather than once: TSM can finish loading after Goldsmith.
@@ -666,7 +700,7 @@ function addon:CreateHelpPanel(parent, settings)
     local panel = CreateFrame("Frame", "GoldsmithHelp", parent, "BackdropTemplate")
     panel:SetWidth(HELP_WIDTH)
     panel:SetPoint("TOPRIGHT", settings, "TOPRIGHT")
-    UI.Style(panel, "window", "borderGold")
+    UI.Style(panel, "dialog", "borderGold")
     panel:SetFrameStrata("DIALOG")
     panel:EnableMouse(true)
     panel:Hide()
@@ -715,6 +749,110 @@ function addon:CreateHelpPanel(parent, settings)
         local height = 50 + 52 + (#HELP_SECTIONS - 1) * 14 + #HELP_SECTIONS * 4
         for _, fs in ipairs(texts) do height = height + fs:GetStringHeight() end
         panel:SetHeight(height)
+    end)
+    return panel
+end
+
+-- Support and feedback
+--
+-- Where to report bugs and ideas: GitHub issues. Addons can't open a web
+-- page, so the link is in a box to copy. No donation link here: Blizzard's
+-- add-on policy doesn't allow asking for donations in game, so that lives
+-- on the CurseForge page (2026-10-06).
+
+local SUPPORT_WIDTH = 560
+
+-- A box showing text to copy: clicking selects all of it, and typing
+-- can't change it
+local function CopyBox(parent, width, text)
+    local box = CreateFrame("EditBox", nil, parent, "BackdropTemplate")
+    box:SetSize(width, 26)
+    UI.Style(box, "panelRaised", "borderStrong")
+    box:SetFontObject(addon:Font("body"))
+    box:SetTextInsets(8, 8, 0, 0)
+    box:SetAutoFocus(false)
+    box:SetText(text)
+    box:SetCursorPosition(0)
+    box:SetScript("OnTextChanged", function(self, userInput)
+        if userInput then
+            self:SetText(text)
+            self:HighlightText()
+        end
+    end)
+    box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    -- Again next frame: the click that gave focus can move the cursor
+    box:SetScript("OnEditFocusGained", function(self)
+        self:SetBackdropBorderColor(addon:Color("gold"))
+        self:HighlightText()
+        C_Timer.After(0, function() if self:HasFocus() then self:HighlightText() end end)
+    end)
+    box:SetScript("OnEditFocusLost", function(self)
+        self:SetBackdropBorderColor(addon:Color("borderStrong"))
+        self:HighlightText(0, 0)
+        self:SetCursorPosition(0)
+    end)
+    return box
+end
+
+function addon:CreateSupportPanel(parent, settings)
+    local panel = CreateFrame("Frame", "GoldsmithSupport", parent, "BackdropTemplate")
+    panel:SetWidth(SUPPORT_WIDTH)
+    panel:SetPoint("TOPRIGHT", settings, "TOPRIGHT")
+    UI.Style(panel, "dialog", "borderGold")
+    panel:SetFrameStrata("DIALOG")
+    panel:EnableMouse(true)
+    panel:Hide()
+
+    local title = UI.Text(panel, "heading")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("Support and feedback")
+    local close = UI.IconButton(panel, 26, "X", "Close", function() panel:Hide() end, { hoverColor = "loss" })
+    close:SetPoint("TOPRIGHT", -8, -8)
+
+    local intro = UI.Text(panel, "small", "muted")
+    intro:SetPoint("TOPLEFT", 16, -50)
+    intro:SetWidth(SUPPORT_WIDTH - 32)
+    intro:SetWordWrap(true)
+    intro:SetSpacing(2)
+    intro:SetText("Found a bug or have an idea? Open an issue on GitHub. Click the link, press Ctrl+C to copy it, and paste it into your browser.")
+
+    local link = CopyBox(panel, SUPPORT_WIDTH - 32, addon.ISSUES_URL)
+    link:SetPoint("TOPLEFT", intro, "BOTTOMLEFT", 0, -10)
+
+    local heading = UI.Text(panel, "body", "text")
+    heading:SetPoint("TOPLEFT", link, "BOTTOMLEFT", 0, -16)
+    heading:SetText("For a bug, it helps to include")
+    local details = UI.Text(panel, "small", "muted")
+    details:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -4)
+    details:SetWidth(SUPPORT_WIDTH - 32)
+    details:SetWordWrap(true)
+    details:SetSpacing(2)
+
+    local back = UI.Button(panel, "Back to settings", 130, 24, function()
+        panel:Hide()
+        settings:Show()
+    end)
+    back:SetPoint("BOTTOMRIGHT", -16, 12)
+
+    -- The details below, gathered for you (Report.lua)
+    local report = addon:CreateReportPanel(parent, panel)
+    local reportButton = UI.Button(panel, "Copy bug report", 140, 24, function()
+        panel:Hide()
+        report:Show()
+    end)
+    reportButton:SetPoint("BOTTOMLEFT", 16, 12)
+    local errorsText = UI.Text(panel, "small", "warning")
+    errorsText:SetPoint("LEFT", reportButton, "RIGHT", 10, 0)
+
+    -- Tall enough for the text, however it wrapped: the title, the intro,
+    -- the link, the heading and details with the gaps between, the button
+    panel:SetScript("OnShow", function()
+        details:SetText("What you did and what happened. Copy bug report adds your versions, settings and any saved errors.")
+        local errors = #addon:GetErrors()
+        errorsText:SetText(errors > 0 and string.format("%d error%s saved", errors, errors == 1 and "" or "s") or "")
+        panel:SetHeight(50 + intro:GetStringHeight() + 10 + 26 + 16 + heading:GetStringHeight() + 4
+            + details:GetStringHeight() + 52)
     end)
     return panel
 end

@@ -1,0 +1,23 @@
+name: Idea
+description: Suggest something new or a change to how Goldsmith works
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would it help with?
+      description: What you were trying to do, or what's slow or annoying today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: How you'd like it to work. Rough is fine.
+    validations:
+      required: true
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else?
+      description: Other addons that do something similar, screenshots or examples.

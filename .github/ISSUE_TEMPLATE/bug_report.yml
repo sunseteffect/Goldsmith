@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in Goldsmith is broken, wrong or confusing
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! In game, open **Settings > Support and feedback > Copy bug report** (or type `/gsm report`), press Ctrl+C, and paste it in the last box. It has your versions, settings and any errors Goldsmith saved, with character and realm names left out.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you saw. A screenshot helps if it's something on screen.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can it be made to happen?
+      description: The steps, if you know them. "Opened the Crafts tab, picked Alchemy, clicked a craft."
+      placeholder: |
+        1.
+        2.
+        3.
+  - type: dropdown
+    id: often
+    attributes:
+      label: How often?
+      options:
+        - Every time
+        - Sometimes
+        - Once so far
+  - type: textarea
+    id: report
+    attributes:
+      label: Goldsmith report
+      description: Paste from Copy bug report or /gsm report.
+      placeholder: "### Goldsmith report ..."
+    validations:
+      required: true

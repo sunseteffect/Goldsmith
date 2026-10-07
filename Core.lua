@@ -480,6 +480,7 @@ local function PrintHelp()
     print("  /gsm setup - show the getting started checklist again")
     print("  /gsm cooldowns - craft cooldowns on every character")
     print("  /gsm perf - time each tab and show memory use (freezes the game briefly)")
+    print("  /gsm report - copy a bug report (versions, settings and recent errors) for GitHub")
     print("  /gsm reset - delete all transactions")
     print("  Right-click an entry on the History tab to delete it.")
 end
@@ -526,6 +527,8 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:ListCooldowns()
     elseif cmd == "perf" then
         addon:RunPerfCheck()
+    elseif cmd == "report" or cmd == "bug" then
+        addon:ShowBugReport()
     elseif cmd == "reset" then
         StaticPopup_Show("GOLDSMITH_RESET")
     else
