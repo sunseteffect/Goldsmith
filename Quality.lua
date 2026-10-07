@@ -125,17 +125,26 @@ local function FindScrollTiers(recipeID, qualities, allocationGUID)
         return outputs
     end
 
+    -- A scroll's tier comes from the reagent quality call: the crafted
+    -- quality one returns nothing for scrolls (Midnight, 2026-10-07)
     outputs = {}
     local name = C_Item.GetItemNameByID(scroll.itemID)
-    local qualityFn = C_TradeSkillUI.GetItemCraftedQualityByItemInfo
-    if not name or not qualityFn then return nil end
+    local craftedFn = C_TradeSkillUI.GetItemCraftedQualityByItemInfo
+    local reagentFn = C_TradeSkillUI.GetItemReagentQualityByItemInfo
+    if not name or not (craftedFn or reagentFn) then return nil end
+    local function TierOf(id)
+        for _, fn in ipairs({ craftedFn, reagentFn }) do
+            local ok, tier = pcall(fn, id)
+            if ok and tier then return tier end
+        end
+    end
     for id = scroll.itemID - 3, scroll.itemID + 3 do
         local otherName = C_Item.GetItemNameByID(id)
         if not otherName then
             C_Item.RequestLoadItemDataByID(id)
         elseif otherName == name then
-            local ok, tier = pcall(qualityFn, id)
-            if ok and tier and qualities[tier] then
+            local tier = TierOf(id)
+            if tier and qualities[tier] then
                 outputs[tier] = { itemID = id }
             end
         end
@@ -144,6 +153,10 @@ local function FindScrollTiers(recipeID, qualities, allocationGUID)
         return outputs
     end
 end
+
+-- Enchants whose scroll tiers weren't found because the scrolls next to it
+-- hadn't loaded: tried again shortly, a few times a session
+local scrollRetries = {}
 
 function addon:RefreshTierData(recipeID)
     local okQ, qualities = pcall(C_TradeSkillUI.GetQualitiesForRecipe, recipeID)
@@ -163,7 +176,13 @@ function addon:RefreshTierData(recipeID)
     if scroll then
         allocationGUID = FindItemGUIDInBags(scroll.vellumID)
         outputs = FindScrollTiers(recipeID, qualities, allocationGUID)
-        if not outputs then return end
+        if not outputs then
+            scrollRetries[recipeID] = (scrollRetries[recipeID] or 0) + 1
+            if scrollRetries[recipeID] <= 3 then
+                C_Timer.After(2, function() addon:RefreshTierData(recipeID) end)
+            end
+            return
+        end
     else
         for tier, qualityID in ipairs(qualities) do
             local okO, out = pcall(C_TradeSkillUI.GetRecipeOutputItemData, recipeID, {}, nil, qualityID)
