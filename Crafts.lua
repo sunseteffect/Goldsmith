@@ -74,6 +74,18 @@ end
 -- column starts the most useful way round (names A-Z, cheapest first,
 -- highest profit first). Rows with no value for the column go last.
 
+-- Gold per concentration point as shown and sorted: the extra gold
+-- concentration adds, or, for a craft that loses gold, the loss spread over
+-- its concentration (negative), so a losing craft never looks like a good
+-- use of it and sorts to the bottom.
+local function GoldPerConc(info)
+    if not info.concentrate or not info.concentrationValue then return nil end
+    if info.profit and info.profit < 0 then
+        return info.profit / math.max(info.concentration or 1, 1)
+    end
+    return info.concentrationValue
+end
+
 local SORTS = {
     item   = { firstDescending = false, value = function(i) return i.recipe.outputName .. (i.tier or "") end },
     cost   = { firstDescending = false, value = function(i) return i.info.cost end },
@@ -81,7 +93,7 @@ local SORTS = {
     profit = { firstDescending = true,  value = function(i) return i.info.profit end },
     margin = { firstDescending = true,  value = function(i) return i.info.margin end },
     conc   = { firstDescending = false, value = function(i) return i.info.concentrate and i.info.concentration or nil end },
-    gpc    = { firstDescending = true,  value = function(i) return i.info.concentrate and i.info.concentrationValue or nil end },
+    gpc    = { firstDescending = true,  value = function(i) return GoldPerConc(i.info) end },
     demand = { firstDescending = true,  value = function(i) return i.info.demand end },
     saleRate = { firstDescending = true, value = function(i) return i.info.saleRate end },
 }
@@ -185,10 +197,10 @@ local function FillCraftRow(row, item)
         if info.concentrate then
             cells.conc:SetText(string.format("%d", info.concentration))
             cells.conc:SetTextColor(addon:Color("conc"))
-            if info.concentrationValue then
-                cells.gpc:SetText(Money(info.concentrationValue))
-                local good = info.concentrationValue > 0 and info.profit and info.profit > 0
-                cells.gpc:SetTextColor(addon:Color(good and "conc" or "loss"))
+            local perPoint = GoldPerConc(info)
+            if perPoint then
+                cells.gpc:SetText(perPoint < 0 and Signed(perPoint) or Money(perPoint))
+                cells.gpc:SetTextColor(addon:Color(perPoint > 0 and "conc" or "loss"))
             else
                 cells.gpc:SetText("-")
                 cells.gpc:SetTextColor(addon:Color("dim"))
@@ -364,8 +376,11 @@ local function CraftTooltip(tooltip, item)
     if info.concentrate then
         tooltip:AddLine(" ")
         Line(tooltip, "Concentration", string.format("about %d per craft", info.concentration), "conc")
-        if info.concentrationValue then
-            Line(tooltip, "Worth", Money(info.concentrationValue) .. " per point", "conc")
+        local perPoint = GoldPerConc(info)
+        if perPoint and perPoint < 0 then
+            Line(tooltip, "Worth", Signed(perPoint) .. " per point: the craft loses gold", "loss")
+        elseif perPoint then
+            Line(tooltip, "Worth", Money(perPoint) .. " per point", "conc")
         end
     end
 
