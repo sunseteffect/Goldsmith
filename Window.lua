@@ -3,13 +3,15 @@ local UI = addon.UI
 
 -- The window
 --
--- A header (title, profession and date filters, where prices come from,
--- settings), six tabs, and the tab's screen below. Each screen is a view
--- registered with addon:RegisterView; the window creates it the first time
--- its tab is opened and refreshes it when shown or when data changes.
+-- A header (title, profession, date and expansion filters, where prices
+-- come from, settings), six tabs, and the tab's screen below. Each screen
+-- is a view registered with addon:RegisterView; the window creates it the
+-- first time its tab is opened and refreshes it when shown or when data
+-- changes.
 --
 -- Remembered in GoldsmithDB.ui2: position, open or closed, tab,
--- profession ("All" or one) and date range key.
+-- profession ("All" or one), date range key and expansions (see
+-- IsExpansionShown).
 
 local WIDTH, HEIGHT = 900, 710
 -- Height left for a tab's content (header, tabs and padding taken off)
@@ -328,6 +330,31 @@ function addon:CreateWindow()
     end)
     rangeButton:SetPoint("LEFT", professionButton, "RIGHT", 8, 0)
 
+    -- Which expansions' items every tab lists (IsExpansionShown); starts on
+    -- the current one
+    local expansionButton = UI.Dropdown(header, 130, function(root)
+        root:CreateTitle("Show items from")
+        for _, expansionID in ipairs(addon:GetFilterExpansions()) do
+            root:CreateCheckbox(addon:GetExpansionName(expansionID),
+                function() return addon:IsExpansionShown(expansionID) end,
+                function()
+                    addon:SetExpansionShown(expansionID, not addon:IsExpansionShown(expansionID))
+                    Refresh()
+                end)
+        end
+        root:CreateDivider()
+        root:CreateButton("Current expansion only", function()
+            ui.expansions = nil
+            Refresh()
+        end)
+        root:CreateButton("All expansions", function()
+            ui.expansions = {}
+            for _, expansionID in ipairs(addon:GetFilterExpansions()) do ui.expansions[expansionID] = true end
+            Refresh()
+        end)
+    end)
+    expansionButton:SetPoint("LEFT", rangeButton, "RIGHT", 8, 0)
+
     local closeButton = UI.IconButton(header, 34, "X", "Close (Esc)", function() frame:Hide() end,
         { font = "close", hoverColor = "loss" })
     closeButton:SetPoint("RIGHT", -8, 0)
@@ -345,8 +372,12 @@ function addon:CreateWindow()
         tooltip:AddLine("Costs, prices and thresholds, item tooltips, chat messages, which characters count, and Help.", 0.8, 0.8, 0.8, true)
     end, "ANCHOR_BOTTOM")
 
+    -- Between the filters and Settings, on two lines when it doesn't fit
     local priceText = UI.Text(header, "small", "muted", "RIGHT")
+    priceText:SetPoint("LEFT", expansionButton, "RIGHT", 12, 0)
     priceText:SetPoint("RIGHT", settingsButton, "LEFT", -12, 0)
+    priceText:SetWordWrap(true)
+    priceText:SetMaxLines(2)
 
     -- Tabs
     local tabArea = UI.Panel(frame, "header")
@@ -437,6 +468,7 @@ function addon:CreateWindow()
 
         professionButton:SetLabel(ProfessionLabel(ui.profession))
         rangeButton:SetLabel(addon:GetDateRange(ui.range).label)
+        expansionButton:SetLabel(addon:ExpansionFilterLabel())
         local text, color = PriceSourceText()
         priceText:SetText(text)
         priceText:SetTextColor(addon:Color(color))

@@ -4,8 +4,9 @@ local UI = addon.UI
 -- History tab
 --
 -- "What happened?" Every sale, purchase, AH deposit and craft, newest
--- first. Filter by type (the chips) and character; the header's profession
--- and date filters apply too. Click an entry for its item's page;
+-- first. Filter by type (the chips) and character; the header's
+-- profession, date and expansion filters apply too (not to one item's
+-- history, from its page). Click an entry for its item's page;
 -- right-click to assign the item to a profession or delete the entry
 -- (carried over from v1's Log). The rows come from GetHistory
 -- (Insights.lua).
@@ -291,7 +292,7 @@ local function Refresh(view, state)
     })
     view.list:SetEmptyText(#addon.ledger:getAll() == 0
         and "Nothing recorded yet. Purchases, sales and AH deposits are recorded as you make them."
-        or "Nothing matches. Try another type, All characters, or a longer date range at the top.")
+        or "Nothing matches. Try another type, All characters, or a longer date range or All expansions at the top.")
     view.list:SetItems(rows)
     state.loading:Done(view.list)
     view.summary:SetText(string.format("%d entr%s  ·  in %s  ·  out %s", #rows, #rows == 1 and "y" or "ies",

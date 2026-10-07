@@ -170,16 +170,19 @@ end
 
 -- Materials with enough history, for the Deals tab, and the earliest date
 -- any history was saved (so the tab can say how long until it's ready).
--- prof filters to one profession's materials, or "All". Vendor items are
--- left out. Kept until data changes (the Overview asks every time it's
--- shown); callers mustn't change the list or its entries.
+-- prof filters to one profession's materials, or "All". Vendor items and
+-- materials the expansion filter hides (IsItemShown) are left out (user,
+-- 2026-10-06: old pigments and Darkmoon decks filled the list). Kept until
+-- data changes (the Overview asks every time it's shown); callers mustn't
+-- change the list or its entries.
 local dealsCache = addon:NewCache()
 local Deals
 
 function addon:GetDeals(prof)
     local store = dealsCache:Get()
-    store[prof] = store[prof] or { Deals(prof) }
-    return store[prof][1], store[prof][2], store[prof][3]
+    local id = prof .. "|" .. addon:ExpansionFilterKey()
+    store[id] = store[id] or { Deals(prof) }
+    return store[id][1], store[id][2], store[id][3]
 end
 
 Deals = function(prof)
@@ -193,10 +196,12 @@ Deals = function(prof)
             if not earliest or day < earliest then earliest = day end
         end
     end
+    local everything = addon:AllExpansionsShown()
     for itemID, name in pairs(addon:GetTrackedMaterials()) do
         addon:Yield()
         local materialProf = GoldsmithDB.reagents[name]
-        if (prof == "All" or materialProf == prof) and not addon:IsVendorItem(itemID) then
+        if (prof == "All" or materialProf == prof) and not addon:IsVendorItem(itemID)
+            and (everything or addon:IsItemShown(itemID, name)) then
             local insight = addon:GetPriceInsight(itemID)
             if insight then
                 insight.itemID = itemID

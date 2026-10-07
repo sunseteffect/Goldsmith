@@ -580,6 +580,40 @@ local function RecipesByMaterial()
     return byMaterial
 end
 
+-- GetOutputRecipes, kept until data changes
+local outputsCache = addon:NewCache()
+local function OutputRecipes()
+    local store = outputsCache:Get()
+    if not store.outputs then store.outputs = GetOutputRecipes() end
+    return store.outputs
+end
+
+-- Whether an item passes the expansion filter (IsExpansionShown): shown
+-- if its own expansion is shown, if it's made by a recipe from a shown
+-- expansion (Enchanting Vellum: a Classic recipe, a Midnight item), or if
+-- a recipe from a shown expansion uses it (older materials still in use).
+-- name is used when there's no item ID. An expansion not known yet counts
+-- as shown, so an item is only hidden when something known says it's from
+-- a hidden expansion and nothing says otherwise.
+-- Callers can skip this when addon:AllExpansionsShown().
+function addon:IsItemShown(itemID, name)
+    local known = false
+    local function Shown(expansionID)
+        if expansionID == nil then return false end
+        known = true
+        return addon:IsExpansionShown(expansionID)
+    end
+    local recipe = (itemID and OutputRecipes()[itemID]) or (name and addon:FindRecipeByOutput(name))
+    if recipe and Shown(addon:GetRecipeExpansion(recipe)) then return true end
+    if itemID then
+        if Shown(addon:GetItemExpansion(itemID)) then return true end
+        for _, r in pairs(RecipesByMaterial()[itemID] or {}) do
+            if Shown(addon:GetRecipeExpansion(r)) then return true end
+        end
+    end
+    return not known
+end
+
 -- Recipes a material goes into, that a counted character knows, each made
 -- by whoever makes it best, with its profit without concentration. Only
 -- crafts worth recommending (WhyNotRecommended): gear nobody buys and
@@ -1140,7 +1174,7 @@ local ItemBoards
 
 function addon:GetItemBoards(prof, rangeKey)
     local store = boardsCache:Get()
-    local id = prof .. "|" .. tostring(rangeKey)
+    local id = prof .. "|" .. tostring(rangeKey) .. "|" .. addon:ExpansionFilterKey()
     store[id] = store[id] or ItemBoards(prof, rangeKey)
     return store[id]
 end
@@ -1150,10 +1184,12 @@ ItemBoards = function(prof, rangeKey)
     local _, byName = ItemIndex()
     local sold = SalesByItem(prof, since)
 
+    local everything = addon:AllExpansionsShown()
+    local function Shown(itemID, name) return everything or addon:IsItemShown(itemID, name) end
     local list = {}
     for _, item in pairs(sold) do
         item.itemID = byName[item.name] and byName[item.name][#byName[item.name]]
-        if item.salesCount > 0 then table.insert(list, item) end
+        if item.salesCount > 0 and Shown(item.itemID, item.name) then table.insert(list, item) end
     end
     -- Days the range covers: all time counts from your first sale
     local first
@@ -1180,12 +1216,14 @@ ItemBoards = function(prof, rangeKey)
         held = {},
     }
     local stock = addon:GetStockValue(prof)
-    for i = 1, math.min(#stock.heldLong, BOARD_SIZE) do
-        local item = stock.heldLong[i]
-        table.insert(boards.held, {
-            name = item.name, itemID = item.itemID, count = item.count, value = item.value,
-            days = math.floor((time() - item.heldSince) / 86400),
-        })
+    for _, item in ipairs(stock.heldLong) do
+        if #boards.held >= BOARD_SIZE then break end
+        if Shown(item.itemID, item.name) then
+            table.insert(boards.held, {
+                name = item.name, itemID = item.itemID, count = item.count, value = item.value,
+                days = math.floor((time() - item.heldSince) / 86400),
+            })
+        end
     end
     return boards
 end
@@ -1199,12 +1237,14 @@ function addon:SearchItems(text, prof, limit)
     local list = {}
     -- The index is never changed once built, so pairs() is safe while the
     -- work waits for a frame
+    local everything = addon:AllExpansionsShown()
     local n = 0
     for name, ids in pairs(byName) do
         n = n + 1
         if n % 256 == 0 then addon:Yield() end
         local profession = byID[ids[#ids]].profession
-        if name:lower():find(needle, 1, true) and (prof == "All" or profession == prof) then
+        if name:lower():find(needle, 1, true) and (prof == "All" or profession == prof)
+            and (everything or addon:IsItemShown(ids[#ids], name)) then
             for _, id in ipairs(ids) do
                 table.insert(list, { name = name, itemID = id, tier = byID[id].tier, profession = profession })
             end
@@ -1367,8 +1407,9 @@ local History
 
 function addon:GetHistory(filters)
     local store = historyCache:Get()
-    local id = string.format("%s|%s|%s|%s|%s", tostring(filters.prof), tostring(filters.since),
-        tostring(filters.kind), tostring(filters.character), tostring(filters.item))
+    local id = string.format("%s|%s|%s|%s|%s|%s", tostring(filters.prof), tostring(filters.since),
+        tostring(filters.kind), tostring(filters.character), tostring(filters.item),
+        filters.item and "" or addon:ExpansionFilterKey())
     store[id] = store[id] or { History(filters) }
     return store[id][1], store[id][2]
 end
@@ -1397,19 +1438,30 @@ History = function(filters)
         if recipes[e.item] == nil then recipes[e.item] = addon:FindRecipeByOutput(e.item) ~= nil end
         return recipes[e.item] and not (firstCraft[e.item] and firstCraft[e.item] <= e.timestamp)
     end
-    local function Keep(kind, t, item, profession, character)
+    -- The expansion filter, except for one item's history (from its page)
+    local everything = filters.item ~= nil or addon:AllExpansionsShown()
+    local shown = {}
+    local function Shown(itemID, name)
+        if everything then return true end
+        local key = itemID or name
+        if key == nil then return true end
+        if shown[key] == nil then shown[key] = addon:IsItemShown(itemID, name) end
+        return shown[key]
+    end
+    local function Keep(kind, t, item, profession, character, itemID)
         return (not filters.kind or filters.kind == kind)
             and (not filters.since or t >= filters.since)
             and (not filters.item or filters.item == item)
             and (filters.prof == "All" or profession == filters.prof)
             and (not filters.character or filters.character == character)
+            and Shown(itemID, item)
     end
 
     for i, e in ipairs(addon.ledger:getAll()) do
         if i % 64 == 0 then addon:Yield() end
         local kind = e.type == "REVENUE" and "Sale" or (e.kind == "DEPOSIT" and "Deposit" or "Purchase")
         local character = e.character and e.realm and (e.character .. "-" .. e.realm)
-        if Keep(kind, e.timestamp, e.item, e.profession, character) then
+        if Keep(kind, e.timestamp, e.item, e.profession, character, e.itemID) then
             local row = {
                 kind = kind, time = e.timestamp, item = e.item, itemID = e.itemID, qty = e.quantity,
                 gold = kind == "Sale" and e.totalCopper or -e.totalCopper,
@@ -1442,7 +1494,7 @@ History = function(filters)
             for _, lot in ipairs(lots) do
                 local recipe = lot.name and addon:FindRecipeByOutput(lot.name)
                 local profession = recipe and recipe.profession or addon:GetProfessionForItemName(lot.name or "")
-                if lot.name and Keep("Craft", lot.time, lot.name, profession, nil) then
+                if lot.name and Keep("Craft", lot.time, lot.name, profession, nil, itemID) then
                     table.insert(rows, {
                         kind = "Craft", time = lot.time, item = lot.name, itemID = itemID, qty = lot.qty,
                         cost = lot.unitCost, partial = lot.partial, profession = profession, lot = lot,
@@ -1453,7 +1505,7 @@ History = function(filters)
         for _, lot in ipairs(GoldsmithDB.orderCrafts or {}) do
             local recipe = lot.name and addon:FindRecipeByOutput(lot.name)
             local profession = recipe and recipe.profession or addon:GetProfessionForItemName(lot.name or "")
-            if lot.name and Keep("Order", lot.time, lot.name, profession, nil) then
+            if lot.name and Keep("Order", lot.time, lot.name, profession, nil, lot.itemID) then
                 -- The commission is gold in; profit adds the materials you
                 -- kept and sellable rewards, less your own materials
                 -- (orders saved before commissions were recorded have neither)

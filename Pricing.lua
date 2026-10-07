@@ -676,6 +676,73 @@ function addon:GetRecipeExpansion(recipe)
     return addon:GetItemExpansion(recipe.outputItemID)
 end
 
+-- Expansion filter: the header's "Show items from", followed by every tab
+-- that lists items (user, 2026-10-06: the current expansion is always the
+-- most profitable). GoldsmithDB.ui2.expansions is a set of expansion IDs to
+-- show; until it's changed, only the current expansion is shown. An
+-- expansion that isn't known yet (nil) is shown until its data loads.
+-- Recommendations stay current-expansion only whatever this says
+-- (WhyNotRecommended).
+
+function addon:IsExpansionShown(expansionID)
+    if expansionID == nil then return true end
+    local selected = GoldsmithDB.ui2 and GoldsmithDB.ui2.expansions
+    if not selected then return expansionID == addon:GetCurrentExpansion() end
+    return selected[expansionID] == true
+end
+
+function addon:SetExpansionShown(expansionID, shown)
+    local ui = GoldsmithDB.ui2
+    ui.expansions = ui.expansions or { [addon:GetCurrentExpansion()] = true }
+    ui.expansions[expansionID] = shown or nil
+end
+
+-- Expansions with at least one saved (sellable) recipe, newest first; the
+-- current expansion is always offered. By the recipe's expansion, not the
+-- item's (see GetRecipeExpansion).
+function addon:GetFilterExpansions()
+    local seen, list = {}, {}
+    for _, recipe in pairs(GoldsmithDB.recipes) do
+        local expansionID = addon:GetRecipeExpansion(recipe)
+        if expansionID and not seen[expansionID] and addon:CanAuction(recipe.outputItemID) ~= false then
+            seen[expansionID] = true
+            table.insert(list, expansionID)
+        end
+    end
+    local current = addon:GetCurrentExpansion()
+    if not seen[current] then table.insert(list, current) end
+    table.sort(list, function(a, b) return a > b end)
+    return list
+end
+
+-- True when every offered expansion is shown, so filtering can be skipped
+function addon:AllExpansionsShown()
+    for _, expansionID in ipairs(addon:GetFilterExpansions()) do
+        if not addon:IsExpansionShown(expansionID) then return false end
+    end
+    return true
+end
+
+function addon:ExpansionFilterLabel()
+    local shown = {}
+    for _, expansionID in ipairs(addon:GetFilterExpansions()) do
+        if addon:IsExpansionShown(expansionID) then table.insert(shown, expansionID) end
+    end
+    if #shown == 1 then return addon:GetExpansionName(shown[1]) end
+    if addon:AllExpansionsShown() then return "All expansions" end
+    return string.format("Expansions (%d)", #shown)
+end
+
+-- The filter as text, for cache keys
+function addon:ExpansionFilterKey()
+    local selected = GoldsmithDB.ui2 and GoldsmithDB.ui2.expansions
+    if not selected then return "current" end
+    local ids = {}
+    for expansionID in pairs(selected) do table.insert(ids, expansionID) end
+    table.sort(ids)
+    return table.concat(ids, ",")
+end
+
 -- Whether an item can be listed on the AH, from its bind type. Bind on
 -- pickup, quest items and account/warband-bound items can't be. Returns nil
 -- if the item isn't in the game's cache yet (it's requested for next time).
@@ -1812,7 +1879,7 @@ function addon:AddRecipeTooltipLines(tooltip, recipe, itemID, showBreakdown, sho
     if short then return end
 
     if info.demand then
-        local r, g, b = addon:Color(addon:DemandColor(info.demand, data.id))
+        local r, g, b = addon:Color(addon:DemandColor(info.demand, itemID))
         tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r sold per day",
             string.format("%s (%s)", addon:FormatDemand(info.demand), info.demandSource), 1, 1, 1, r, g, b)
     end

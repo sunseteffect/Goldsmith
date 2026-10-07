@@ -1023,8 +1023,10 @@ local function Refresh(v, state)
         local stock = addon:GetStockValue(state.profession)
         local items, value = {}, 0
         local needle = search:lower()
+        local everything = addon:AllExpansionsShown()
         for _, item in ipairs(stock.items) do
-            if needle == "" or item.name:lower():find(needle, 1, true) then
+            if (needle == "" or item.name:lower():find(needle, 1, true))
+                and (everything or addon:IsItemShown(item.itemID, item.name)) then
                 table.insert(items, item)
                 value = value + item.value
             end

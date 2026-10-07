@@ -67,50 +67,6 @@ local function CharName(charKey)
     return c and c.name or charKey
 end
 
--- Expansion filter. GoldsmithDB.ui2.expansions is a set of expansion IDs
--- to show; until it's changed, only the current expansion is shown.
-
-local function IsExpansionShown(expansionID)
-    -- Items not in the game's cache yet are shown until their data loads
-    if expansionID == nil then return true end
-    local selected = GoldsmithDB.ui2.expansions
-    if not selected then return expansionID == addon:GetCurrentExpansion() end
-    return selected[expansionID] == true
-end
-
-local function SetExpansionShown(expansionID, shown)
-    local ui = GoldsmithDB.ui2
-    ui.expansions = ui.expansions or { [addon:GetCurrentExpansion()] = true }
-    ui.expansions[expansionID] = shown or nil
-end
-
--- Expansions with at least one saved (sellable) recipe, newest first; the
--- current expansion is always offered. By the recipe's expansion, not the
--- item's (see GetRecipeExpansion).
-local function GetRecipeExpansions()
-    local seen, list = {}, {}
-    for _, recipe in pairs(GoldsmithDB.recipes) do
-        local expansionID = addon:GetRecipeExpansion(recipe)
-        if expansionID and not seen[expansionID] and addon:CanAuction(recipe.outputItemID) ~= false then
-            seen[expansionID] = true
-            table.insert(list, expansionID)
-        end
-    end
-    local current = addon:GetCurrentExpansion()
-    if not seen[current] then table.insert(list, current) end
-    table.sort(list, function(a, b) return a > b end)
-    return list
-end
-
-local function ExpansionLabel()
-    local shown = {}
-    for _, expansionID in ipairs(GetRecipeExpansions()) do
-        if IsExpansionShown(expansionID) then table.insert(shown, expansionID) end
-    end
-    if #shown == 1 then return addon:GetExpansionName(shown[1]) end
-    return string.format("Expansions (%d)", #shown)
-end
-
 -- Sorting. Clicking a header sorts by it; clicking again reverses. Each
 -- column starts the most useful way round (names A-Z, cheapest first,
 -- highest profit first). Rows with no value for the column go last.
@@ -2019,29 +1975,6 @@ local function Create(parent)
     list:SetAllPoints()
     view.listScreen = list
 
-    view.expansion = UI.Dropdown(list, 150, function(root)
-        root:CreateTitle("Show items from")
-        for _, expansionID in ipairs(GetRecipeExpansions()) do
-            root:CreateCheckbox(addon:GetExpansionName(expansionID),
-                function() return IsExpansionShown(expansionID) end,
-                function()
-                    SetExpansionShown(expansionID, not IsExpansionShown(expansionID))
-                    addon.RefreshWindow()
-                end)
-        end
-        root:CreateDivider()
-        root:CreateButton("Current expansion only", function()
-            ui.expansions = nil
-            addon.RefreshWindow()
-        end)
-        root:CreateButton("All expansions", function()
-            ui.expansions = {}
-            for _, expansionID in ipairs(GetRecipeExpansions()) do ui.expansions[expansionID] = true end
-            addon.RefreshWindow()
-        end)
-    end)
-    view.expansion:SetPoint("TOPLEFT", 0, 0)
-
     -- Show: all crafts, profitable ones, or recommended ones (profitable and
     -- they sell: what Do this next would suggest). ui.craftsShow; the old
     -- Profitable only checkbox (ui.profitableOnly) carries over.
@@ -2063,7 +1996,7 @@ local function Create(parent)
                 addon.RefreshWindow()
             end)
     end)
-    view.show:SetPoint("LEFT", view.expansion, "RIGHT", 16, 0)
+    view.show:SetPoint("LEFT", view.searchBox, "RIGHT", 16, 0)
 
     -- Only what the character you're on can make, with their own stats
     view.onlyMine = UI.Checkbox(list, "Only " .. (addon.char.name or "me"), function(checked)
@@ -2085,8 +2018,8 @@ local function Create(parent)
             addon.RefreshWindow()
         end)
     end)
-    -- Far left, before the filters (see Refresh, which moves the filters
-    -- over while it's hidden)
+    -- Far left, before the filters (the focus chip takes its place while
+    -- it's hidden). The expansion filter is in the window's header.
     view.searchBox:SetPoint("TOPLEFT", 0, 0)
 
     -- "Showing: Best crafts right now (5)  x" after following a link from
@@ -2098,8 +2031,9 @@ local function Create(parent)
     UI.Style(view.focusChip, "highlight", "borderGold")
     view.focusChip:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderGold")) end)
     view.focusChip.label:SetTextColor(addon:Color("gold"))
-    -- In place of the two checkboxes, which don't apply while it's showing
-    view.focusChip:SetPoint("LEFT", view.expansion, "RIGHT", 16, 0)
+    -- In place of the search and filters, which don't apply while it's
+    -- showing
+    view.focusChip:SetPoint("TOPLEFT", 0, 0)
 
     view.concSwitch = UI.Switch(list, "Concentration", function(on)
         ui.craftsConcentration = on or nil
@@ -2256,7 +2190,6 @@ local function Refresh(v, state)
     v.concSwitch:SetOn(concOn)
     v.show:SetLabel("Show: " .. ShowLabel(CraftsShow()))
     v.onlyMine:SetChecked(ui.craftsOnlyMine == true)
-    v.expansion:SetLabel(ExpansionLabel())
 
     -- Following a link from the Overview shows just those crafts, whatever
     -- the filters say
@@ -2264,12 +2197,6 @@ local function Refresh(v, state)
     v.show:SetShown(not focus)
     v.onlyMine:SetShown(not focus)
     v.searchBox:SetShown(not focus)
-    v.expansion:ClearAllPoints()
-    if focus then
-        v.expansion:SetPoint("TOPLEFT", 0, 0)
-    else
-        v.expansion:SetPoint("LEFT", v.searchBox, "RIGHT", 16, 0)
-    end
     local needle = not focus and v.search:lower():match("^%s*(.-)%s*$") or ""
     -- One letter matches nearly everything, so a search starts at two
     local searching = #needle >= SEARCH_MIN_LETTERS
@@ -2278,7 +2205,8 @@ local function Refresh(v, state)
         concentration = concOn,
         profitableOnly = show ~= "all",
         onlyMine = not focus and ui.craftsOnlyMine,
-        showExpansion = not focus and not searching and IsExpansionShown or nil,
+        showExpansion = not focus and not searching
+            and function(expansionID) return addon:IsExpansionShown(expansionID) end or nil,
         -- A search finds ignored crafts too, so they're easy to get back
         showIgnored = ui.craftsShowIgnored or searching,
         -- Names are matched before costing, so only matches are worked out
@@ -2328,8 +2256,8 @@ local function Refresh(v, state)
             or "No craft matches. Try All professions at the top, or open the profession that makes it so Goldsmith can load the recipe.")
     else
         v.list:SetEmptyText(ui.craftsOnlyMine
-            and "No crafts match. This character may not know these recipes: untick Only " .. (addon.char.name or "me") .. ", try All expansions, or set Show to All crafts."
-            or "No crafts match. Try All expansions, set Show to All crafts, or pick All professions at the top.")
+            and "No crafts match. This character may not know these recipes: untick Only " .. (addon.char.name or "me") .. ", pick All expansions at the top, or set Show to All crafts."
+            or "No crafts match. Set Show to All crafts, or pick All expansions or All professions at the top.")
     end
     v.list:SetItems(items)
     v.count:SetText(string.format("%d craft%s", #items, #items == 1 and "" or "s"))
