@@ -48,3 +48,6 @@ You can also set keys for opening Goldsmith and for Craft next in the game's Key
 ## Support and feedback
 - Found a bug or have an idea? [Open an issue on GitHub](https://github.com/sunseteffect/Goldsmith/issues). In game, Settings > Support and feedback has the link and a Copy bug report button that gathers the details for you.
 - Goldsmith is free. If it makes you gold and you'd like to say thanks, you can [buy me a coffee on Ko-fi](https://ko-fi.com/sunseteffect).
+
+## License
+All rights reserved. You're welcome to use Goldsmith, read the code, report bugs and suggest changes; copying or republishing it needs permission. See [LICENSE](LICENSE).

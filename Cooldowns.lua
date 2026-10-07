@@ -338,7 +338,7 @@ end
 -- Older expansions' cooldowns saved before they were left out. Run after
 -- login, not while the addon loads: on a fresh start the game may not report
 -- the current expansion yet, and Midnight's cooldowns were deleted as older
--- (2026-10-06, Mysticmead's Mote of Wild Magic).
+-- (2026-10-06, an alt's Mote of Wild Magic).
 local function PruneOlder()
     for _, c in pairs(GoldsmithDB.characters) do
         for recipeID, entry in pairs(c.cooldowns or {}) do

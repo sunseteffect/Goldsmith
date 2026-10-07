@@ -9,17 +9,27 @@
 # one in its place (Make-StressData.lua). -Restore keeps the fake file,
 # with the /gsm perf results in it, as Goldsmith.stress-results.lua, and
 # puts Goldsmith.real.lua back. Anything you do in game in between is lost.
+# The account folder is found by itself (the one with Goldsmith's saved
+# data); with several, pass -Account <folder name under WTF\Account>.
 param(
     [switch]$Use,
     [switch]$Restore,
     [int]$Characters = 24,
     [int]$Days = 365,
     [int]$Entries = 20000,
-    [string]$Account = 'SUNSETEFFECT'
+    [string]$Account
 )
 $ErrorActionPreference = 'Stop'
 
 $wow = Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')
+if (-not $Account) {
+    $found = @(Get-ChildItem (Join-Path $wow 'WTF\Account') -Directory |
+        Where-Object { Test-Path (Join-Path $_.FullName 'SavedVariables\Goldsmith.lua') })
+    if ($found.Count -ne 1) {
+        throw "Found $($found.Count) accounts with Goldsmith data. Pass -Account <folder name under WTF\Account>."
+    }
+    $Account = $found[0].Name
+}
 $saved = Join-Path $wow "WTF\Account\$Account\SavedVariables"
 $data = Join-Path $saved 'Goldsmith.lua'
 $backup = Join-Path $saved 'Goldsmith.real.lua'
