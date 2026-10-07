@@ -610,6 +610,8 @@ end)
 -- made recommendations flicker. They're remembered once seen, in
 -- GoldsmithDB.itemFacts[itemID] = { expansion, bind }.
 local function ItemFacts(itemID)
+    -- Some rows have no item (a recipe without one)
+    if not itemID then return nil end
     GoldsmithDB.itemFacts = GoldsmithDB.itemFacts or {}
     local facts = GoldsmithDB.itemFacts[itemID]
     if facts then return facts end
@@ -682,7 +684,8 @@ end
 -- show; until it's changed, only the current expansion is shown. An
 -- expansion that isn't known yet (nil) is shown until its data loads.
 -- Recommendations stay current-expansion only whatever this says
--- (WhyNotRecommended).
+-- (WhyNotRecommended), except on the Crafts tab, where picking an older
+-- expansion judges its crafts on their sales.
 
 function addon:IsExpansionShown(expansionID)
     if expansionID == nil then return true end

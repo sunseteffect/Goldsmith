@@ -10,7 +10,10 @@ local UI = addon.UI
 -- case and what yours cost you. Clicking a craft opens the planner.
 --
 -- Crafts the Overview wouldn't recommend (old expansion, slow sellers) are
--- shown dimmed with the reason in the hover, so the two tabs agree.
+-- shown dimmed with the reason in the hover, so the two tabs agree. Shows
+-- Recommended by default. Crafts say their expansion after the name when
+-- the list can mix expansions (a search, or several picked in the header);
+-- with an older expansion picked its crafts are judged on sales.
 -- The numbers come from GetCraftRows (Insights.lua), GetTierRows
 -- (Quality.lua) and BuildPlan (Planner.lua).
 
@@ -121,7 +124,14 @@ local WHO_INDENT = 18
 
 local function FillCraftRow(row, item)
     local info, cells = item.info, row.cells
-    cells.item:SetText(ItemText(item) .. (item.ignored and addon:Colorize("  ignored", "dim") or ""))
+    -- Which expansion it's from (by the recipe's expansion; salvage by
+    -- what's salvaged), when the list can hold more than one: a search, or
+    -- several expansions picked at the top
+    local expansionID = item.labelExpansion and (item.salvage and addon:GetItemExpansion(item.itemID)
+        or addon:GetRecipeExpansion(item.recipe))
+    local label = expansionID
+        and addon:Colorize("  " .. addon:GetExpansionName(expansionID), "expansion") or ""
+    cells.item:SetText(ItemText(item) .. label .. (item.ignored and addon:Colorize("  ignored", "dim") or ""))
     if item.ignored then
         cells.item:SetTextColor(addon:Color("dim"))
     elseif item.whyNot then
@@ -347,6 +357,25 @@ local function CraftTooltip(tooltip, item)
         Line(tooltip, "Concentration", string.format("about %d per craft", info.concentration), "conc")
         if info.concentrationValue then
             Line(tooltip, "Worth", Money(info.concentrationValue) .. " per point", "conc")
+        end
+    end
+
+    -- Higher tiers only concentration reaches aren't listed while the
+    -- Concentration switch is off: say they exist
+    if item.tier and not info.concentrate and GoldsmithDB.ui2.craftsConcentration ~= true then
+        local rows = addon:WithCharacter(item.charKey, addon.GetTierRows, addon, recipe) or {}
+        local plainTiers = {}
+        for _, row in ipairs(rows) do
+            if not row.concentrate then plainTiers[row.tier] = true end
+        end
+        local shown = false
+        for _, row in ipairs(rows) do
+            if row.concentrate and row.tier > item.tier and not plainTiers[row.tier] then
+                if not shown then tooltip:AddLine(" ") shown = true end
+                Note(tooltip, string.format("%s tier needs concentration: about %d per craft, %s profit each. Turn on Concentration (top right) to see it.",
+                    addon:TierIconText(row.tier, row.tierCount), row.concentration or 0,
+                    row.profit and Signed(row.profit) or "no price"), "conc")
+            end
         end
     end
 
@@ -1954,10 +1983,11 @@ local SHOW_CHOICES = {
     { value = "recommended", label = "Recommended" },
 }
 
--- The Show filter, with the old Profitable only checkbox carried over
+-- The Show filter, with the old Profitable only checkbox carried over.
+-- Recommended until changed (user, 2026-10-07).
 local function CraftsShow()
     local ui = GoldsmithDB.ui2
-    return ui.craftsShow or (ui.profitableOnly and "profitable") or "all"
+    return ui.craftsShow or (ui.profitableOnly and "profitable") or "recommended"
 end
 
 local function ShowLabel(value)
@@ -1996,14 +2026,12 @@ local function Create(parent)
                 addon.RefreshWindow()
             end)
     end)
-    view.show:SetPoint("LEFT", view.searchBox, "RIGHT", 16, 0)
 
     -- Only what the character you're on can make, with their own stats
     view.onlyMine = UI.Checkbox(list, "Only " .. (addon.char.name or "me"), function(checked)
         ui.craftsOnlyMine = checked or nil
         addon.RefreshWindow()
     end)
-    view.onlyMine:SetPoint("LEFT", view.show, "RIGHT", 16, 0)
 
     -- Search by craft or salvage name. Ignores the expansion and Profitable
     -- only filters, so whatever you type for is found. Waits for a pause in
@@ -2021,6 +2049,10 @@ local function Create(parent)
     -- Far left, before the filters (the focus chip takes its place while
     -- it's hidden). The expansion filter is in the window's header.
     view.searchBox:SetPoint("TOPLEFT", 0, 0)
+    -- Then Show and Only <name> to its right (anchored here: the search box
+    -- has to exist first)
+    view.show:SetPoint("LEFT", view.searchBox, "RIGHT", 16, 0)
+    view.onlyMine:SetPoint("LEFT", view.show, "RIGHT", 16, 0)
 
     -- "Showing: Best crafts right now (5)  x" after following a link from
     -- the Overview; click to show everything again
@@ -2061,12 +2093,12 @@ local function Create(parent)
         -- One short line per choice; the detail is in each craft's hover
         tooltip:AddLine("Show", 1, 1, 1)
         local minROI = addon:Setting("minROI")
-        Line(tooltip, "All crafts", "everything you can make")
-        Line(tooltip, "Profitable", minROI > 0 and string.format("%d%%+ ROI at AH prices", minROI) or "makes gold at AH prices")
         Line(tooltip, "Recommended", "profitable, and it sells")
+        Line(tooltip, "Profitable", minROI > 0 and string.format("%d%%+ ROI at AH prices", minROI) or "makes gold at AH prices")
+        Line(tooltip, "All crafts", "everything you can make")
         Line(tooltip, "Show ignored", "adds your ignored crafts")
         tooltip:AddLine(" ")
-        Note(tooltip, "Recommended is what Do this next suggests. Hover a greyed-out craft for why it isn't.")
+        Note(tooltip, "Recommended is what Do this next suggests. Pick older expansions at the top to judge their crafts on sales too. Hover a greyed-out craft for why it isn't recommended.")
     end)
     Explain(view.searchBox, function(tooltip)
         tooltip:AddLine("Find a craft", 1, 1, 1)
@@ -2207,6 +2239,7 @@ local function Refresh(v, state)
         onlyMine = not focus and ui.craftsOnlyMine,
         showExpansion = not focus and not searching
             and function(expansionID) return addon:IsExpansionShown(expansionID) end or nil,
+        shownExpansions = true,
         -- A search finds ignored crafts too, so they're easy to get back
         showIgnored = ui.craftsShowIgnored or searching,
         -- Names are matched before costing, so only matches are worked out
@@ -2229,6 +2262,17 @@ local function Refresh(v, state)
             if not item.whyNot and not item.info.partial then table.insert(kept, item) end
         end
         items = kept
+    end
+    local mixed = searching or focus ~= nil
+    if not mixed then
+        local shown = 0
+        for _, expansionID in ipairs(addon:GetFilterExpansions()) do
+            if addon:IsExpansionShown(expansionID) then shown = shown + 1 end
+        end
+        mixed = shown > 1
+    end
+    if mixed then
+        for _, item in ipairs(items) do item.labelExpansion = true end
     end
     if focus then
         local kept = {}
@@ -2254,6 +2298,8 @@ local function Refresh(v, state)
         v.list:SetEmptyText(ui.craftsOnlyMine
             and "No craft matches. " .. (addon.char.name or "This character") .. " may not know it: untick Only " .. (addon.char.name or "me") .. ", or pick All professions at the top."
             or "No craft matches. Try All professions at the top, or open the profession that makes it so Goldsmith can load the recipe.")
+    elseif show == "recommended" then
+        v.list:SetEmptyText("Nothing to recommend right now: no craft both makes a profit and sells. Set Show to Profitable or All crafts, or pick more expansions at the top.")
     else
         v.list:SetEmptyText(ui.craftsOnlyMine
             and "No crafts match. This character may not know these recipes: untick Only " .. (addon.char.name or "me") .. ", pick All expansions at the top, or set Show to All crafts."

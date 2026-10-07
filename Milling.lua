@@ -505,10 +505,22 @@ end
 --     procMeasured, unitPrice, outputs = { { itemID, perCast, unit, value } },
 --     sample, sampleFrom }
 -- opts as for GetCraftRows (profitableOnly, onlyMine, showExpansion, match).
--- match gets the salvaged item's name and what it gives (Powder Pigment
--- finds Tranquility Bloom).
-local function SalvageNames(itemID, record)
-    local names = { record.name or C_Item.GetItemNameByID(itemID) }
+-- match gets the salvaged item's name, the row's name ("Prospect Umbral Tin
+-- Ore", so "prospect" finds every prospecting row) and what it gives
+-- (Powder Pigment finds Tranquility Bloom).
+local function SalvageNames(itemID, record, byChar)
+    local name = record.name or C_Item.GetItemNameByID(itemID)
+    local names = { name }
+    if name then
+        -- Every verb a row for it can show (from each character's salvage
+        -- spell, as the row does), so "crush" finds Crush 3 Amani Lapis
+        local seen = {}
+        for _, run in pairs(byChar or {}) do
+            seen[SalvageVerb(run.recipeID, record.profession or "Inscription")] = true
+        end
+        if not next(seen) then seen[SalvageVerb(nil, record.profession or "Inscription")] = true end
+        for verb in pairs(seen) do table.insert(names, verb .. " " .. name) end
+    end
     for id, out in pairs(record.outputs or {}) do
         table.insert(names, out.name or C_Item.GetItemNameByID(id))
     end
@@ -528,7 +540,7 @@ function addon:GetSalvageRows(prof, opts)
         local byChar = totals[itemID]
         local charKey = (record.milled or 0) > 0 and (prof == "All" or profession == prof)
             and (not opts.showExpansion or opts.showExpansion(addon:GetItemExpansion(itemID)))
-            and (not opts.match or opts.match(SalvageNames(itemID, record)))
+            and (not opts.match or opts.match(SalvageNames(itemID, record, byChar)))
             and SalvagerFor(profession, byChar, opts.onlyMine)
         local mine = charKey and byChar and byChar[charKey]
         if charKey and (not opts.onlyMine or mine or addon.char.professions[profession]) then

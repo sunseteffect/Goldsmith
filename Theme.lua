@@ -38,6 +38,9 @@ addon.themes = {
             muted       = Hex("9a9ca6"),
             dim         = Hex("7c7e88"),
             gold        = Hex("e8c25a"),
+            -- The expansion after a craft's name (Crafts): its own
+            -- color, so it still reads on a greyed-out row
+            expansion   = Hex("7fa7d9"),
 
             profit      = Hex("5fcf7b"),
             loss        = Hex("e5645a"),

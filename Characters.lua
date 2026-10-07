@@ -432,7 +432,8 @@ end
 -- warband bank, at the end of each of the last `days` days (oldest first).
 -- A character's gold on a day without
 -- a record is its most recent earlier record; before its first record it
--- counts as nothing. Returns { { day, copper } }.
+-- counts as nothing. Returns { { day, copper, warband, characters } },
+-- characters = { { key, copper } } with gold that day, most first.
 local function ValueOn(history, day)
     local best, bestDay
     for d, value in pairs(history) do
@@ -447,11 +448,17 @@ function addon:GetAccountGoldHistory(days)
     local list = {}
     for i = days - 1, 0, -1 do
         local day = date("%Y-%m-%d", time() - i * 86400)
-        local total = ValueOn(GoldsmithDB.warbandGold, day)
+        local warband = ValueOn(GoldsmithDB.warbandGold, day)
+        local total, characters = warband, {}
         for key, c in pairs(GoldsmithDB.characters) do
-            if addon:IsCharacterIncluded(key) then total = total + ValueOn(c.gold, day) end
+            if addon:IsCharacterIncluded(key) then
+                local copper = ValueOn(c.gold, day)
+                total = total + copper
+                if copper > 0 then table.insert(characters, { key = key, copper = copper }) end
+            end
         end
-        table.insert(list, { day = day, copper = total })
+        table.sort(characters, function(a, b) return a.copper > b.copper end)
+        table.insert(list, { day = day, copper = total, warband = warband, characters = characters })
     end
     return list
 end

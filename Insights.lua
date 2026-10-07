@@ -47,6 +47,9 @@ local ENOUGH_STOCK_CAP = 20    -- see GetBestCrafts
 -- left out too: most get relisted or expire, so the profit rarely arrives.
 -- Your own profitable sales override that, as for gear.
 -- Items the game hasn't loaded yet are left out until it has.
+-- shownExpansions: the Crafts tab judges older crafts on their sales too
+-- when you've picked their expansion in the header (user, 2026-10-07);
+-- everything else (Do this next, to-dos, concentration) stays current only.
 -- Returns nil if it's worth recommending, otherwise why not (plain words).
 
 -- Your sales over the last 14 days averaged at least what the craft costs
@@ -58,15 +61,16 @@ local function SoldAtProfit(recipe, row)
     return got ~= nil and row.cost ~= nil and got >= row.cost
 end
 
-function addon:WhyNotRecommended(recipe, row)
+function addon:WhyNotRecommended(recipe, row, shownExpansions)
     if addon:IsIgnored(recipe.outputItemID) then
         return "You're ignoring this item. Right-click it to stop, or Settings > Ignored items."
     end
     local itemID = row.itemID or recipe.outputItemID
     local expansion = itemID and addon:GetItemExpansion(itemID)
     if not expansion then return "The game hasn't loaded this item yet." end
-    if expansion ~= addon:GetCurrentExpansion() then
-        return "From an older expansion. Its listings often sit unsold, so the profit may not be real."
+    if expansion ~= addon:GetCurrentExpansion()
+        and not (shownExpansions and addon:IsExpansionShown(addon:GetRecipeExpansion(recipe))) then
+        return "From an older expansion. Its listings often sit unsold, so the profit may not be real. Pick its expansion at the top to judge it on its sales."
     end
     local demand = row.demand or addon:GetDemand(itemID, recipe.outputName)
     if demand == nil then return "No sales data, so there's no telling whether it sells." end
@@ -92,12 +96,27 @@ local function IsRecommendable(recipe, row)
     return addon:WhyNotRecommended(recipe, row) == nil
 end
 
+-- Mass Mill and Mass Prospect recipes report the herb or ore they use up
+-- as what they make (20 Elethium Ore -> 1 Elethium Ore). They're salvage,
+-- shown as salvage rows (Milling.lua), not crafts.
+function addon:IsSalvageRecipe(recipe)
+    local output = recipe.outputItemID
+    if not output then return false end
+    for _, reagent in ipairs(recipe.reagents or {}) do
+        for _, itemID in pairs(reagent.itemIDs or {}) do
+            if itemID == output then return true end
+        end
+    end
+    return false
+end
+
 -- Only current-expansion items are recommended (WhyNotRecommended), so
 -- lists of recommendations skip other recipes before costing them: costing
 -- every expansion's recipes on every character was most of the work
 local function MakesCurrentItem(recipe)
     return recipe.outputItemID ~= nil
         and addon:GetItemExpansion(recipe.outputItemID) == addon:GetCurrentExpansion()
+        and not addon:IsSalvageRecipe(recipe)
 end
 
 -- Crafted items: item ID -> recipe, for every recipe output including each
@@ -881,6 +900,8 @@ end
 -- Costs follow the "Show cost as" setting.
 --   showExpansion  - function(expansionID) -> whether to include it
 --   showIgnored    - include ignored items (Settings > Ignored items)
+--   shownExpansions - older crafts from expansions picked in the header are
+--                    judged on sales, not left out for their age
 --   match          - function(names) -> whether to include it, checked
 --                    before any costing so a search only works out matches
 -- Returns { { key, recipe, info (the tier row or GetRecipeProfit), tier,
@@ -895,6 +916,7 @@ function addon:GetCraftRows(prof, opts)
         if recipe and (prof == "All" or recipe.profession == prof)
             and (not opts.onlyMine or addon.char.knownRecipes[recipeID])
             and addon:CanAuction(recipe.outputItemID) ~= false
+            and not addon:IsSalvageRecipe(recipe)
             and (not opts.showExpansion or opts.showExpansion(addon:GetRecipeExpansion(recipe)))
             and (opts.showIgnored or not addon:IsIgnored(recipe.outputItemID))
             and (not opts.match or opts.match({ recipe.outputName, recipe.name }))
@@ -939,7 +961,7 @@ function addon:GetCraftRows(prof, opts)
                             key = addon:CraftKey(recipeID, info),
                             recipe = recipe, info = info, tier = info.tier, charKey = set.key,
                             itemID = info.itemID or recipe.outputItemID,
-                            whyNot = addon:WhyNotRecommended(recipe, info),
+                            whyNot = addon:WhyNotRecommended(recipe, info, opts.shownExpansions),
                             ignored = addon:IsIgnored(recipe.outputItemID),
                         })
                     end

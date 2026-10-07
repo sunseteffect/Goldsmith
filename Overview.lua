@@ -445,6 +445,19 @@ local function ChartData(key, state)
                 table.insert(points, { value = d.copper, day = d.day, tooltip = function(tooltip)
                     tooltip:AddLine(ShortDay(d.day), 1, 1, 1)
                     tooltip:AddDoubleLine("Total gold", Money(d.copper), 0.8, 0.8, 0.8, 1, 1, 1)
+                    -- Where it is: the warband bank, then each character
+                    -- (class color), most gold first
+                    tooltip:AddLine(" ")
+                    if d.warband > 0 then
+                        tooltip:AddDoubleLine("Warband bank", Money(d.warband), 0.8, 0.8, 0.8, 1, 1, 1)
+                    end
+                    for _, ch in ipairs(d.characters) do
+                        local c = GoldsmithDB.characters[ch.key]
+                        local color = c and c.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[c.class]
+                        local r, g, b = 0.8, 0.8, 0.8
+                        if color then r, g, b = color.r, color.g, color.b end
+                        tooltip:AddDoubleLine((c and c.name) or ch.key, Money(ch.copper), r, g, b, 1, 1, 1)
+                    end
                 end })
             end
         end
