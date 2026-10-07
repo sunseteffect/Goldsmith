@@ -287,7 +287,7 @@ local function SalvageTooltip(tooltip, item)
     if item.whyNot then
         Note(tooltip, "Not recommended: " .. item.whyNot, "warning")
     end
-    Note(tooltip, string.format("Click to plan it (buy or %s?), right-click to queue a batch or open %s's page.",
+    Note(tooltip, string.format("Click to plan it (buy or %s?), right-click to queue a batch, shift-click for %s's page.",
         (item.recipe.outputName:match("^(%S+)") or "Salvage"):lower(), s.inputName), "profit")
 end
 
@@ -385,7 +385,7 @@ local function CraftTooltip(tooltip, item)
     end
     tooltip:AddLine(" ")
     Note(tooltip, "Click to plan: materials, quantity, shopping list", "profit")
-    Note(tooltip, "Right-click to add it to the queue, or for the item's page")
+    Note(tooltip, "Right-click to add it to the queue, shift-click for the item's page")
 end
 
 -- Planner
@@ -2118,6 +2118,23 @@ local function Create(parent)
         fill = FillCraftRow,
         tooltip = CraftTooltip,
         onClick = function(item, button)
+            -- Shift-click: the item's page (salvage: what's salvaged), or
+            -- its link into chat while you're typing a message
+            if IsShiftKeyDown() then
+                local itemID = item.salvage and item.salvage.inputID or item.itemID
+                local name = item.salvage and item.salvage.inputName or item.recipe.outputName
+                local link = itemID and select(2, C_Item.GetItemInfo(itemID))
+                -- Old and newer names of the chat functions
+                local chat = (ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow())
+                    or (ChatFrameUtil and ChatFrameUtil.GetActiveWindow and ChatFrameUtil.GetActiveWindow())
+                local insert = (ChatFrameUtil and ChatFrameUtil.InsertLink) or ChatEdit_InsertLink
+                if chat and link and insert then
+                    insert(link)
+                else
+                    addon:OpenItem(name, itemID)
+                end
+                return
+            end
             if item.salvage then
                 -- Click for the mill planner; right-click to queue a
                 -- batch or open the item's page
@@ -2320,7 +2337,7 @@ local function Refresh(v, state)
         for _, item in ipairs(items) do
             if item.info.partial then partial = true break end
         end
-        v.footnote:SetText("Hover a craft for how its cost is worked out, click it to plan, right-click to queue it."
+        v.footnote:SetText("Hover a craft for how its cost is worked out, click it to plan, right-click to queue it, shift-click for its page."
             .. (partial and "   + some material costs unknown,  * profit is at most this" or ""))
     end
 end
