@@ -972,6 +972,62 @@ function addon:GetCraftRows(prof, opts)
     return list
 end
 
+-- Recipes not learned yet (GoldsmithDB.unlearned, the current expansion's),
+-- for the Crafts tab's "Not learned yet": what each would make if learned
+-- today, costed with the stats of a character who has the profession (the
+-- one you're on first). Never recommended, planned or queued.
+-- opts: onlyMine (only recipes this character could learn), concentration
+-- (add the ways with concentration), match (as for GetCraftRows). Rows as
+-- GetCraftRows', plus unlearned = true.
+function addon:GetUnlearnedRows(prof, opts)
+    local list = {}
+    for _, recipeID in ipairs(addon:Keys(GoldsmithDB.unlearned or {})) do
+        addon:Yield()
+        local recipe = GoldsmithDB.unlearned[recipeID]
+        if recipe and not GoldsmithDB.recipes[recipeID]
+            and (prof == "All" or recipe.profession == prof)
+            and addon:CanAuction(recipe.outputItemID) ~= false
+            and (not opts.match or opts.match({ recipe.outputName, recipe.name })) then
+            -- Who'd learn it: you if you can, otherwise the first counted
+            -- character with the profession
+            local learners = recipe.learners or {}
+            local charKey
+            if learners[addon.charKey] then
+                charKey = addon.charKey
+            elseif not opts.onlyMine then
+                for _, key in ipairs(addon:Keys(learners)) do
+                    if GoldsmithDB.characters[key] and addon:IsCharacterIncluded(key) then
+                        charKey = key
+                        break
+                    end
+                end
+            end
+            if charKey then
+                local rows = addon:WithCharacter(charKey, function()
+                    local tierRows = addon:GetTierRows(recipe)
+                    if not tierRows or #tierRows == 0 then tierRows = { addon:GetRecipeProfit(recipe) } end
+                    local shown = {}
+                    for _, row in ipairs(tierRows) do
+                        if opts.concentration or not row.concentrate then
+                            table.insert(shown, ApplyCostMode(recipe, row))
+                        end
+                    end
+                    return shown
+                end)
+                for _, info in ipairs(rows) do
+                    table.insert(list, {
+                        key = "unlearned:" .. addon:CraftKey(recipeID, info),
+                        recipe = recipe, info = info, tier = info.tier, charKey = charKey,
+                        itemID = info.itemID or recipe.outputItemID,
+                        unlearned = true,
+                    })
+                end
+            end
+        end
+    end
+    return list
+end
+
 -- Gold per hour for each of the last `days` days (oldest first), each
 -- averaged over the 7 days up to it: sales land days after the crafting
 -- time, so single days jump around. Profit is for `prof`; goldmaking time

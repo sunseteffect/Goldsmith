@@ -151,7 +151,8 @@ local function FillCraftRow(row, item)
         row.who:ClearAllPoints()
         row.who:SetPoint("TOPLEFT", cells.item, "BOTTOMLEFT", WHO_INDENT, -2)
         row.who:SetWidth(cells.item:GetWidth() - WHO_INDENT)
-        row.who:SetText((info.concentrate and "concentration on " or "on ") .. CharName(item.charKey))
+        row.who:SetText((item.unlearned and "to learn on " or info.concentrate and "concentration on " or "on ")
+            .. CharName(item.charKey))
         row.who:Show()
     else
         row.who:Hide()
@@ -295,7 +296,15 @@ local function CraftTooltip(tooltip, item)
     if item.salvage then return SalvageTooltip(tooltip, item) end
     local info, recipe = item.info, item.recipe
     tooltip:AddLine(ItemText(item), 1, 1, 1)
-    if item.charKey ~= addon.charKey and info.concentrate then
+    if item.unlearned then
+        -- Not learned yet: what it'd make if learned today, and where
+        Note(tooltip, string.format("Not learned yet. Costed with %s skill and stats as they are now, as if learned today.",
+            item.charKey == addon.charKey and "your" or (CharName(item.charKey) .. "'s")), "warning")
+        if recipe.source then
+            tooltip:AddLine(" ")
+            tooltip:AddLine(recipe.source, 1, 1, 1, true)
+        end
+    elseif item.charKey ~= addon.charKey and info.concentrate then
         Note(tooltip, "With " .. CharName(item.charKey) .. "'s concentration and stats.")
     elseif item.charKey ~= addon.charKey then
         -- Made by whoever makes it best; say by how much when you know it too
@@ -384,6 +393,10 @@ local function CraftTooltip(tooltip, item)
         Note(tooltip, "Not recommended: " .. item.whyNot, "warning")
     end
     tooltip:AddLine(" ")
+    if item.unlearned then
+        Note(tooltip, "Click for the item's page. Once learned, open the profession and it moves to your crafts.", "profit")
+        return
+    end
     Note(tooltip, "Click to plan: materials, quantity, shopping list", "profit")
     Note(tooltip, "Right-click to add it to the queue, shift-click for the item's page")
 end
@@ -1981,6 +1994,8 @@ local SHOW_CHOICES = {
     { value = "all", label = "All crafts" },
     { value = "profitable", label = "Profitable" },
     { value = "recommended", label = "Recommended" },
+    -- Recipes you could learn (GetUnlearnedRows)
+    { value = "unlearned", label = "Not learned yet" },
 }
 
 -- The Show filter, with the old Profitable only checkbox carried over.
@@ -2094,6 +2109,7 @@ local function Create(parent)
         tooltip:AddLine("Show", 1, 1, 1)
         local minROI = addon:Setting("minROI")
         Line(tooltip, "Recommended", "profitable, and it sells")
+        Line(tooltip, "Not learned yet", "recipes to go learn, and what they'd make")
         Line(tooltip, "Profitable", minROI > 0 and string.format("%d%%+ ROI at AH prices", minROI) or "makes gold at AH prices")
         Line(tooltip, "All crafts", "everything you can make")
         Line(tooltip, "Show ignored", "adds your ignored crafts")
@@ -2135,7 +2151,9 @@ local function Create(parent)
                 end
                 return
             end
-            if item.salvage then
+            if item.unlearned then
+                addon:OpenItem(item.recipe.outputName, item.itemID)
+            elseif item.salvage then
                 -- Click for the mill planner; right-click to queue a
                 -- batch or open the item's page
                 if button == "RightButton" and MenuUtil and MenuUtil.CreateContextMenu then
@@ -2250,6 +2268,9 @@ local function Refresh(v, state)
     -- One letter matches nearly everything, so a search starts at two
     local searching = #needle >= SEARCH_MIN_LETTERS
     local show = (focus or searching) and "all" or CraftsShow()
+    -- Not learned yet: its own rows (searchable); concentration works as
+    -- for your crafts (most enchant profit is with it)
+    local unlearnedMode = not focus and CraftsShow() == "unlearned"
     local rowOpts = {
         concentration = concOn,
         profitableOnly = show ~= "all",
@@ -2266,10 +2287,15 @@ local function Refresh(v, state)
             end
         end or nil,
     }
-    local items = addon:GetCraftRows(state.profession, rowOpts)
-    -- Milling, prospecting and other salvage, as rows of their own
-    for _, item in ipairs(addon:GetSalvageRows(state.profession, rowOpts)) do
-        table.insert(items, item)
+    local items
+    if unlearnedMode then
+        items = addon:GetUnlearnedRows(state.profession, rowOpts)
+    else
+        items = addon:GetCraftRows(state.profession, rowOpts)
+        -- Milling, prospecting and other salvage, as rows of their own
+        for _, item in ipairs(addon:GetSalvageRows(state.profession, rowOpts)) do
+            table.insert(items, item)
+        end
     end
     -- Recommended: what Do this next would suggest (no reason against it,
     -- every material priced)
@@ -2307,7 +2333,11 @@ local function Refresh(v, state)
     local sort = GetSort()
     v.list:SetSort(sort.key, sort.descending)
     v.list:SetColumns(addon:AvailableColumns(concOn and CONC_COLUMNS or SIMPLE_COLUMNS))
-    if next(GoldsmithDB.recipes) == nil then
+    if unlearnedMode then
+        v.list:SetEmptyText(searching and "No recipe you haven't learned matches."
+            or string.format("No %s recipes left to learn found yet. Open each profession's window on the character who has it, so Goldsmith can see which recipes you haven't learned.",
+                addon:GetExpansionName(addon:GetCurrentExpansion())))
+    elseif next(GoldsmithDB.recipes) == nil then
         v.list:SetEmptyText("No recipes yet. Open your professions so Goldsmith can load them.")
     elseif focus then
         v.list:SetEmptyText("Those crafts aren't worth it any more. Click the button above to see everything.")
@@ -2337,7 +2367,9 @@ local function Refresh(v, state)
         for _, item in ipairs(items) do
             if item.info.partial then partial = true break end
         end
-        v.footnote:SetText("Hover a craft for how its cost is worked out, click it to plan, right-click to queue it, shift-click for its page."
+        v.footnote:SetText((unlearnedMode
+            and "Recipes you haven't learned, costed with your skill today. Hover one for where to learn it, click for its page."
+            or "Hover a craft for how its cost is worked out, click it to plan, right-click to queue it, shift-click for its page.")
             .. (partial and "   + some material costs unknown,  * profit is at most this" or ""))
     end
 end

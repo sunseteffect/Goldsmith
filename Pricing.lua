@@ -810,7 +810,12 @@ local MAX_RETRIES = 3
 
 -- profession is passed when saving outside the profession window (enchants
 -- matched to scrolls after an AH scan); otherwise it's the open profession.
-local function SaveRecipe(recipeID, quiet, attempt, profession)
+-- unlearned: a recipe nobody has learned yet, saved to
+-- GoldsmithDB.unlearned instead (same shape, plus skillLine, source = where
+-- to learn it, learners = { [charKey] = true } who have the profession),
+-- for the Crafts tab's "Not learned yet". Kept apart so nothing else takes
+-- it for a recipe someone knows.
+local function SaveRecipe(recipeID, quiet, attempt, profession, unlearned)
     attempt = attempt or 1
     local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
     if not ok or not schematic or not IsCraftRecipe(schematic) then return end
@@ -825,13 +830,17 @@ local function SaveRecipe(recipeID, quiet, attempt, profession)
         if IsEnchantRecipe(schematic) then
             -- Remember it so its scroll can be matched by name later
             if schematic.name then
-                GoldsmithDB.pendingEnchants[recipeID] = { name = schematic.name, profession = profession }
+                -- learner: who could learn it, since the scroll may be
+                -- matched later on another character
+                GoldsmithDB.pendingEnchants[recipeID] = { name = schematic.name, profession = profession,
+                    unlearned = unlearned or nil, learner = unlearned and addon.charKey or nil }
             end
         elseif not quiet then
             addon:Notify("info", "Couldn't save recipe %s: the game didn't report what it makes.", schematic.name or recipeID)
         end
         return
     end
+    local pendingLearner = GoldsmithDB.pendingEnchants[recipeID] and GoldsmithDB.pendingEnchants[recipeID].learner
     GoldsmithDB.pendingEnchants[recipeID] = nil
 
     local reagents = {}
@@ -877,8 +886,33 @@ local function SaveRecipe(recipeID, quiet, attempt, profession)
 
     if namesMissing then
         if attempt < MAX_RETRIES then
-            C_Timer.After(1, function() SaveRecipe(recipeID, quiet, attempt + 1, profession) end)
+            C_Timer.After(1, function() SaveRecipe(recipeID, quiet, attempt + 1, profession, unlearned) end)
         end
+        return
+    end
+
+    if unlearned then
+        if GoldsmithDB.recipes[recipeID] then return end
+        local existing = GoldsmithDB.unlearned[recipeID]
+        local okL, _, skillLine = pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe, recipeID)
+        local okS, source = pcall(C_TradeSkillUI.GetRecipeSourceText, recipeID)
+        local learners = existing and existing.learners or {}
+        learners[pendingLearner or addon.charKey] = true
+        GoldsmithDB.unlearned[recipeID] = {
+            recipeID = recipeID,
+            name = schematic.name,
+            profession = profession,
+            outputItemID = outputItemID,
+            outputName = outputName,
+            outputQty = ((schematic.quantityMin or 1) + (schematic.quantityMax or 1)) / 2,
+            outputMin = schematic.quantityMin or 1,
+            outputMax = schematic.quantityMax or 1,
+            reagents = reagents,
+            skillLine = okL and type(skillLine) == "string" and skillLine or (existing and existing.skillLine),
+            source = okS and type(source) == "string" and source ~= "" and source or (existing and existing.source),
+            learners = learners,
+        }
+        addon:RefreshRecipeStats(recipeID)
         return
     end
 
@@ -887,6 +921,8 @@ local function SaveRecipe(recipeID, quiet, attempt, profession)
             GoldsmithDB.reagents[name] = GoldsmithDB.reagents[name] or profession
         end
     end
+    -- Learned now: no longer one to go learn
+    GoldsmithDB.unlearned[recipeID] = nil
 
     local isNew = GoldsmithDB.recipes[recipeID] == nil
 
@@ -933,22 +969,82 @@ local function GetVellumID()
     return ENCHANTING_VELLUM
 end
 
+-- An expansion's scrolls are numbered together, in recipe order (Midnight's
+-- 243948-244018), so the item IDs around scrolls already known are looked
+-- up too and matched by name. That finds enchants nobody has made or seen
+-- on the AH, learned or not; the game doesn't report their scroll even
+-- with a vellum as the target. Items not loaded yet are asked for, and the
+-- match runs again a few seconds later (a few times a session).
+local SCROLL_NEIGHBOURS = 60
+local neighbourRetries = 0
+
 function addon:MatchEnchantScrolls()
     local itemEnhancement = Enum.ItemClass and Enum.ItemClass.ItemEnhancement or 8
-    local matched = 0
+    local matched, unlearned = 0, 0
+    local function Found(recipeID, pending, itemID)
+        GoldsmithDB.scrollOutputs[recipeID] = { itemID = itemID, vellumID = GetVellumID() }
+        SaveRecipe(recipeID, true, 1, pending.profession, pending.unlearned)
+        if pending.unlearned then unlearned = unlearned + 1 else matched = matched + 1 end
+    end
     for recipeID, pending in pairs(GoldsmithDB.pendingEnchants) do
         local link = select(2, C_Item.GetItemInfo(pending.name))
         local itemID = link and C_Item.GetItemInfoInstant(link)
         local classID = itemID and select(6, C_Item.GetItemInfoInstant(itemID))
         if itemID and classID == itemEnhancement then
-            GoldsmithDB.scrollOutputs[recipeID] = { itemID = itemID, vellumID = GetVellumID() }
-            SaveRecipe(recipeID, true, 1, pending.profession)
-            matched = matched + 1
+            Found(recipeID, pending, itemID)
         end
     end
+
+    -- Item IDs next to known scrolls, matched by name (lowest ID per
+    -- enchant; its tiers are found from it, Quality.lua)
+    local byName = {}
+    for recipeID, pending in pairs(GoldsmithDB.pendingEnchants) do
+        if not GoldsmithDB.scrollOutputs[recipeID] then byName[pending.name] = recipeID end
+    end
+    if next(byName) then
+        local candidates, known = {}, {}
+        for _, scroll in pairs(GoldsmithDB.scrollOutputs) do
+            if scroll.itemID then
+                known[scroll.itemID] = true
+                for id = scroll.itemID - SCROLL_NEIGHBOURS, scroll.itemID + SCROLL_NEIGHBOURS do
+                    candidates[id] = true
+                end
+            end
+        end
+        local found, waiting = {}, false
+        for id in pairs(candidates) do
+            if not known[id] then
+                local name = C_Item.GetItemNameByID(id)
+                if not name then
+                    C_Item.RequestLoadItemDataByID(id)
+                    waiting = true
+                else
+                    local recipeID = byName[name]
+                    if recipeID and select(6, C_Item.GetItemInfoInstant(id)) == itemEnhancement
+                        and (not found[recipeID] or id < found[recipeID]) then
+                        found[recipeID] = id
+                    end
+                end
+            end
+        end
+        for recipeID, itemID in pairs(found) do
+            local pending = GoldsmithDB.pendingEnchants[recipeID]
+            if pending then Found(recipeID, pending, itemID) end
+        end
+        if waiting and neighbourRetries < 5 then
+            neighbourRetries = neighbourRetries + 1
+            C_Timer.After(3, function() addon:MatchEnchantScrolls() end)
+        end
+    end
+
     if matched > 0 then
         addon:Notify("info", "Found scrolls for %d enchant%s. See the Crafts tab in /gsm.", matched, matched == 1 and "" or "s")
     end
+    if unlearned > 0 then
+        addon:Notify("info", "Found scrolls for %d enchant%s you haven't learned. See Crafts > Show: Not learned yet in /gsm.",
+            unlearned, unlearned == 1 and "" or "s")
+    end
+    if (matched > 0 or unlearned > 0) and addon.Refresh then addon.Refresh() end
 end
 
 -- Crafting stats
@@ -1015,7 +1111,8 @@ function addon:RefreshRecipeStats(recipeID)
     -- Quality crafts: work out which tiers are reachable (Quality.lua).
     -- Enchants included once their scroll is known (their tiers are found
     -- from it)
-    if op.isQualityCraft and GoldsmithDB.recipes[recipeID] and addon.RefreshTierData then
+    if op.isQualityCraft and (GoldsmithDB.recipes[recipeID] or GoldsmithDB.unlearned[recipeID])
+        and addon.RefreshTierData then
         addon:RefreshTierData(recipeID)
     end
 end
@@ -1958,7 +2055,10 @@ local function ScanLearnedRecipes()
     -- and skill)
     -- Each recipe this character has learned is marked as known by it;
     -- stats are only read for those (they're this character's stats).
-    local toSave, toStats = {}, {}
+    -- Not learned yet: only the current expansion's (the ones worth going
+    -- to learn), saved apart (see SaveRecipe) once a session each
+    local toSave, toStats, toUnlearned = {}, {}, {}
+    local current = addon:GetCurrentExpansion()
     for _, id in ipairs(ids) do
         if not statsReadThisSession[id] and not triedThisSession[id] then
             local info = C_TradeSkillUI.GetRecipeInfo(id)
@@ -1966,7 +2066,14 @@ local function ScanLearnedRecipes()
             if learned then
                 addon:MarkRecipeKnown(id)
             end
-            if GoldsmithDB.recipes[id] then
+            if info and not learned and not GoldsmithDB.recipes[id] then
+                triedThisSession[id] = true
+                local okL, _, skillLine = pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe, id)
+                if okL and type(skillLine) == "string"
+                    and addon:GetRecipeExpansion({ skillLine = skillLine }) == current then
+                    table.insert(toUnlearned, id)
+                end
+            elseif GoldsmithDB.recipes[id] then
                 statsReadThisSession[id] = true
                 -- Recipes saved before skill lines were kept (for the
                 -- expansion filter)
@@ -1982,10 +2089,12 @@ local function ScanLearnedRecipes()
             end
         end
     end
-    if #toSave == 0 and #toStats == 0 then
+    if #toSave == 0 and #toStats == 0 and #toUnlearned == 0 then
         addon:MatchEnchantScrolls()
         return
     end
+    local unlearnedBefore = 0
+    for _ in pairs(GoldsmithDB.unlearned) do unlearnedBefore = unlearnedBefore + 1 end
 
     scanning = true
     local before = CountRecipes()
@@ -2005,6 +2114,14 @@ local function ScanLearnedRecipes()
             C_Timer.After(0, Step)
             return
         end
+        -- Then recipes not learned yet (their stats too, so a slice each)
+        while toUnlearned[1] and debugprofilestop() - start < FRAME_BUDGET_MS do
+            SaveRecipe(table.remove(toUnlearned, 1), true, 1, nil, true)
+        end
+        if toUnlearned[1] then
+            C_Timer.After(0, Step)
+            return
+        end
 
         for _ = 1, SCAN_BATCH do
             local id = toSave[i]
@@ -2019,6 +2136,12 @@ local function ScanLearnedRecipes()
                     if added > 0 then
                         addon:Notify("info", "Saved %d learned recipes. See the Crafts tab in /gsm.", added)
                         addon:ReassignProfessions()
+                    end
+                    local unlearned = 0
+                    for _ in pairs(GoldsmithDB.unlearned) do unlearned = unlearned + 1 end
+                    if unlearned > unlearnedBefore then
+                        addon:Notify("info", "Found %d recipes you haven't learned yet. See Crafts > Show: Not learned yet in /gsm.",
+                            unlearned - unlearnedBefore)
                     end
                 end)
                 return
@@ -2180,6 +2303,7 @@ function addon:InitializePricing()
     GoldsmithDB.craftStats = GoldsmithDB.craftStats or {}
     GoldsmithDB.scrollOutputs = GoldsmithDB.scrollOutputs or {}
     GoldsmithDB.pendingEnchants = GoldsmithDB.pendingEnchants or {}
+    GoldsmithDB.unlearned = GoldsmithDB.unlearned or {}
     GoldsmithDB.vendorPrices = GoldsmithDB.vendorPrices or {}
     local vendorFrame = CreateFrame("Frame")
     vendorFrame:RegisterEvent("MERCHANT_SHOW")
