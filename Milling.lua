@@ -401,6 +401,21 @@ local function SalvageVerb(recipeID, profession)
     return "Salvage"
 end
 
+-- The verb for salvaging an item ("Prospect", "Crush", "Mill"...), from the
+-- spell your last salvage of it used, else its profession's usual one.
+-- For the planner's "best way" (Planner.lua).
+function addon:GetSalvageVerb(itemID)
+    local record = GoldsmithDB.milling and GoldsmithDB.milling[itemID]
+    local profession = record and record.profession or "Inscription"
+    local recipeID, latest
+    for _, run in ipairs(SalvageRuns()) do
+        if run.itemID == itemID and run.recipeID and (not latest or (run.time or 0) >= latest) then
+            recipeID, latest = run.recipeID, run.time or 0
+        end
+    end
+    return SalvageVerb(recipeID, profession)
+end
+
 -- Salvage runs added up per item and character:
 -- [itemID][charKey] = { casts, used, outputs = { [id] = qty }, perCast, recipeID, last }
 local function RunTotals()

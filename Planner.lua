@@ -167,7 +167,8 @@ GetOptions = function(itemID, name, depth, memo, visiting)
                 local unit = herbCost * record.milled * share / out.qty
                 if not options.mill or unit < options.mill.unit then
                     options.mill = {
-                        method = "Mill", unit = unit,
+                        -- verb: how it's salvaged ("Prospect" for ore)
+                        method = "Mill", unit = unit, verb = addon:GetSalvageVerb(herbID),
                         herbID = herbID, herbName = record.name,
                         perHerb = out.qty / record.milled,
                         share = share,

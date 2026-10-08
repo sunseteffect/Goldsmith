@@ -185,8 +185,30 @@ local UNDERCUT_RATIO = 0.6
 -- commodities only, so no gear. It loads at login or /reload. Used when neither
 -- Auctionator nor TSM has a price for the item, or when Auctionator's price
 -- is a day or more old and this data is newer (not with TSM installed).
---   GoldsmithPriceData.items[itemID] = { min, market, median, quantity }
--- (copper; market = average of the cheapest 15% of units listed)
+--   GoldsmithPriceData.items[itemID] = { min, market, median, quantity, sells }
+-- (copper; market = average of the cheapest 15% of units listed; sells =
+-- the sell level, see GetSellLevel)
+-- How well an item sells across the region, from Goldsmith Data's last week
+-- of hourly listings: 3 sells, 2 slow, 1 hardly sells, or nil (no data, or
+-- not a week of it yet). Used for recommendations when TSM isn't installed.
+addon.SELL_LEVEL = { hardly = 1, slow = 2, sells = 3 }
+local SELL_LEVEL_TEXT = { "Hardly sells", "Slow", "Sells" }
+
+function addon:GetSellLevel(itemID)
+    local data = GoldsmithPriceData
+    local entry = itemID and data and data.items and data.items[itemID]
+    return entry and entry[5]
+end
+
+function addon:SellLevelText(level)
+    return level and SELL_LEVEL_TEXT[level]
+end
+
+function addon:SellLevelColor(level)
+    if not level then return "dim" end
+    return level == addon.SELL_LEVEL.sells and "text" or "warning"
+end
+
 function addon:GetBlizzardDataTime()
     return GoldsmithPriceData and GoldsmithPriceData.updated
 end

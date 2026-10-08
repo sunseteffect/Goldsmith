@@ -213,13 +213,21 @@ local function FillCraftRow(row, item)
         end
     end
 
-    cells.demand:SetText(addon:FormatDemand(info.demand))
-    local demandColor = addon:DemandColor(info.demand, item.itemID)
-    if demandColor == "text" and info.demandSource == "your sales" then
-        -- Only your own sales, which undercount the market
-        demandColor = "muted"
+    -- Without TSM: Goldsmith Data's sell level (Sells, Slow, Hardly sells)
+    -- instead of a number
+    local level = not addon:HasTSM() and addon:GetSellLevel(item.itemID)
+    if level then
+        cells.demand:SetText(addon:SellLevelText(level))
+        cells.demand:SetTextColor(addon:Color(addon:SellLevelColor(level)))
+    else
+        cells.demand:SetText(addon:FormatDemand(info.demand))
+        local demandColor = addon:DemandColor(info.demand, item.itemID)
+        if demandColor == "text" and info.demandSource == "your sales" then
+            -- Only your own sales, which undercount the market
+            demandColor = "muted"
+        end
+        cells.demand:SetTextColor(addon:Color(demandColor))
     end
-    cells.demand:SetTextColor(addon:Color(demandColor))
 
     -- Not there without TSM (see AvailableColumns)
     if cells.saleRate then
@@ -362,6 +370,12 @@ local function CraftTooltip(tooltip, item)
     else
         Note(tooltip, "No AH price yet. Scan the AH with Auctionator.")
     end
+    -- Without TSM: how well it sells (Goldsmith Data)
+    local sellLevel = not addon:HasTSM() and addon:GetSellLevel(item.itemID)
+    if sellLevel then
+        Line(tooltip, "Sells", addon:SellLevelText(sellLevel) .. " (Goldsmith Data, last 7 days)",
+            addon:SellLevelColor(sellLevel))
+    end
     if info.demand then
         Line(tooltip, "Sold per day", string.format("%s (%s)", addon:FormatDemand(info.demand), info.demandSource or "?"),
             addon:DemandColor(info.demand, item.itemID))
@@ -419,6 +433,11 @@ end
 -- Planner
 
 local METHOD_COLORS = { Buy = "text", Vendor = "gold", Craft = "profit", Mill = "profit" }
+-- "Milling", "Prospecting", "Crushing"
+local function Gerund(verb)
+    return (verb:gsub("e$", "")) .. "ing"
+end
+
 local METHOD_LABELS = {
     { key = "buy",    method = "Buy",    label = "Buy on the AH" },
     { key = "craft",  method = "Craft",  label = "Craft it" },
@@ -452,7 +471,8 @@ local function FillPlanRow(row, node)
     local best = node.best
     if best then
         -- * marks your own choice (right-click) rather than the cheapest
-        cells.source:SetText(best.method .. (node.options.override and "*" or ""))
+        -- Salvage says how ("Prospect", "Crush"), not "Mill" for everything
+        cells.source:SetText((best.verb or best.method) .. (node.options.override and "*" or ""))
         cells.source:SetTextColor(addon:Color(METHOD_COLORS[best.method] or "text"))
         cells.each:SetText(Money(best.unit))
         -- Priced on what's expected to be used up (node.use, the craft's own
@@ -508,22 +528,22 @@ local function PlanTooltip(tooltip, node)
     -- by AH value (Planner.lua), so say this one's part
     local millDetail
     if o.mill and (o.mill.share or 1) < 0.999 then
-        millDetail = string.format("%.2f per %s\nat %.0f%% of its AH price\n(its other pigments pay the rest,\nby AH value)",
+        millDetail = string.format("%.2f per %s\nat %.0f%% of its AH price\n(what else it gives pays the rest,\nby AH value)",
             o.mill.perHerb, o.mill.herbName, o.mill.share * 100)
     elseif o.mill then
         millDetail = string.format("%.2f per %s\nat its AH price", o.mill.perHerb, o.mill.herbName)
     end
-    Option(o.mill, "Mill it", millDetail)
+    Option(o.mill, (o.mill and o.mill.verb or "Mill") .. " it", millDetail)
     if not node.best then Note(tooltip, "  No price found. Scan the AH with Auctionator.", "loss") end
 
     if o.cheapest and o.buy and o.cheapest ~= o.buy and o.buy.unit > o.cheapest.unit then
         tooltip:AddLine(" ")
         Note(tooltip, string.format("%s it instead of buying saves %s here",
-            o.cheapest.method == "Mill" and "Milling" or "Crafting", Money((o.buy.unit - o.cheapest.unit) * node.need)),
+            o.cheapest.method == "Mill" and Gerund(o.cheapest.verb or "Mill") or "Crafting", Money((o.buy.unit - o.cheapest.unit) * node.need)),
             "profit")
     end
     if o.override and o.cheapest and node.best ~= o.cheapest then
-        Note(tooltip, string.format("Your choice (%s) costs %s more here", node.best.method,
+        Note(tooltip, string.format("Your choice (%s) costs %s more here", node.best.verb or node.best.method,
             Money((node.best.unit - o.cheapest.unit) * node.need)), "warning")
     end
     Note(tooltip, "Right-click to choose how to get it, click for its item page")
@@ -547,7 +567,8 @@ local function PlanMenu(node)
         for _, m in ipairs(METHOD_LABELS) do
             local option = o[m.key]
             if option then
-                root:CreateRadio(string.format("%s (%s each)", m.label, Money(option.unit)),
+                local label = m.key == "mill" and ((option.verb or "Mill") .. " it") or m.label
+                root:CreateRadio(string.format("%s (%s each)", label, Money(option.unit)),
                     function() return o.override == m.method end,
                     function()
                         addon:SetMethodOverride(node.itemID, m.method)
@@ -959,7 +980,7 @@ end
 local function StepState(steps, plan)
     local state = { label = "Craft", blockers = {}, notes = {}, steps = {} }
     for _, node in ipairs(steps) do
-        local verb = node.best.method == "Mill" and "Mill" or "Craft"
+        local verb = node.best.method == "Mill" and (node.best.verb or "Mill") or "Craft"
         local what = node.best.method == "Mill" and node.best.herbName or node.name
         table.insert(state.steps, string.format("%s %s", verb, what))
     end

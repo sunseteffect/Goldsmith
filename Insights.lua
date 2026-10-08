@@ -13,6 +13,8 @@ local AH_CUT = 0.05
 local MIN_DEMAND = 1           -- sold per day
 local GEAR_MIN_DEMAND = 10     -- sold per day across the region, for gear
 local MIN_SALE_RATE = 0.10     -- share of listings that sell (TSM region)
+local SLOW_MIN_ROI = 50        -- ROI (%) a slow seller needs (Goldsmith Data, no TSM)
+local SLOW_MAX_BATCH = 2       -- and how many of it to make at a time
 local GOOD_SALE_RATE = 0.25    -- above this, most listings sell (green)
 
 -- Colors for sale rate and sold per day wherever they're shown, from the
@@ -71,6 +73,17 @@ function addon:WhyNotRecommended(recipe, row, shownExpansions)
     if expansion ~= addon:GetCurrentExpansion()
         and not (shownExpansions and addon:IsExpansionShown(addon:GetRecipeExpansion(recipe))) then
         return "From an older expansion. Its listings often sit unsold, so the profit may not be real. Pick its expansion at the top to judge it on its sales."
+    end
+    -- Without TSM, Goldsmith Data's sell level decides (TSM comes first
+    -- when it's installed). Gear isn't in it (realm by realm), so it goes on
+    -- to the rules below.
+    local level = not addon:HasTSM() and addon:GetSellLevel(itemID)
+    if level == addon.SELL_LEVEL.hardly and not SoldAtProfit(recipe, row) then
+        return "Hardly sells: few sales across the region this past week (Goldsmith Data)."
+    elseif level == addon.SELL_LEVEL.slow and (row.margin or 0) < SLOW_MIN_ROI and not SoldAtProfit(recipe, row) then
+        return string.format("Sells slowly across the region (Goldsmith Data): worth it from %d%% ROI.", SLOW_MIN_ROI)
+    elseif level then
+        return nil
     end
     local demand = row.demand or addon:GetDemand(itemID, recipe.outputName)
     if demand == nil then return "No sales data, so there's no telling whether it sells." end
@@ -535,6 +548,13 @@ function addon:GetBestCrafts(prof, count)
                         local demand, source = addon:GetDemand(itemID, recipe.outputName)
                         local make, makeReason = addon:SuggestedQuantity(recipe.outputName,
                             source == "TSM region" and demand or nil)
+                        -- A slow seller (Goldsmith Data, without TSM): a
+                        -- couple at a time
+                        if not addon:HasTSM() and addon:GetSellLevel(itemID) == addon.SELL_LEVEL.slow
+                            and make > SLOW_MAX_BATCH then
+                            make = SLOW_MAX_BATCH
+                            makeReason = makeReason .. string.format(", at most %d: it sells slowly", SLOW_MAX_BATCH)
+                        end
                         table.insert(list, {
                             key = addon:CraftKey(recipeID, row),
                             recipe = recipe, row = row, charKey = charKey, itemID = itemID,
