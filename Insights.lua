@@ -653,6 +653,22 @@ function addon:IsItemShown(itemID, name)
     return not known
 end
 
+-- For a material: whether a recipe from a shown expansion uses it. The
+-- recipes decide, not the item's own expansion: the game re-tags some old
+-- materials as new (Curing Salt 183955 says Midnight, but only Classic and
+-- Legion recipes use it). With no known recipe using it, as IsItemShown.
+function addon:IsMaterialShown(itemID, name)
+    local users = itemID and RecipesByMaterial()[itemID]
+    if users and next(users) then
+        for _, r in pairs(users) do
+            local expansionID = addon:GetRecipeExpansion(r)
+            if expansionID == nil or addon:IsExpansionShown(expansionID) then return true end
+        end
+        return false
+    end
+    return addon:IsItemShown(itemID, name)
+end
+
 -- Recipes a material goes into, that a counted character knows, each made
 -- by whoever makes it best, with its profit without concentration. Only
 -- crafts worth recommending (WhyNotRecommended): gear nobody buys and

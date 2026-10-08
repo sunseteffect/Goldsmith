@@ -171,7 +171,7 @@ end
 -- Materials with enough history, for the Deals tab, and the earliest date
 -- any history was saved (so the tab can say how long until it's ready).
 -- prof filters to one profession's materials, or "All". Vendor items and
--- materials the expansion filter hides (IsItemShown) are left out (user,
+-- materials the expansion filter hides (IsMaterialShown) are left out (user,
 -- 2026-10-06: old pigments and Darkmoon decks filled the list). Kept until
 -- data changes (the Overview asks every time it's shown); callers mustn't
 -- change the list or its entries.
@@ -201,7 +201,7 @@ Deals = function(prof)
         addon:Yield()
         local materialProf = GoldsmithDB.reagents[name]
         if (prof == "All" or materialProf == prof) and not addon:IsVendorItem(itemID)
-            and (everything or addon:IsItemShown(itemID, name)) then
+            and (everything or addon:IsMaterialShown(itemID, name)) then
             local insight = addon:GetPriceInsight(itemID)
             if insight then
                 insight.itemID = itemID
