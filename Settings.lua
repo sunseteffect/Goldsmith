@@ -457,7 +457,7 @@ local HELP = {
     },
     showMinimap = {
         "Minimap button",
-        "A gold coin on the edge of the minimap: click to show or hide Goldsmith, right-click for these settings, drag to move it.",
+        "The Goldsmith button on the edge of the minimap: click to show or hide Goldsmith, right-click for these settings, drag to move it.",
         "Other ways to open Goldsmith: /gsm, a key (Options > Keybindings > AddOns > Goldsmith), or the addons button by the minimap.",
     },
     keybind = {
@@ -607,7 +607,7 @@ function addon:CreateSettingsPanel(parent)
         self.control:SetLabel(count == 0 and "None ignored" or string.format("%d ignored", count))
     end
 
-    rows.showMinimap = Row(panel, "showMinimap", "Minimap button", "A coin by the minimap that opens Goldsmith.")
+    rows.showMinimap = Row(panel, "showMinimap", "Minimap button", "A button by the minimap that opens Goldsmith.")
     rows.showMinimap.control = UI.Checkbox(rows.showMinimap, "Show", function(checked)
         addon:SetSetting("showMinimap", checked)
         addon:UpdateMinimapButton()
@@ -694,15 +694,26 @@ local HELP_WIDTH = 560
 
 local HELP_SECTIONS = {
     { "Getting started",
-      "Open each profession once on every crafter (press K) so Goldsmith loads its recipes and crafting stats. Scan the AH with Auctionator for prices. From then on, purchases, sales, crafts and AH deposits are recorded by themselves." },
+      "Open each profession once on every crafter (press K) so Goldsmith loads its recipes and crafting stats. Prices come with Goldsmith Data from the start; scan the AH with Auctionator for live ones. From then on, purchases, sales, crafts and AH deposits are recorded by themselves." },
     { "Opening Goldsmith",
-      "/gsm, the gold coin on the minimap, the addons button by the minimap, or a key of your own (Settings > Key to open Goldsmith)." },
-    { "The tabs",
-      "Overview: how you're doing and what to do next. Crafts: every recipe you know with its cost, profit and ROI; click one for a shopping plan. Items: any item's page, and In my bags for everything you hold. History: every purchase, sale, craft and deposit; right-click an entry to fix it. Characters: a to-do list for each character, its craft cooldowns, and which characters count." },
+      "/gsm, the Goldsmith button on the minimap, the addons button by the minimap, or a key of your own (Settings > Key to open Goldsmith)." },
+    -- One line per tab, its name in the text color (Theme.lua loads first)
+    { "The tabs", table.concat({
+        addon:Colorize("Overview", "text") .. ": how you're doing and what to do next.",
+        addon:Colorize("Crafts", "text") .. ": what you can make, with its cost, profit and how well it sells. Show picks Recommended, Profitable, All crafts or Not learned yet (recipes worth going to learn), and can hide gear. Click a craft for a shopping plan.",
+        addon:Colorize("Queue", "text") .. ": crafts lined up to make, with one shopping list and a button that does the next step.",
+        addon:Colorize("Items", "text") .. ": any item's page, and In my bags for everything you hold.",
+        addon:Colorize("History", "text") .. ": every purchase, sale, craft and deposit; right-click an entry to fix it.",
+        addon:Colorize("Characters", "text") .. ": a to-do list for each character, its craft cooldowns, and which characters count.",
+      }, "\n") },
+    { "Hovers",
+      "Hover any number to see what it means and how it's worked out. Once you know, Settings > Hover explanations > Hold Ctrl keeps hovers short: hold Ctrl over one to see the explanations again." },
     { "Item tooltips",
       "Show your cost, profit and break-even price. Hold Shift for each material's cost. Settings > Item tooltips makes them shorter or turns them off." },
-    { "Recommended: TSM",
-      "Goldsmith works with Auctionator alone. TSM alongside it adds region sales per day, sale rates, a check on listings far from the usual price, and prices between Auctionator scans." },
+    { "Recommended: Auctionator",
+      "Goldsmith works without it: Goldsmith Data brings the region's AH prices, refreshed with each daily update, and how well each item sells. Auctionator's scans add live prices for the moment you buy and sell." },
+    { "Optional: TSM",
+      "With TSM installed, Goldsmith uses its region sales per day and sale rates instead of Goldsmith Data's Sells / Slow / Hardly sells, a check on listings far from the usual price, and prices between Auctionator scans. Without TSM, Goldsmith Data's sell levels decide what's worth making." },
     { "Commands",
       "/gsm help lists them all. Handy ones: /gsm chars (your characters and concentration), /gsm cooldowns (craft cooldowns on every character), /gsm recipes, /gsm milling, /gsm setup (the getting started checklist)." },
 }
