@@ -97,12 +97,12 @@ local function Tooltip(tooltip, row)
             end
             Line(row.partial and "Profit (at most)" or "Profit", Signed(row.profit), addon:MoneyColor(row.profit))
         else
-            tooltip:AddLine("Crafted before Goldsmith recorded commissions, so the gold isn't known.", 0.6, 0.6, 0.6, true)
+            addon:Explain(tooltip, "Crafted before Goldsmith recorded commissions, so the gold isn't known.", 0.6, 0.6, 0.6, true)
         end
-        tooltip:AddLine("Crafted for a crafting order: the item went to the customer, so it isn't in your stock and doesn't count toward what yours cost you.", 0.6, 0.6, 0.6, true)
+        addon:Explain(tooltip, "Crafted for a crafting order: the item went to the customer, so it isn't in your stock and doesn't count toward what yours cost you.", 0.6, 0.6, 0.6, true)
     elseif row.kind == "Craft" then
         Line("Materials cost", Money(row.cost) .. (row.partial and "+" or "") .. " each")
-        tooltip:AddLine("Crafts are kept for working out costs, so they can't be deleted here.", 0.6, 0.6, 0.6, true)
+        addon:Explain(tooltip, "Crafts are kept for working out costs, so they can't be deleted here.", 0.6, 0.6, 0.6, true)
     else
         Line("Total", Money(math.abs(row.gold)))
         if row.qty and row.qty > 0 then Line("Each", Money(math.abs(row.gold) / row.qty)) end
@@ -110,9 +110,9 @@ local function Tooltip(tooltip, row)
             Line(COST_LABELS[row.costSource] or "Cost you", Money(row.cost) .. (row.partial and "+" or ""))
             Line(row.partial and "Profit (at most)" or "Profit", Signed(row.profit), addon:MoneyColor(row.profit))
             if row.costSource == "estimated" then
-                tooltip:AddLine("You didn't craft these while Goldsmith was watching, so the cost is the recipe at that day's prices.", 0.6, 0.6, 0.6, true)
+                addon:Explain(tooltip, "You didn't craft these while Goldsmith was watching, so the cost is the recipe at that day's prices.", 0.6, 0.6, 0.6, true)
             elseif row.costSource == "today" then
-                tooltip:AddLine("Sold before Goldsmith saved costs with sales, so this is today's estimate.", 0.6, 0.6, 0.6, true)
+                addon:Explain(tooltip, "Sold before Goldsmith saved costs with sales, so this is today's estimate.", 0.6, 0.6, 0.6, true)
             end
         elseif row.kind == "Sale" then
             tooltip:AddLine("No cost known, so this sale isn't in your profit. If it was loot or a reward, right-click and mark it as free.", 0.6, 0.6, 0.6, true)
@@ -122,7 +122,7 @@ local function Tooltip(tooltip, row)
     if row.profession then Line("Profession", row.profession) end
     Line("When", date("%Y-%m-%d %H:%M", row.time))
     tooltip:AddLine(" ")
-    tooltip:AddLine("Click for the item's page, right-click for more", 0.37, 0.81, 0.48)
+    addon:Explain(tooltip, "Click for the item's page, right-click for more", 0.37, 0.81, 0.48)
 end
 
 StaticPopupDialogs["GOLDSMITH_HISTORY_DELETE"] = {

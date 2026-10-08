@@ -99,7 +99,7 @@ local BOARDS = {
         tooltip = function(tooltip, i)
             tooltip:AddDoubleLine("You have", tostring(i.count), 0.8, 0.8, 0.8, 1, 1, 1)
             tooltip:AddDoubleLine("Worth", Money(i.value), 0.8, 0.8, 0.8, 1, 1, 1)
-            tooltip:AddLine("Check its break-even on the item page before cutting the price.", 0.6, 0.6, 0.6, true)
+            addon:Explain(tooltip, "Check its break-even on the item page before cutting the price.", 0.6, 0.6, 0.6, true)
         end,
     },
 }
@@ -143,7 +143,7 @@ local function CreateBoard(parent, def)
         UI.SetTooltip(row, function(tooltip, self)
             tooltip:AddLine(ItemText(self.item.name, self.item.itemID), 1, 1, 1)
             def.tooltip(tooltip, self.item)
-            tooltip:AddLine("Click to open its page.", 0.37, 0.81, 0.48)
+            addon:Explain(tooltip, "Click to open its page.", 0.37, 0.81, 0.48)
         end)
         board.rows[i] = row
     end
@@ -283,9 +283,9 @@ local function CheapTooltip(tooltip, item)
             tooltip:AddLine(string.format("and %d more", #item.recipes - CHEAP_RECIPES_SHOWN), 0.6, 0.6, 0.6)
         end
     elseif item.milled then
-        tooltip:AddLine("A herb you mill into pigments.", 0.6, 0.6, 0.6, true)
+        addon:Explain(tooltip, "A herb you mill into pigments.", 0.6, 0.6, 0.6, true)
     end
-    tooltip:AddLine("Click to open its page: price history and more.", 0.37, 0.81, 0.48)
+    addon:Explain(tooltip, "Click to open its page: price history and more.", 0.37, 0.81, 0.48)
 end
 
 -- Sold per day and sale rate for list rows, looked up once per refresh
@@ -417,7 +417,7 @@ local function StockTooltip(tooltip, item)
     end
     tooltip:AddLine(item.crafted and "Valued at what your latest crafts cost you."
         or "Valued at what you paid, or the AH price when there's no cost.", 0.6, 0.6, 0.6, true)
-    tooltip:AddLine("Click to open its page.", 0.37, 0.81, 0.48)
+    addon:Explain(tooltip, "Click to open its page.", 0.37, 0.81, 0.48)
 end
 
 -- Item page
@@ -646,7 +646,7 @@ local function CreatePage(parent)
         end
         t[2].tooltip = function(tooltip)
             tooltip:AddLine("Usual price", 1, 1, 1)
-            tooltip:AddLine("The middle of the prices saved each day Auctionator scans, not counting today.", 0.6, 0.6, 0.6, true)
+            addon:Explain(tooltip, "The middle of the prices saved each day Auctionator scans, not counting today.", 0.6, 0.6, 0.6, true)
             if insight then
                 tooltip:AddDoubleLine("Lowest", Money(insight.low), 0.8, 0.8, 0.8, 1, 1, 1)
                 tooltip:AddDoubleLine("Highest", Money(insight.high), 0.8, 0.8, 0.8, 1, 1, 1)
@@ -686,7 +686,7 @@ local function CreatePage(parent)
             end
             if d.have == 0 then tooltip:AddLine("None on any character or in the warband bank.", 0.6, 0.6, 0.6, true) end
             if heldDays then
-                tooltip:AddLine("Held since your oldest copy was made (oldest sold first).", 0.6, 0.6, 0.6, true)
+                addon:Explain(tooltip, "Held since your oldest copy was made (oldest sold first).", 0.6, 0.6, 0.6, true)
             elseif d.have > 0 then
                 tooltip:AddLine("No held time: only shown for things you craft to sell, not materials you keep for your own crafts (unless you've listed some this week).",
                     0.6, 0.6, 0.6, true)
@@ -886,7 +886,7 @@ local function Create(parent)
     view.inBags:SetPoint("LEFT", view.searchBox, "RIGHT", 16, 0)
     UI.SetTooltip(view.inBags, function(tooltip)
         tooltip:AddLine("In my bags", 1, 1, 1)
-        tooltip:AddLine("Everything you hold on every character and in the warband bank, with what it's worth and how long you've had it.", 0.6, 0.6, 0.6, true)
+        addon:Explain(tooltip, "Everything you hold on every character and in the warband bank, with what it's worth and how long you've had it.", 0.6, 0.6, 0.6, true)
     end)
     view.cheap = UI.Checkbox(landing, "Cheap materials", function(checked)
         ui.itemsCheap = checked or nil
@@ -897,7 +897,7 @@ local function Create(parent)
     view.cheap:SetPoint("LEFT", view.inBags, "RIGHT", 16, 0)
     UI.SetTooltip(view.cheap, function(tooltip)
         tooltip:AddLine("Cheap materials", 1, 1, 1)
-        tooltip:AddLine(string.format("Materials %d%% or more below their usual price (Settings > Cheap materials), what you have, and the crafts they go into.",
+        addon:Explain(tooltip, string.format("Materials %d%% or more below their usual price (Settings > Cheap materials), what you have, and the crafts they go into.",
             addon:Setting("dealPercent")), 0.6, 0.6, 0.6, true)
     end)
     view.note = UI.Text(landing, "label", "dim", "RIGHT")
@@ -927,7 +927,7 @@ local function Create(parent)
                 CheapTooltip(tooltip, item)
             else
                 tooltip:AddLine(ItemText(item.name, item.itemID), 1, 1, 1)
-                tooltip:AddLine("Click to open its page.", 0.37, 0.81, 0.48)
+                addon:Explain(tooltip, "Click to open its page.", 0.37, 0.81, 0.48)
             end
         end,
         onClick = function(item) addon:OpenItem(item.name, item.itemID) end,

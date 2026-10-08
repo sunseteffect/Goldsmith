@@ -25,6 +25,7 @@ local DEFAULTS = {
     dealPercent = 10,
     heldDays = 7,
     tooltips = "full",
+    explain = "always",
     chat = "all",
     showMinimap = true,
 }
@@ -359,6 +360,10 @@ local CHOICES = {
         { value = "short", label = "Short" },
         { value = "off", label = "Off" },
     },
+    explain = {
+        { value = "always", label = "Always (recommended)" },
+        { value = "ctrl", label = "Hold Ctrl" },
+    },
     chat = {
         { value = "all", label = "Everything (recommended)" },
         { value = "money", label = "Sales and purchases" },
@@ -427,6 +432,11 @@ local HELP = {
         "Full: everything Goldsmith knows about the item, such as your average cost, how today's price compares, what yours cost to make, break-even, and craft cost and profit with your stats.",
         "Short: craft cost and profit for things you craft, otherwise your average cost and today's price against usual.",
         "Off: no Goldsmith lines. Everything is still on the item's page in /gsm.",
+    },
+    explain = {
+        "Hover explanations",
+        "Always: Goldsmith's hovers explain what each number means and how it's worked out, and what clicking does.",
+        "Hold Ctrl: hovers show just the numbers and warnings. Hold Ctrl over one to see its explanations; let go and they're gone. Once you know how Goldsmith works.",
     },
     chat = {
         "Chat messages",
@@ -513,7 +523,7 @@ end
 
 local COLUMNS = {
     { title = "Crafting and prices", rows = { "costMode", "priceSource", "minROI", "dealPercent", "heldDays", "ignored" } },
-    { title = "Display", rows = { "tooltips", "chat", "characters", "showMinimap", "keybind" } },
+    { title = "Display", rows = { "tooltips", "explain", "chat", "characters", "showMinimap", "keybind" } },
 }
 
 function addon:CreateSettingsPanel(parent)
@@ -550,6 +560,7 @@ function addon:CreateSettingsPanel(parent)
     rows.dealPercent = ChoiceRow(panel, "dealPercent", "Cheap materials", "How far below usual a material's price counts as cheap.")
     rows.heldDays = ChoiceRow(panel, "heldDays", "Held too long", "Days unsold before a crafted item is flagged.")
     rows.tooltips = ChoiceRow(panel, "tooltips", "Item tooltips", "Goldsmith's lines in the game's item tooltips.")
+    rows.explain = ChoiceRow(panel, "explain", "Hover explanations", "What the numbers in hovers mean, or only while you hold Ctrl.")
     rows.chat = ChoiceRow(panel, "chat", "Chat messages", "What Goldsmith says in chat as things happen.")
 
     rows.characters = Row(panel, "characters", "Exclude characters", "Characters left out of stock, concentration, Crafts and Do this next.")

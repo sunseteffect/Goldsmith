@@ -82,7 +82,7 @@ local function SalvageTooltip(tooltip, item)
         for _, line in ipairs(s.blockers) do tooltip:AddLine(line, 1, 0.6, 0.2, true) end
     end
     tooltip:AddLine(" ")
-    tooltip:AddLine("Click to open its plan (change how many there). Right-click to move or remove it.", 0.37, 0.81, 0.48, true)
+    addon:Explain(tooltip, "Click to open its plan (change how many there). Right-click to move or remove it.", 0.37, 0.81, 0.48, true)
 end
 
 local function FillRow(row, item)
@@ -146,7 +146,7 @@ local function RowTooltip(tooltip, item)
         for _, line in ipairs(s.blockers) do tooltip:AddLine(line, 1, 0.6, 0.2, true) end
     end
     tooltip:AddLine(" ")
-    tooltip:AddLine("Click to open its plan (change how many there). Right-click to move or remove it.", 0.37, 0.81, 0.48, true)
+    addon:Explain(tooltip, "Click to open its plan (change how many there). Right-click to move or remove it.", 0.37, 0.81, 0.48, true)
 end
 
 local function RowMenu(item)
@@ -296,7 +296,7 @@ local function Create(parent)
     view.craft:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderGold")) end)
     UI.SetTooltip(view.craft, function(tooltip)
         tooltip:AddLine("Craft next", 1, 1, 1)
-        tooltip:AddLine("One step per click: mill, make materials, then the craft, down the queue. Crafts for the profession that's open go first. The same button sits next to the profession window, and you can set a key for it (Options > Keybindings > AddOns > Goldsmith).",
+        addon:Explain(tooltip, "One step per click: mill, make materials, then the craft, down the queue. Crafts for the profession that's open go first. The same button sits next to the profession window, and you can set a key for it (Options > Keybindings > AddOns > Goldsmith).",
             0.8, 0.8, 0.8, true)
         local row = view.next
         if row and row.state then

@@ -543,7 +543,7 @@ local function CreatePanel()
     panel.open:SetPoint("TOPRIGHT", -6, -6)
     UI.SetTooltip(panel, function(tooltip)
         tooltip:AddLine("Goldsmith queue", 1, 1, 1)
-        tooltip:AddLine("Drag to move it. Right-click to put it back or open the Queue tab.", 0.6, 0.6, 0.6, true)
+        addon:Explain(tooltip, "Drag to move it. Right-click to put it back or open the Queue tab.", 0.6, 0.6, 0.6, true)
     end)
 
     panel.lines = {}
@@ -563,7 +563,7 @@ local function CreatePanel()
     UI.SetTooltip(panel.button, function(tooltip)
         local row = panel.row
         tooltip:AddLine("Craft next", 1, 1, 1)
-        tooltip:AddLine("One step per click: mill, make materials, then the craft, down the queue.", 0.8, 0.8, 0.8, true)
+        addon:Explain(tooltip, "One step per click: mill, make materials, then the craft, down the queue.", 0.8, 0.8, 0.8, true)
         if row and row.state then
             tooltip:AddLine(" ")
             tooltip:AddLine(row.recipe.outputName, addon:Color("gold"))
@@ -578,7 +578,7 @@ local function CreatePanel()
         tooltip:AddLine(" ")
         tooltip:AddLine(KeyText() and ("Key: " .. KeyText()) or "Set a key: Options > Keybindings > AddOns > Goldsmith.",
             0.6, 0.6, 0.6, true)
-        tooltip:AddLine("Right-click for the Queue tab.", 0.6, 0.6, 0.6)
+        addon:Explain(tooltip, "Right-click for the Queue tab.", 0.6, 0.6, 0.6)
     end, "ANCHOR_BOTTOM")
 end
 

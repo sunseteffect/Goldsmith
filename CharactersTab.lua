@@ -145,11 +145,14 @@ local function CreateTodoLine(card, i)
         tooltip:AddLine(ItemText(item.itemID, item.recipe.outputName, item.row.tier, item.tierCount), 1, 1, 1)
         tooltip:AddDoubleLine("Crafts", tostring(item.crafts), 0.8, 0.8, 0.8, 1, 1, 1)
         tooltip:AddDoubleLine("Makes about", tostring(item.quantity), 0.8, 0.8, 0.8, 1, 1, 1)
+        addon:Explain(tooltip, "The crafts times what each makes, with multicraft's extra items on average.")
         tooltip:AddDoubleLine("Profit", Signed(item.profit), 0.8, 0.8, 0.8, 0.37, 0.81, 0.48)
+        addon:Explain(tooltip, "For all of them: the AH price less the 5% cut, less what they cost to make.")
         local perPoint = item.concentration and item.row.concentrationValue
         if item.concentration then
             tooltip:AddDoubleLine("Concentration", tostring(math.floor(item.concentration + 0.5)),
                 0.8, 0.8, 0.8, 0.91, 0.76, 0.35)
+            addon:Explain(tooltip, "What these crafts use of this character's concentration, after ingenuity's average refund.")
         end
         if perPoint then
             -- Extra profit concentrating earns, per point spent; colored by
@@ -157,18 +160,30 @@ local function CreateTodoLine(card, i)
             local r, g, b = addon:Color(addon:ConcentrationValueColor(perPoint))
             tooltip:AddDoubleLine("Gold per concentration", addon:FormatMoney(perPoint),
                 0.8, 0.8, 0.8, r, g, b)
+            addon:Explain(tooltip, "The extra gold concentration earns over making the same thing without it, per point.")
+        end
+        -- Without TSM: how well it sells (Goldsmith Data)
+        local level = not addon:HasTSM() and addon:GetSellLevel(item.itemID)
+        if level then
+            local r, g, b = addon:Color(addon:SellLevelColor(level))
+            tooltip:AddDoubleLine("Sells", addon:SellLevelText(level) .. " (Goldsmith Data)", 0.8, 0.8, 0.8, r, g, b)
+            addon:Explain(tooltip, "How often it sold across the region's AH this past week, and how much is listed near the lowest price.")
         end
         local demand, source = addon:GetDemand(item.itemID, item.recipe.outputName)
         if demand then
             local r, g, b = addon:Color(addon:DemandColor(demand, item.itemID))
             tooltip:AddDoubleLine("Sold per day", string.format("%s (%s)", addon:FormatDemand(demand), source),
                 0.8, 0.8, 0.8, r, g, b)
+            addon:Explain(tooltip, source == "your sales"
+                and "How many you've sold a day lately. The whole market sells more."
+                or "TSM: the average sold per day across your region by players who use TSM, shared by every seller.")
         end
         local saleRate = item.row.saleRate or addon:GetSaleRate(item.itemID)
         if saleRate then
             local r, g, b = addon:Color(addon:SaleRateColor(saleRate))
             tooltip:AddDoubleLine("Sale rate", addon:FormatSaleRate(saleRate) .. " of listings sell",
                 0.8, 0.8, 0.8, r, g, b)
+            addon:Explain(tooltip, "TSM: of the auctions TSM players post, the share that sell. The rest expire or are cancelled.")
         end
         if item.cooldown then
             tooltip:AddLine(item.cooldown.maxCharges
@@ -176,18 +191,18 @@ local function CreateTodoLine(card, i)
                     item.cooldown.charges, item.cooldown.maxCharges)
                 or "A cooldown craft, ready now. Every day it waits is a craft lost.", 0.6, 0.6, 0.6, true)
         elseif item.concentration then
-            tooltip:AddLine("The best use of this character's concentration right now.", 0.6, 0.6, 0.6, true)
+            addon:Explain(tooltip, "The best use of this character's concentration right now.", 0.6, 0.6, 0.6, true)
             if perPoint and addon:ConcentrationValueColor(perPoint) == "warning" then
                 local r, g, b = addon:Color("warning")
                 tooltip:AddLine("A low rate: suggested only because concentration is full or nearly full, so it would go to waste otherwise.",
                     r, g, b, true)
             end
         else
-            tooltip:AddLine("How many: " .. (item.why or "?") .. ".", 0.6, 0.6, 0.6, true)
-            tooltip:AddLine("Once you've made them it drops off, and comes back when they've all sold.",
+            addon:Explain(tooltip, "How many: " .. (item.why or "?") .. ".", 0.6, 0.6, 0.6, true)
+            addon:Explain(tooltip, "Once you've made them it drops off, and comes back when they've all sold.",
                 0.6, 0.6, 0.6, true)
         end
-        tooltip:AddLine("Click to plan it: materials and shopping list.", 0.37, 0.81, 0.48)
+        addon:Explain(tooltip, "Click to plan it: materials and shopping list.", 0.37, 0.81, 0.48)
     end)
     return line
 end
@@ -270,9 +285,9 @@ local function CreateCard(parent)
         end
         tooltip:AddLine(" ")
         if card.key ~= addon.charKey then
-            tooltip:AddLine("Right-click to leave it out or remove it.", 0.6, 0.6, 0.6, true)
+            addon:Explain(tooltip, "Right-click to leave it out or remove it.", 0.6, 0.6, 0.6, true)
         end
-        tooltip:AddLine("Click a to-do line to plan that craft.", 0.37, 0.81, 0.48)
+        addon:Explain(tooltip, "Click a to-do line to plan that craft.", 0.37, 0.81, 0.48)
     end)
     return card
 end

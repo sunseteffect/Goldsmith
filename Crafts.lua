@@ -243,6 +243,13 @@ local function Line(tooltip, left, right, rightColor)
     tooltip:AddDoubleLine(left, right, LABEL[1], LABEL[2], LABEL[3], r[1], r[2], r[3])
 end
 
+-- An explanation: shown only when hover explanations are on, or Ctrl is
+-- held (addon:Explain, Widgets.lua). Numbers and warnings use Note.
+local function Why(tooltip, text, colorName)
+    local r, g, b = addon:Color(colorName or "muted")
+    addon:Explain(tooltip, text, r, g, b)
+end
+
 local function Note(tooltip, text, colorName)
     local r, g, b = addon:Color(colorName or "muted")
     tooltip:AddLine(text, r, g, b, true)
@@ -301,14 +308,14 @@ local function SalvageTooltip(tooltip, item)
             s.sampleFrom and (" on " .. CharName(s.sampleFrom)) or ", all characters"))
     end
     if s.resourcefulness > 0 then
-        Note(tooltip, s.procMeasured
+        Why(tooltip, s.procMeasured
             and string.format("A resourcefulness proc saves about %.0f%% of the input (measured from your salvage).", s.procSave * 100)
             or string.format("A resourcefulness proc is assumed to save %.0f%% of the input until there's enough of your salvage to measure it.", s.procSave * 100))
     end
     if item.whyNot then
         Note(tooltip, "Not recommended: " .. item.whyNot, "warning")
     end
-    Note(tooltip, string.format("Click to plan it (buy or %s?), right-click to queue a batch, shift-click for %s's page.",
+    Why(tooltip, string.format("Click to plan it (buy or %s?), right-click to queue a batch, shift-click for %s's page.",
         (item.recipe.outputName:match("^(%S+)") or "Salvage"):lower(), s.inputName), "profit")
 end
 
@@ -334,6 +341,7 @@ local function CraftTooltip(tooltip, item)
     end
     if item.tier then
         Line(tooltip, "How", (info.description or "") .. (info.concentrate and " + concentration" or ""))
+        Why(tooltip, "The mix of material qualities that reaches this tier for the least gold.")
     end
 
     tooltip:AddLine(" ")
@@ -341,17 +349,26 @@ local function CraftTooltip(tooltip, item)
     if info.costMode == "worst" then
         -- "Show cost as: Worst case" (Settings)
         Line(tooltip, "Cost (worst case, no procs)", Money(info.cost) .. (info.partial and "+" or ""), "gold")
+        Why(tooltip, "Materials for one item if no multicraft or resourcefulness ever happens. Settings > Show cost as picks this or the estimate.")
         Line(tooltip, "Estimated", Money(info.estimatedCost))
-        Note(tooltip, StatsText(stats))
+        Why(tooltip, StatsText(stats))
     else
         Line(tooltip, "Cost (estimated)", Money(info.cost) .. (info.partial and "+" or ""), "gold")
-        Note(tooltip, StatsText(stats))
+        Why(tooltip, "Materials for one item: what you paid for ones you hold, otherwise today's AH price. Less what resourcefulness saves on average, spread over the extra items multicraft makes.")
+        Why(tooltip, StatsText(stats))
         local worst = addon:WithCharacter(item.charKey, addon.GetWorstCaseCost, addon, recipe, info)
-        if worst then Line(tooltip, "Worst case (no procs)", Money(worst)) end
+        if worst then
+            Line(tooltip, "Worst case (no procs)", Money(worst))
+            Why(tooltip, "The most the item can cost you.")
+        end
     end
     local yours = item.itemID and addon:GetCraftedCost(item.itemID)
     Line(tooltip, "Your latest crafts cost you", yours and Money(yours) or "not crafted yet")
+    if yours then
+        Why(tooltip, "What the ones you've made and still hold actually cost, from Goldsmith's record of your crafts. Profit on their sale uses this.")
+    end
     Line(tooltip, "Break-even AH price", Money(info.cost / (1 - AH_CUT)))
+    Why(tooltip, "The lowest price that still covers the cost once the AH takes its 5% cut. The deposit isn't in it: you get that back when it sells, and lose it only if it expires.")
     if info.partial then
         Note(tooltip, "Some material costs are unknown, so the real cost is higher and the profit at most this.", "warning")
     end
@@ -365,8 +382,10 @@ local function CraftTooltip(tooltip, item)
         -- gear tiers are priced by link, not by their shared item ID.
         Line(tooltip, "Price data", addon:PriceSourceText(item.itemID, info.priceSource, info.priceAge),
             stale and "warning" or "muted")
+        Why(tooltip, "What it sells for now: the lowest listing, or the usual price when the lowest is far below it (a stray cheap listing). Price data says where it came from and how old it is.")
         Line(tooltip, "Profit each", string.format("%s%s", Signed(info.profit),
             info.margin and string.format(" (%.0f%% ROI)", info.margin) or ""), addon:MoneyColor(info.profit))
+        Why(tooltip, "AH price less the 5% cut, less the cost. ROI is that profit as a share of the cost: 100% doubles your gold.")
     else
         Note(tooltip, "No AH price yet. Scan the AH with Auctionator.")
     end
@@ -375,26 +394,37 @@ local function CraftTooltip(tooltip, item)
     if sellLevel then
         Line(tooltip, "Sells", addon:SellLevelText(sellLevel) .. " (Goldsmith Data, last 7 days)",
             addon:SellLevelColor(sellLevel))
+        Why(tooltip, "From the region's AH every hour: how often it sells, and how much is listed near the lowest price. Sells: often, with little stock ahead of you. Slow: now and then. Hardly sells: rarely.")
     end
     if info.demand then
         Line(tooltip, "Sold per day", string.format("%s (%s)", addon:FormatDemand(info.demand), info.demandSource or "?"),
             addon:DemandColor(info.demand, item.itemID))
+        Why(tooltip, info.demandSource == "your sales"
+            and "How many you've sold a day lately. The whole market sells more."
+            or "TSM: the average sold per day across your region by players who use TSM, shared by every seller.")
     end
     if info.saleRate then
         Line(tooltip, "Sale rate", addon:FormatSaleRate(info.saleRate) .. " of listings sell",
             addon:SaleRateColor(info.saleRate))
+        Why(tooltip, "TSM: of the auctions TSM players post, the share that sell. The rest expire or are cancelled, so a low rate means listings often sit.")
     end
     local have = item.itemID and addon:GetStock(item.itemID) or 0
-    if have > 0 then Line(tooltip, "You have", tostring(have)) end
+    if have > 0 then
+        Line(tooltip, "You have", tostring(have))
+        Why(tooltip, "In bags and banks on your counted characters, and the warband bank.")
+    end
 
     if info.concentrate then
         tooltip:AddLine(" ")
         Line(tooltip, "Concentration", string.format("about %d per craft", info.concentration), "conc")
+        Why(tooltip, "Ingenuity sometimes refunds some, so it's an average.")
         local perPoint = GoldPerConc(info)
         if perPoint and perPoint < 0 then
             Line(tooltip, "Worth", Signed(perPoint) .. " per point: the craft loses gold", "loss")
+            Why(tooltip, "The loss spread over the concentration it uses.")
         elseif perPoint then
             Line(tooltip, "Worth", Money(perPoint) .. " per point", "conc")
+            Why(tooltip, "The extra gold concentration earns over making the same thing without it, per point. Compare it between crafts to spend concentration where it pays most.")
         end
     end
 
@@ -423,11 +453,11 @@ local function CraftTooltip(tooltip, item)
     end
     tooltip:AddLine(" ")
     if item.unlearned then
-        Note(tooltip, "Click for the item's page. Once learned, open the profession and it moves to your crafts.", "profit")
+        Why(tooltip, "Click for the item's page. Once learned, open the profession and it moves to your crafts.", "profit")
         return
     end
-    Note(tooltip, "Click to plan: materials, quantity, shopping list", "profit")
-    Note(tooltip, "Right-click to add it to the queue, shift-click for the item's page")
+    Why(tooltip, "Click to plan: materials, quantity, shopping list", "profit")
+    Why(tooltip, "Right-click to add it to the queue, shift-click for the item's page")
 end
 
 -- Planner
@@ -546,7 +576,7 @@ local function PlanTooltip(tooltip, node)
         Note(tooltip, string.format("Your choice (%s) costs %s more here", node.best.verb or node.best.method,
             Money((node.best.unit - o.cheapest.unit) * node.need)), "warning")
     end
-    Note(tooltip, "Right-click to choose how to get it, click for its item page")
+    Why(tooltip, "Right-click to choose how to get it, click for its item page")
 end
 
 -- Right-click a material: pick how to get it. The choice applies to that
@@ -1118,7 +1148,7 @@ local function CreatePlanScreen(parent)
         if screen.plan then addon:OpenItem(screen.plan.recipe.outputName, screen.tierItemID) end
     end)
     UI.SetTooltip(titleButton, function(tooltip)
-        tooltip:AddLine("Click for the item's page", 1, 1, 1)
+        addon:Explain(tooltip, "Click for the item's page", 1, 1, 1)
     end)
     screen.subtitle = UI.Text(screen, "small", "muted")
     screen.subtitle:SetPoint("LEFT", screen.title, "RIGHT", 10, 0)
@@ -1177,7 +1207,7 @@ local function CreatePlanScreen(parent)
     screen.useConc:SetPoint("RIGHT", screen.useHave, "LEFT", -20, 0)
     UI.SetTooltip(screen.useConc, function(tooltip)
         tooltip:AddLine("Use concentration", 1, 1, 1)
-        tooltip:AddLine("Plan this tier with concentration, using the mix of material qualities that earns the most. Some tiers can only be reached with it.", 0.6, 0.6, 0.6, true)
+        addon:Explain(tooltip, "Plan this tier with concentration, using the mix of material qualities that earns the most. Some tiers can only be reached with it.", 0.6, 0.6, 0.6, true)
     end)
 
     screen.list = UI.List(screen, {
@@ -1524,7 +1554,7 @@ local function SalvageRowTooltip(tooltip, item)
             or "no price")
         if item.millUnit then
             Line(tooltip, "By salvaging", Money(item.millUnit) .. " each", item.millUnit < item.unit and "profit" or "warning")
-            Note(tooltip, "The cost of what's salvaged, split across what comes out by AH value.")
+            Why(tooltip, "The cost of what's salvaged, split across what comes out by AH value.")
         end
     else
         Line(tooltip, "To salvage", Whole(item.amount))
@@ -1533,7 +1563,7 @@ local function SalvageRowTooltip(tooltip, item)
         Line(tooltip, "AH price", item.unit and string.format("%s (%s)", Money(item.unit), addon:PriceAgeText(item.itemID))
             or "no price", (not item.unit) and "warning" or nil)
     end
-    Note(tooltip, "Click for the item's page.", "profit")
+    Why(tooltip, "Click for the item's page.", "profit")
 end
 
 -- A salvage recipe for an item from saved salvage runs, so the profession
@@ -1577,7 +1607,7 @@ local function CreateSalvageScreen(parent)
         if t then addon:OpenItem(t.name, t.itemID) end
     end)
     UI.SetTooltip(titleButton, function(tooltip)
-        tooltip:AddLine("Click for the item's page", 1, 1, 1)
+        addon:Explain(tooltip, "Click for the item's page", 1, 1, 1)
     end)
     screen.subtitle = UI.Text(screen, "small", "muted")
     screen.subtitle:SetPoint("LEFT", screen.title, "RIGHT", 10, 0)
@@ -1971,9 +2001,9 @@ local function CreateBudget(parent)
                 if p.row.description then Note(tooltip, "        " .. p.row.description) end
             end
         end
-        Note(tooltip, "Mixes of lower and higher quality materials are compared for each craft, to get the most gold from your concentration.", "gold")
-        Note(tooltip, "Extra = profit on top of crafting the same thing without concentration. Each craft is capped at about a day of that item's sales.")
-        if bar.target then Note(tooltip, "Click to plan the best use.", "profit") end
+        Why(tooltip, "Mixes of lower and higher quality materials are compared for each craft, to get the most gold from your concentration.", "gold")
+        Why(tooltip, "Extra = profit on top of crafting the same thing without concentration. Each craft is capped at about a day of that item's sales.")
+        if bar.target then Why(tooltip, "Click to plan the best use.", "profit") end
     end, "ANCHOR_TOP")
     return bar
 end
@@ -2059,12 +2089,23 @@ local function Create(parent)
     -- Show: all crafts, profitable ones, or recommended ones (profitable and
     -- they sell: what Do this next would suggest). ui.craftsShow; the old
     -- Profitable only checkbox (ui.profitableOnly) carries over.
-    view.show = UI.Dropdown(list, 150, function(root)
+    view.show = UI.Dropdown(list, 220, function(root)
         root:CreateTitle("Show")
         for _, choice in ipairs(SHOW_CHOICES) do
             root:CreateRadio(choice.label, function() return CraftsShow() == choice.value end, function()
                 ui.craftsShow = choice.value
                 ui.profitableOnly = nil
+                addon.RefreshWindow()
+            end)
+        end
+        -- Gear (armor, weapons, profession tools): often clutter, so it can
+        -- be hidden, or shown on its own (ui.craftsGear = nil / "hide" /
+        -- "only")
+        root:CreateDivider()
+        root:CreateTitle("Gear")
+        for _, choice in ipairs({ { nil, "All items" }, { "hide", "Hide gear" }, { "only", "Gear only" } }) do
+            root:CreateRadio(choice[2], function() return ui.craftsGear == choice[1] end, function()
+                ui.craftsGear = choice[1]
                 addon.RefreshWindow()
             end)
         end
@@ -2127,18 +2168,13 @@ local function Create(parent)
     -- Hover explanations for the two options (hooked, so the widgets keep
     -- their own hover colors)
     local function Explain(frame, fill)
-        frame:HookScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-            fill(GameTooltip)
-            GameTooltip:Show()
-        end)
-        frame:HookScript("OnLeave", GameTooltip_Hide)
+        UI.SetTooltip(frame, fill, "ANCHOR_BOTTOM")
     end
     Explain(view.concSwitch, function(tooltip)
         tooltip:AddLine("Concentration", 1, 1, 1)
-        Note(tooltip, "Adds the ways to craft with concentration: how much each uses (Conc) and the extra gold it earns per point (g/conc).")
-        Note(tooltip, "The bar at the bottom shows your concentration on all characters and the best way to spend it.")
-        Note(tooltip, "Goldsmith tries mixes of lower and higher quality materials. Better materials cost more but need less concentration, so the same concentration can make more crafts. It picks the mix that earns the most.", "gold")
+        Why(tooltip, "Adds the ways to craft with concentration: how much each uses (Conc) and the extra gold it earns per point (g/conc).")
+        Why(tooltip, "The bar at the bottom shows your concentration on all characters and the best way to spend it.")
+        Why(tooltip, "Goldsmith tries mixes of lower and higher quality materials. Better materials cost more but need less concentration, so the same concentration can make more crafts. It picks the mix that earns the most.", "gold")
     end)
     Explain(view.show, function(tooltip)
         -- One short line per choice; the detail is in each craft's hover
@@ -2150,17 +2186,17 @@ local function Create(parent)
         Line(tooltip, "All crafts", "everything you can make")
         Line(tooltip, "Show ignored", "adds your ignored crafts")
         tooltip:AddLine(" ")
-        Note(tooltip, "Recommended is what Do this next suggests. Pick older expansions at the top to judge their crafts on sales too. Hover a greyed-out craft for why it isn't recommended.")
+        Why(tooltip, "Recommended is what Do this next suggests. Pick older expansions at the top to judge their crafts on sales too. Hover a greyed-out craft for why it isn't recommended.")
     end)
     Explain(view.searchBox, function(tooltip)
         tooltip:AddLine("Find a craft", 1, 1, 1)
-        Note(tooltip, "Type two letters or more. Matches crafts by name, and salvage by what's salvaged or what it gives, across every expansion and whether or not they're profitable.")
-        Note(tooltip, "Only " .. (addon.char.name or "me") .. " and the profession picked at the top still apply. Escape clears it.")
+        Why(tooltip, "Type two letters or more. Matches crafts by name, and salvage by what's salvaged or what it gives, across every expansion and whether or not they're profitable.")
+        Why(tooltip, "Only " .. (addon.char.name or "me") .. " and the profession picked at the top still apply. Escape clears it.")
     end)
     Explain(view.onlyMine, function(tooltip)
         tooltip:AddLine(view.onlyMine.label and view.onlyMine.label:GetText() or "Only this character", 1, 1, 1)
-        Note(tooltip, "Shows only the crafts the character you're logged in on knows, costed with their own stats, even where another character makes it better.")
-        Note(tooltip, "Untick to see every character's crafts, each made by whoever makes it best.")
+        Why(tooltip, "Shows only the crafts the character you're logged in on knows, costed with their own stats, even where another character makes it better.")
+        Why(tooltip, "Untick to see every character's crafts, each made by whoever makes it best.")
     end)
     view.count = UI.Text(list, "label", "dim", "RIGHT")
     view.count:SetPoint("RIGHT", view.concSwitch, "LEFT", -12, 0)
@@ -2291,7 +2327,8 @@ local function Refresh(v, state)
     local costLabel = addon:Setting("costMode") == "worst" and "Worst cost" or "Cost"
     SIMPLE_COLUMNS[2].label, CONC_COLUMNS[2].label = costLabel, costLabel
     v.concSwitch:SetOn(concOn)
-    v.show:SetLabel("Show: " .. ShowLabel(CraftsShow()))
+    v.show:SetLabel("Show: " .. ShowLabel(CraftsShow())
+        .. (ui.craftsGear == "hide" and ", no gear" or ui.craftsGear == "only" and ", gear only" or ""))
     v.onlyMine:SetChecked(ui.craftsOnlyMine == true)
 
     -- Following a link from the Overview shows just those crafts, whatever
@@ -2349,6 +2386,15 @@ local function Refresh(v, state)
             if addon:IsExpansionShown(expansionID) then shown = shown + 1 end
         end
         mixed = shown > 1
+    end
+    -- Gear filter (Show menu): salvage is never gear
+    if ui.craftsGear and not focus then
+        local only, kept = ui.craftsGear == "only", {}
+        for _, item in ipairs(items) do
+            local gear = not item.salvage and addon:IsGear(item.itemID)
+            if (only and gear) or (not only and not gear) then table.insert(kept, item) end
+        end
+        items = kept
     end
     if mixed then
         for _, item in ipairs(items) do item.labelExpansion = true end

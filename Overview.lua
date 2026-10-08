@@ -77,7 +77,7 @@ local function FillProfitTile(tile, s)
                 s.unknownSales == 1 and "" or "s"), 1, 0.6, 0.2, true)
         end
         if s.estimated then
-            tooltip:AddLine("Some older sales use today's cost estimate.", 0.6, 0.6, 0.6, true)
+            addon:Explain(tooltip, "Some older sales use today's cost estimate.", 0.6, 0.6, 0.6, true)
         end
     end
 end
@@ -87,7 +87,7 @@ local function FillSalesTile(tile, s)
     tile.tooltip = function(tooltip)
         tooltip:AddLine("Sales", 1, 1, 1)
         tooltip:AddDoubleLine("Spent on materials", Money(s.spent), 0.8, 0.8, 0.8, 1, 1, 1)
-        tooltip:AddLine("Materials you still hold aren't a loss until they're used or sold.", 0.6, 0.6, 0.6, true)
+        addon:Explain(tooltip, "Materials you still hold aren't a loss until they're used or sold.", 0.6, 0.6, 0.6, true)
     end
 end
 
@@ -109,7 +109,7 @@ local function FillStockTile(tile, stock, prof)
         if prof ~= "All" then
             tooltip:AddLine("Only " .. prof .. " items. Pick All professions at the top to see everything.", 1, 0.82, 0, true)
         end
-        tooltip:AddLine("Valued at what it cost you, or the AH price when there's no cost.", 0.6, 0.6, 0.6, true)
+        addon:Explain(tooltip, "Valued at what it cost you, or the AH price when there's no cost.", 0.6, 0.6, 0.6, true)
         for i = 1, math.min(#stock.items, 8) do
             local item = stock.items[i]
             tooltip:AddDoubleLine(string.format("%s x%d", item.name, item.count), Money(item.value),
@@ -128,7 +128,7 @@ local function FillStockTile(tile, stock, prof)
                     string.format("%d days", days), 0.9, 0.9, 0.9, 1, 0.6, 0.2)
             end
         end
-        tooltip:AddLine("Click to see everything you hold.", 0.37, 0.81, 0.48)
+        addon:Explain(tooltip, "Click to see everything you hold.", 0.37, 0.81, 0.48)
     end
 end
 
@@ -151,7 +151,7 @@ local function FillConcentrationTile(tile, conc)
                 tooltip:AddDoubleLine("    worth", Signed(row.gain), 0.6, 0.6, 0.6, 0.37, 0.81, 0.48)
             end
         end
-        tooltip:AddLine("Alts' concentration is worked out from when you last logged in on them.", 0.6, 0.6, 0.6, true)
+        addon:Explain(tooltip, "Alts' concentration is worked out from when you last logged in on them.", 0.6, 0.6, 0.6, true)
     end
 end
 
@@ -182,8 +182,8 @@ local function ConcentrationAction(conc)
                     tooltip:AddLine("    " .. p.row.description, 0.6, 0.6, 0.6, true)
                 end
             end
-            tooltip:AddLine("Extra = profit on top of crafting the same thing without concentration.", 0.6, 0.6, 0.6, true)
-            tooltip:AddLine("Click to plan it: materials and shopping list.", 0.37, 0.81, 0.48)
+            addon:Explain(tooltip, "Extra = profit on top of crafting the same thing without concentration.", 0.6, 0.6, 0.6, true)
+            addon:Explain(tooltip, "Click to plan it: materials and shopping list.", 0.37, 0.81, 0.48)
         end,
         onClick = function()
             addon:OpenCraftPlan(first.recipe, first.row, best.key,
@@ -221,7 +221,7 @@ local function CooldownAction(prof)
                     Signed(c.profit * c.crafts * (c.outputPerCraft or 1)), 0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
             end
             tooltip:AddLine(" ")
-            tooltip:AddLine("Click to plan the first one. Every character's cooldowns are on the Characters tab.",
+            addon:Explain(tooltip, "Click to plan the first one. Every character's cooldowns are on the Characters tab.",
                 0.37, 0.81, 0.48, true)
         end,
         onClick = function()
@@ -250,7 +250,7 @@ local function CraftsAction(crafts, prof)
         detail = table.concat(parts, "\n"),
         tooltip = function(tooltip)
             tooltip:AddLine("Best crafts right now", 1, 1, 1)
-            tooltip:AddLine(string.format("Current-expansion items with a %d%%+ ROI (profit as a share of cost; see Settings) that sell at least once a day, with no unknown costs. A craft drops off once you've made it, and comes back when you've sold them all (bags, banks and AH listings on every character).",
+            addon:Explain(tooltip, string.format("Current-expansion items with a %d%%+ ROI (profit as a share of cost; see Settings) that sell at least once a day, with no unknown costs. A craft drops off once you've made it, and comes back when you've sold them all (bags, banks and AH listings on every character).",
                 addon:Setting("minROI")), 0.6, 0.6, 0.6, true)
             for _, c in ipairs(crafts) do
                 tooltip:AddLine(" ")
@@ -272,7 +272,7 @@ local function CraftsAction(crafts, prof)
                 end
             end
             tooltip:AddLine(" ")
-            tooltip:AddLine("Click to see these in Crafts.", 0.37, 0.81, 0.48)
+            addon:Explain(tooltip, "Click to see these in Crafts.", 0.37, 0.81, 0.48)
         end,
         onClick = function()
             local keys = {}
@@ -300,14 +300,14 @@ local function SalvageAction(prof)
         detail = table.concat(parts, "\n"),
         tooltip = function(tooltip)
             tooltip:AddLine("Worth salvaging", 1, 1, 1)
-            tooltip:AddLine("Milling, prospecting and crushing that pays: yields measured from 200+ of your own salvages, every output priced, and a 20%+ ROI (or your Worth crafting at setting, if higher). Profit is per salvage, after the AH cut on what comes out.",
+            addon:Explain(tooltip, "Milling, prospecting and crushing that pays: yields measured from 200+ of your own salvages, every output priced, and a 20%+ ROI (or your Worth crafting at setting, if higher). Profit is per salvage, after the AH cut on what comes out.",
                 0.6, 0.6, 0.6, true)
             for _, r in ipairs(rows) do
                 tooltip:AddDoubleLine(r.recipe.outputName .. OnWho(r.charKey),
                     string.format("%s (%.0f%% ROI)", Signed(r.info.profit), r.info.margin), 0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
             end
             tooltip:AddLine(" ")
-            tooltip:AddLine("Click to see these in Crafts.", 0.37, 0.81, 0.48)
+            addon:Explain(tooltip, "Click to see these in Crafts.", 0.37, 0.81, 0.48)
         end,
         onClick = function()
             local keys = {}
@@ -344,14 +344,14 @@ local function DealsAction(prof)
         detail = table.concat(parts, "   ") .. " vs usual",
         tooltip = function(tooltip)
             tooltip:AddLine("Cheap materials today", 1, 1, 1)
-            tooltip:AddLine(string.format("%d%% or more below their usual price (Settings > Cheap materials)",
+            addon:Explain(tooltip, string.format("%d%% or more below their usual price (Settings > Cheap materials)",
                 addon:Setting("dealPercent")), 0.6, 0.6, 0.6, true)
             for i = 1, math.min(#cheap, 8) do
                 local d = cheap[i]
                 tooltip:AddDoubleLine(d.name, string.format("%.0f%%  %s (usually %s)", d.diff * 100, Money(d.now), Money(d.usual)),
                     0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
             end
-            tooltip:AddLine("Click to see them on the Items tab: what you have, what they're used in, price history.",
+            addon:Explain(tooltip, "Click to see them on the Items tab: what you have, what they're used in, price history.",
                 0.37, 0.81, 0.48, true)
         end,
         onClick = function() addon:OpenItems({ cheap = true }) end,

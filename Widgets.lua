@@ -94,19 +94,64 @@ function UI.Text(parent, fontName, colorName, justify)
     return fs
 end
 
+-- Hover explanations (Settings: Hover explanations). Lines that explain
+-- what a number means, how it's worked out or what a click does go through
+-- addon:Explain; numbers and warnings are always shown. With "Hold Ctrl"
+-- they show only while Ctrl is held: the hover is redrawn when Ctrl goes
+-- down or up, and ends with "Hold Ctrl to explain" when something was left
+-- out, so the key is never a secret.
+-- Every Goldsmith hover is drawn between UI.BeginTooltip and UI.EndTooltip
+-- (the widgets below do it); redraw = function that draws it again.
+local tip = { owner = nil, redraw = nil, hidden = false }
+
+function addon:ExplanationsShown()
+    return addon:Setting("explain") ~= "ctrl" or IsControlKeyDown()
+end
+
+-- An explanation line: grey and wrapped unless a color is given
+function addon:Explain(tooltip, text, r, g, b)
+    if addon:ExplanationsShown() then
+        tooltip:AddLine(text, r or 0.6, g or 0.6, b or 0.6, true)
+    else
+        tip.hidden = true
+    end
+end
+
+function UI.BeginTooltip(owner, redraw)
+    tip.owner, tip.redraw, tip.hidden = owner, redraw, false
+end
+
+function UI.EndTooltip(tooltip)
+    if tip.hidden then
+        local r, g, b = addon:Color("dim")
+        tooltip:AddLine("Hold Ctrl to explain", r, g, b)
+    end
+end
+
+local modifierWatch = CreateFrame("Frame")
+modifierWatch:RegisterEvent("MODIFIER_STATE_CHANGED")
+modifierWatch:SetScript("OnEvent", function(_, _, key)
+    if key ~= "LCTRL" and key ~= "RCTRL" then return end
+    if addon:Setting("explain") ~= "ctrl" or not tip.redraw then return end
+    if GameTooltip:IsShown() and GameTooltip:GetOwner() == tip.owner then tip.redraw() end
+end)
+
 -- Hover tooltip. fill(tooltip, frame) adds the lines; nothing shows if it
 -- adds none. Hooked, so a widget's own hover effects (e.g. a gold border)
 -- keep working; call it once per frame.
 function UI.SetTooltip(frame, fill, anchor)
-    frame:HookScript("OnEnter", function(self)
+    local function Draw(self)
         GameTooltip:SetOwner(self, anchor or "ANCHOR_RIGHT")
+        UI.BeginTooltip(self, function() Draw(self) end)
         fill(GameTooltip, self)
+        UI.EndTooltip(GameTooltip)
         if GameTooltip:NumLines() > 0 then
             GameTooltip:Show()
         else
             GameTooltip:Hide()
         end
-    end)
+    end
+    frame:HookScript("OnEnter", Draw)
     frame:HookScript("OnLeave", GameTooltip_Hide)
 end
 
@@ -272,13 +317,16 @@ local function HoverColumn(chart, i)
         hover.highlight:SetColorTexture(addon:Color("hover"))
         hover.highlight:Hide()
         hover:EnableMouse(true)
+        local function Draw(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            UI.BeginTooltip(self, function() Draw(self) end)
+            self.point.tooltip(GameTooltip)
+            UI.EndTooltip(GameTooltip)
+            GameTooltip:Show()
+        end
         hover:SetScript("OnEnter", function(self)
             self.highlight:Show()
-            if self.point and self.point.tooltip then
-                GameTooltip:SetOwner(self, "ANCHOR_TOP")
-                self.point.tooltip(GameTooltip)
-                GameTooltip:Show()
-            end
+            if self.point and self.point.tooltip then Draw(self) end
         end)
         hover:SetScript("OnLeave", function(self)
             self.highlight:Hide()
@@ -722,12 +770,15 @@ function UI.List(parent, opts)
         row:SetScript("OnClick", function(self, button)
             if self.data and opts.onClick then opts.onClick(self.data, button) end
         end)
-        row:SetScript("OnEnter", function(self)
+        local function Draw(self)
             if not (self.data and opts.tooltip) then return end
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            UI.BeginTooltip(self, function() Draw(self) end)
             opts.tooltip(GameTooltip, self.data)
+            UI.EndTooltip(GameTooltip)
             if GameTooltip:NumLines() > 0 then GameTooltip:Show() else GameTooltip:Hide() end
-        end)
+        end
+        row:SetScript("OnEnter", Draw)
         row:SetScript("OnLeave", GameTooltip_Hide)
         list.rows[i] = row
         return row
