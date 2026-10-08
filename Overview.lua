@@ -561,15 +561,23 @@ local function SetupSteps()
     local hasTSM = addon:HasTSM()
     local hasAuctionator = HasAuctionator()
 
-    -- What TSM adds, for anyone without it
-    local tsmTip = " Optional: TSM adds region sales per day, sale rates and a check on odd prices."
-    if hasAuctionator or hasTSM then
-        table.insert(steps, { true, "Price addon found",
-            "Using " .. ((hasAuctionator and hasTSM) and "Auctionator and TSM" or hasAuctionator and "Auctionator" or "TSM") .. "."
-            .. (hasTSM and "" or tsmTip) })
+    -- Both price addons are recommended, neither is needed (Goldsmith Data
+    -- covers prices and sell levels). Done once Auctionator is in, since
+    -- shopping lists need it; TSM stays a suggestion.
+    local auctionatorTip = "Auctionator gives live prices when you scan the AH, and its Shopping tab is where Goldsmith's shopping lists go."
+    local tsmTip = "TSM's sales per day and sale rates are probably more accurate, but Goldsmith's own sell levels (Sells, Slow, Hardly sells) work well without it."
+    if hasAuctionator and hasTSM then
+        table.insert(steps, { true, "Auctionator and TSM found",
+            "Auctionator for live prices and shopping lists, TSM for sales per day and sale rates." })
+    elseif hasAuctionator then
+        table.insert(steps, { true, "Auctionator found",
+            "Using it for live prices and shopping lists. Optional: TSM (free, on CurseForge). " .. tsmTip })
+    elseif hasTSM then
+        table.insert(steps, { false, "Recommended: Auctionator",
+            "Free, on CurseForge. " .. auctionatorTip })
     else
-        table.insert(steps, { false, "Install Auctionator",
-            "Goldsmith reads AH prices from Auctionator (free, on CurseForge) or TSM. Install one and log in again." .. tsmTip })
+        table.insert(steps, { false, "Recommended: Auctionator and TSM",
+            "Both free on CurseForge, and optional: Goldsmith works without them. " .. auctionatorTip .. " " .. tsmTip })
     end
 
     local professions = CraftingProfessions()
@@ -594,7 +602,7 @@ local function SetupSteps()
         table.insert(steps, { true, "AH prices in",
             scanned and "Auctionator has prices. Scan again whenever you're at the AH."
             or hasTSM and "Using TSM's prices."
-            or "Using Blizzard AH data for materials. Gear needs an Auctionator scan." })
+            or "Using Goldsmith Data: the region's AH prices for materials, updated daily. Gear needs an Auctionator scan." })
     else
         table.insert(steps, { false, "Scan the auction house",
             "Open the AH and run Auctionator's Full Scan on its Auctionator tab (or search for your materials)." })
@@ -639,7 +647,13 @@ local function CreateSetup(panel)
     setup.keyButton:SetPoint("BOTTOMRIGHT", -16, 14)
     setup.keyNote = UI.Text(setup, "small", "muted")
     setup.keyNote:SetPoint("LEFT", 16, 0)
-    setup.keyNote:SetPoint("RIGHT", setup.keyButton, "LEFT", -10, 0)
+    setup.tourButton = UI.Button(setup, "Take the tour", 110, 22, function() addon:StartTour() end)
+    setup.tourButton:SetPoint("RIGHT", setup.keyButton, "LEFT", -8, 0)
+    UI.SetTooltip(setup.tourButton, function(tooltip)
+        tooltip:AddLine("Take the tour", 1, 1, 1)
+        tooltip:AddLine("A short walk through the window: what each part is for. /gsm tour starts it too.", 0.8, 0.8, 0.8, true)
+    end)
+    setup.keyNote:SetPoint("RIGHT", setup.tourButton, "LEFT", -10, 0)
     setup.keyNote:SetPoint("BOTTOM", setup.keyButton, "BOTTOM", 0, 5)
 
     setup.close = UI.IconButton(panel, 22, "X", "Hide getting started (/gsm setup shows it again)", function()

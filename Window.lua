@@ -88,7 +88,7 @@ local function PriceSourceText()
         -- prices, or when it's newer than the last Auctionator scan
         local updated = addon:GetBlizzardDataTime()
         local days = math.floor((time() - updated) / 86400)
-        return "Prices: Blizzard AH data " .. (date("%Y-%m-%d", updated) == date("%Y-%m-%d")
+        return "Prices: Goldsmith Data " .. (date("%Y-%m-%d", updated) == date("%Y-%m-%d")
             and ("at " .. date("%H:%M", updated))
             or string.format("%d day%s ago", math.max(days, 1), days == 1 and "" or "s")),
             days >= 1 and "warning" or "muted"
@@ -427,6 +427,15 @@ function addon:CreateWindow()
     content:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -20, 16)
 
     local created = {} -- key -> { frame, view, def }
+    -- For the tour (Tour.lua): a tab's screen, once it has been opened
+    function addon:GetTabScreen(key) return created[key] end
+    function addon:CurrentTab() return ui.tab end
+    addon.tourParts = {
+        filters = { professionButton, expansionButton },
+        price = priceText,
+        settings = settingsButton,
+        tabs = tabBar.buttons,
+    }
     local function GetScreen(key)
         if created[key] then return created[key] end
         local def = views[key]
@@ -489,6 +498,7 @@ function addon:CreateWindow()
         priceText:SetTextColor(addon:Color(color))
         if settings:IsShown() then settings:Update() end
         tabBar:Select(ui.tab)
+        if addon.OnTourTab then addon.OnTourTab(ui.tab) end
 
         for key, screen in pairs(created) do
             screen.frame:SetShown(key == ui.tab)
@@ -533,9 +543,12 @@ function addon:CreateWindow()
 
     frame:SetScript("OnShow", function()
         Refresh()
+        -- New players: offer the tour once (Tour.lua)
+        if addon.OfferTour then C_Timer.After(0.5, function() addon:OfferTour() end) end
     end)
     frame:SetScript("OnHide", function()
         settings:Hide()
+        if addon.EndTour then addon:EndTour() end
     end)
 
     addon.window = frame

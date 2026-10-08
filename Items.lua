@@ -658,9 +658,28 @@ local function CreatePage(parent)
         local demandNote = d.saleRate and addon:Colorize(addon:FormatSaleRate(d.saleRate) .. " of listings sell",
                 addon:SaleRateColor(d.saleRate))
             or (d.demandSource == "your sales" and "your sales" or "region (TSM)")
-        t[3]:Set("Sold per day", addon:FormatDemand(d.demand), addon:DemandColor(d.demand, d.itemID),
-            d.demand and demandNote or "no sales data")
+        -- Without TSM: Goldsmith Data's sell level (as on the Crafts tab),
+        -- with your own sales per day in the note when you have some
+        local sellLevel = not addon:HasTSM() and addon:GetSellLevel(d.itemID)
+        if sellLevel then
+            t[3]:Set("Sells", addon:SellLevelText(sellLevel), addon:SellLevelColor(sellLevel),
+                d.demand and ("you sell " .. addon:FormatDemand(d.demand) .. " a day") or "region, last 7 days")
+        else
+            t[3]:Set("Sold per day", addon:FormatDemand(d.demand), addon:DemandColor(d.demand, d.itemID),
+                d.demand and demandNote or "no sales data")
+        end
         t[3].tooltip = function(tooltip)
+            if sellLevel then
+                tooltip:AddLine("Sells", 1, 1, 1)
+                local r, g, b = addon:Color(addon:SellLevelColor(sellLevel))
+                tooltip:AddDoubleLine("Sells", addon:SellLevelText(sellLevel) .. " (Goldsmith Data, last 7 days)",
+                    0.8, 0.8, 0.8, r, g, b)
+                if d.demand then
+                    tooltip:AddDoubleLine("You sell", addon:FormatDemand(d.demand) .. " a day", 0.8, 0.8, 0.8, 1, 1, 1)
+                end
+                addon:Explain(tooltip, "From the region's AH every hour: how often it sells, and how much is listed near the lowest price. Sells: often, with little stock ahead of you. Slow: now and then. Hardly sells: rarely. With TSM installed, this shows sales per day and sale rate instead.", 0.6, 0.6, 0.6, true)
+                return
+            end
             tooltip:AddLine("Sold per day", 1, 1, 1)
             if d.demand then
                 local r, g, b = addon:Color(addon:DemandColor(d.demand, d.itemID))

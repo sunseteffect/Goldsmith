@@ -31,4 +31,5 @@ QueueTab.lua
 Items.lua
 History.lua
 CharactersTab.lua
+Tour.lua
 Perf.lua

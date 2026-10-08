@@ -19,10 +19,9 @@ Most players don't want to study the auction house. Goldsmith gives you a short 
 - [Goldsmith Data](https://github.com/sunseteffect/GoldsmithData): region-wide AH prices for US, EU, KR and TW, refreshed daily, and how well each item sells. CurseForge installs it with Goldsmith.
 
 ## Recommended
+Both are free on CurseForge, and neither is required: Goldsmith works without them.
 - Auctionator, for live prices when you buy and sell, and for shopping lists.
-
-## Optional
-- TradeSkillMaster with its desktop app. With TSM, Goldsmith uses its region sales per day and sale rates instead of Goldsmith Data's Sells / Slow / Hardly sells, plus prices between your Auctionator scans and a check on listings far from the usual price. Without TSM, Goldsmith Data's sell levels decide what's worth making.
+- TradeSkillMaster with its desktop app. With TSM, Goldsmith uses its region sales per day and sale rates instead of Goldsmith Data's Sells / Slow / Hardly sells, plus prices between your Auctionator scans and a check on listings far from the usual price. TSM's numbers are probably more accurate, but without it Goldsmith Data's sell levels work well to decide what's worth making.
 
 ## Getting started
 1. Install Goldsmith (with Goldsmith Data) and Auctionator, then log in.

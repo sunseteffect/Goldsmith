@@ -223,21 +223,45 @@ function addon:BlizzardDataBeatsScan()
 end
 
 -- Lowest price, or the market price when the lowest looks like a small
--- undercut (same rule as the TSM check). Returns price, age in days, note.
+-- undercut (same rule as the TSM check). Not when market is more than
+-- MARKET_TRUST_RATIO times the lowest: then market is the unreliable one, a
+-- thin market whose cheapest 15% is mostly silly listings (99 gold-tier
+-- Gleeful Glamours: lowest 3.62g, market 6,668g). Returns price, age in
+-- days, note.
+local MARKET_TRUST_RATIO = 3
+
+-- An item that doesn't sell well (Slow or Hardly sells) priced more than
+-- SOLD_HIGH_RATIO times what it sold for this week is a shelf price: the
+-- cheap ones sold and what's left sits (silver Orc Gleeful Glamour: lowest
+-- 35.65g, sold for 0.60g). Same idea as TSM's sale average check. Returns
+-- the sale price and a note, or nil when the price is fine.
+local SOLD_HIGH_RATIO = 3
+
+local function SoldCap(itemID, price)
+    local data = GoldsmithPriceData
+    local entry = data and data.items and data.items[itemID]
+    local level, sold = entry and entry[5], entry and entry[6]
+    if level and level < addon.SELL_LEVEL.sells and sold and price > sold * SOLD_HIGH_RATIO then
+        return sold, string.format("listed at %s, but it sold for %s this week", FormatGold(price), FormatGold(sold))
+    end
+end
+
 local function GetBlizzardPrice(itemID)
     local data = GoldsmithPriceData
     local entry = data and data.items and data.items[itemID]
     if not entry then return nil end
     local price, market, note = entry[1], entry[2], nil
-    if market and price < market * UNDERCUT_RATIO then
+    if market and price < market * UNDERCUT_RATIO and market <= price * MARKET_TRUST_RATIO then
         note = string.format("lowest listing %s looked like a small undercut", FormatGold(price))
         price = market
     end
+    local sold, soldNote = SoldCap(itemID, price)
+    if sold then price, note = sold, soldNote end
     local age = math.max(0, math.floor((time() - (data.updated or time())) / 86400))
     return price, age, note
 end
 
--- "Blizzard, 17:15" (today) or "Blizzard, 2 days old"
+-- "Goldsmith Data, 17:15" (today) or "Goldsmith Data, 2 days old"
 local function BlizzardAgeText()
     local updated = addon:GetBlizzardDataTime()
     local when
@@ -246,7 +270,7 @@ local function BlizzardAgeText()
     else
         when = addon:FormatAge(updated and math.max(1, math.floor((time() - updated) / 86400)))
     end
-    return "Blizzard, " .. when
+    return "Goldsmith Data, " .. when
 end
 
 -- Vendor prices
@@ -343,7 +367,9 @@ end
 -- Outlier check against TSM's market value: a lowest price far below it
 -- looks like a small undercut; far above it (e.g. a 9,999,999g listing when
 -- nothing else is up) isn't a real price either. Either way TSM's market
--- value is used instead, with a note. Without TSM the price is unchanged.
+-- value is used instead, with a note. Without TSM, Goldsmith Data's market
+-- value is the check for far too high prices (an old Auctionator scan of a
+-- lone 6,000g listing for a 1g item), and its price is used instead.
 --
 -- Market value comes from listings, so for items that rarely sell it's as
 -- unrealistic as the listings themselves (an item-level-15 staff listed at
@@ -355,7 +381,20 @@ local SALE_HIGH_RATIO = 3
 function addon:CheckAgainstMarket(itemID, price, source, age)
     local listed, note = price, nil
     local market = GetTSMValue("DBMarket", itemID)
-    if market and price < market * UNDERCUT_RATIO then
+    if not market then
+        local blizzard, blizzardAge
+        if source ~= "Blizzard" then blizzard, blizzardAge = GetBlizzardPrice(itemID) end
+        if blizzard and price > blizzard * OUTLIER_HIGH_RATIO then
+            return blizzard, "Blizzard", blizzardAge,
+                string.format("lowest listing %s is far above the usual price", FormatGold(listed))
+        end
+        local sold, soldNote = SoldCap(itemID, price)
+        if sold then
+            return sold, "Blizzard", blizzardAge, soldNote
+        end
+        return price, source, age, note
+    end
+    if price < market * UNDERCUT_RATIO then
         price, source, age = market, "TSM market", nil
         note = string.format("lowest listing %s looked like a small undercut", FormatGold(listed))
     elseif market and price > market * OUTLIER_HIGH_RATIO then
@@ -411,7 +450,7 @@ function addon:GetMarketAge(itemID)
 end
 
 -- Where a price came from, and how old, from GetAHPriceInfo's source and
--- age: "Blizzard, 09:15", "Auctionator, 2 days old", "TSM",
+-- age: "Goldsmith Data, 09:15", "Auctionator, 2 days old", "TSM",
 -- "TSM market value", "live, 5m ago". Short, for tooltips.
 function addon:PriceSourceText(itemID, source, age)
     if source == "Live" then

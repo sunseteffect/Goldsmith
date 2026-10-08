@@ -480,6 +480,7 @@ local function PrintHelp()
     print("  /gsm chars - list your characters, professions and concentration")
     print("  /gsm data - check the numbers behind the window")
     print("  /gsm setup - show the getting started checklist again")
+    print("  /gsm tour - a short tour of the window")
     print("  /gsm cooldowns - craft cooldowns on every character")
     print("  /gsm perf - time each tab and show memory use (freezes the game briefly)")
     print("  /gsm report - copy a bug report (versions, settings and recent errors) for GitHub")
@@ -521,6 +522,8 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:ListData()
     elseif cmd == "setup" then
         addon:ShowSetup()
+    elseif cmd == "tour" then
+        addon:StartTour()
     elseif cmd == "stats" then
         addon:DumpCraftingStats()
     elseif cmd == "salvage" then

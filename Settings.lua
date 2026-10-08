@@ -769,10 +769,10 @@ local HELP_SECTIONS = {
       "Show your cost, profit and break-even price. Hold Shift for each material's cost. Settings > Item tooltips makes them shorter or turns them off." },
     { "Recommended: Auctionator",
       "Goldsmith works without it: Goldsmith Data brings the region's AH prices, refreshed with each daily update, and how well each item sells. Auctionator adds two things. Its scans give live prices for the moment you buy and sell. And its Shopping tab is where Goldsmith's shopping lists go: Send to Auctionator in a plan or the Queue makes a list there, and Auctionator searches the AH for every item on it. The game's own AH has no shopping lists." },
-    { "Optional: TSM",
-      "With TSM installed, Goldsmith uses its region sales per day and sale rates instead of Goldsmith Data's Sells / Slow / Hardly sells, a check on listings far from the usual price, and prices between Auctionator scans. Without TSM, Goldsmith Data's sell levels decide what's worth making." },
+    { "Recommended: TSM",
+      "Goldsmith works without it too. With TSM installed, Goldsmith uses its region sales per day and sale rates instead of Goldsmith Data's Sells / Slow / Hardly sells, a check on listings far from the usual price, and prices between Auctionator scans. TSM's numbers are probably more accurate, but Goldsmith's own sell levels work well without it." },
     { "Commands",
-      "/gsm help lists them all. Handy ones: /gsm chars (your characters and concentration), /gsm cooldowns (craft cooldowns on every character), /gsm recipes, /gsm milling, /gsm setup (the getting started checklist)." },
+      "/gsm help lists them all. Handy ones: /gsm chars (your characters and concentration), /gsm cooldowns (craft cooldowns on every character), /gsm recipes, /gsm milling, /gsm setup (the getting started checklist), /gsm tour (a short tour of the window)." },
 }
 
 function addon:CreateHelpPanel(parent, settings)
@@ -816,6 +816,11 @@ function addon:CreateHelpPanel(parent, settings)
         addon:ShowSetup()
     end)
     setupButton:SetPoint("BOTTOMLEFT", 16, 12)
+    local tourButton = UI.Button(panel, "Take the tour", 120, 24, function()
+        panel:Hide()
+        addon:StartTour()
+    end)
+    tourButton:SetPoint("LEFT", setupButton, "RIGHT", 8, 0)
     local back = UI.Button(panel, "Back to settings", 130, 24, function()
         panel:Hide()
         settings:Show()

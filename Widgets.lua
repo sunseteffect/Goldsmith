@@ -99,10 +99,11 @@ end
 -- addon:Explain; numbers and warnings are always shown. With "Hold Ctrl"
 -- they show only while Ctrl is held: the hover is redrawn when Ctrl goes
 -- down or up, and ends with "Hold Ctrl to explain" when something was left
--- out, so the key is never a secret.
+-- out, so the key is never a secret. With "Always" (the default), a hover
+-- that explained something ends with where to turn them off.
 -- Every Goldsmith hover is drawn between UI.BeginTooltip and UI.EndTooltip
 -- (the widgets below do it); redraw = function that draws it again.
-local tip = { owner = nil, redraw = nil, hidden = false }
+local tip = { owner = nil, redraw = nil, hidden = false, explained = false }
 
 function addon:ExplanationsShown()
     return addon:Setting("explain") ~= "ctrl" or IsControlKeyDown()
@@ -112,19 +113,22 @@ end
 function addon:Explain(tooltip, text, r, g, b)
     if addon:ExplanationsShown() then
         tooltip:AddLine(text, r or 0.6, g or 0.6, b or 0.6, true)
+        tip.explained = true
     else
         tip.hidden = true
     end
 end
 
 function UI.BeginTooltip(owner, redraw)
-    tip.owner, tip.redraw, tip.hidden = owner, redraw, false
+    tip.owner, tip.redraw, tip.hidden, tip.explained = owner, redraw, false, false
 end
 
 function UI.EndTooltip(tooltip)
+    local r, g, b = addon:Color("dim")
     if tip.hidden then
-        local r, g, b = addon:Color("dim")
         tooltip:AddLine("Hold Ctrl to explain", r, g, b)
+    elseif tip.explained and addon:Setting("explain") ~= "ctrl" then
+        tooltip:AddLine("To turn off explanations: Settings > Hover explanations", r, g, b, true)
     end
 end
 
