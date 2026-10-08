@@ -150,6 +150,27 @@ function addon:CreateLedger(store)
             wipe(entries)
         end,
 
+        -- Deletes entries from before `before` (a time), except those
+        -- keep(e) says to keep (Keep history for, see addon:TrimHistory).
+        -- Returns how many went.
+        trim = function(self, before, keep)
+            local kept, removed = {}, 0
+            for _, e in ipairs(entries) do
+                if (e.timestamp or 0) < before and not keep(e) then
+                    removed = removed + 1
+                else
+                    kept[#kept + 1] = e
+                end
+            end
+            if removed > 0 then
+                version = version + 1
+                -- in place, so every reference to entries stays valid
+                wipe(entries)
+                for i, e in ipairs(kept) do entries[i] = e end
+            end
+            return removed
+        end,
+
         -- Profit on what you've sold, for one profession or "All".
         --   profit = sales - cost of the items sold - AH deposits
         -- Deposit refunds are part of each sale's amount, so deposits on
@@ -320,6 +341,78 @@ function addon:GetGoldPerHour(prof, days)
         d.perHour = d.seconds > 0 and (d.profit / d.seconds * 3600) or nil
     end
     return list
+end
+
+-- Keep history for (Settings): transactions and daily gold older than the
+-- setting are deleted at login and when it's changed. 0 = forever.
+-- Purchases still covering what you hold stay, since what those items cost
+-- you comes from them (GetAverageCost: the newest purchases covering what
+-- you hold, or the newest one). So does each character's latest day of
+-- gold, or an alt not seen since would drop out of total gold. Craft lots,
+-- order crafts, the craft log and price history have their own caps.
+local function PurchasesInUse()
+    local keep = {}
+    for _, list in pairs(addon.ledger:index().purchases) do
+        local ids, held = {}, 0
+        for _, e in ipairs(list) do
+            if e.itemID then ids[e.itemID] = true end
+        end
+        for itemID in pairs(ids) do held = held + addon:GetHeld(itemID) end
+        local remaining = math.max(held, 1)
+        for i = #list, 1, -1 do
+            local e = list[i]
+            if (e.quantity or 0) > 0 then
+                keep[e] = true
+                remaining = remaining - e.quantity
+                if remaining <= 0 then break end
+            end
+        end
+    end
+    return keep
+end
+
+local function HistoryCutoff(days)
+    if not days or days <= 0 then return nil end
+    return time() - days * 86400
+end
+
+-- How many transactions keeping `days` would delete (the Settings popup)
+function addon:CountOldHistory(days)
+    local before = HistoryCutoff(days)
+    if not before then return 0 end
+    local keep, count = PurchasesInUse(), 0
+    for _, e in ipairs(addon.ledger:getAll()) do
+        if (e.timestamp or 0) < before and not keep[e] then count = count + 1 end
+    end
+    return count
+end
+
+-- Deletes what's older than the setting. Returns how many transactions went.
+function addon:TrimHistory()
+    local before = HistoryCutoff(addon:Setting("keepDays"))
+    if not before then return 0 end
+    local keep = PurchasesInUse()
+    local removed = addon.ledger:trim(before, function(e) return keep[e] end)
+
+    local cutoff = date("%Y-%m-%d", before)
+    local function Prune(days, keepLatest)
+        if not days then return end
+        local latest
+        for day in pairs(days) do
+            if not latest or day > latest then latest = day end
+        end
+        for day in pairs(days) do
+            if day < cutoff and not (keepLatest and day == latest) then days[day] = nil end
+        end
+    end
+    for _, c in pairs(GoldsmithDB.characters) do
+        Prune(c.gold, true)
+        Prune(c.goldTime)
+    end
+    Prune(GoldsmithDB.warbandGold, true)
+
+    if removed > 0 and addon.Refresh then addon.Refresh() end
+    return removed
 end
 
 _G.Goldsmith = addon

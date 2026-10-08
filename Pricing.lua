@@ -1374,9 +1374,12 @@ end
 -- anything resourcefulness gave back, valued at what they cost you (or the
 -- current price if you have no cost for them), divided by how many it made.
 -- Kept per item (each quality tier is its own item) in
--- GoldsmithDB.craftLots[itemID] = { { time, qty, unitCost, partial, name } },
--- the last CRAFT_LOT_LIMIT crafts. Concentration isn't a gold cost, so it
--- isn't included.
+-- GoldsmithDB.craftLots[itemID] = { { time, qty, unitCost, partial, name,
+-- char, mc, res } }, the last CRAFT_LOT_LIMIT crafts. Concentration isn't a
+-- gold cost, so it isn't included. char, mc and res are who crafted it and
+-- their multicraft and resourcefulness (%) for the recipe at the time (nil
+-- for crafts saved before 2026-10-08), to check the estimate against what
+-- crafts really made.
 local CRAFT_LOT_LIMIT = 30
 local ORDER_CRAFT_LIMIT = 100
 -- Bumped whenever craftLots changes (see GetCraftLotsByName)
@@ -1543,6 +1546,9 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTe
         time = time(), qty = made, unitCost = cost / made,
         partial = not complete, name = recipe.outputName,
     }
+    local stats = recipe.recipeID and addon.char.recipeStats[recipe.recipeID]
+    lot.char = addon.charKey
+    if stats then lot.mc, lot.res = stats.multicraft, stats.resourcefulness end
     if isOrder then
         lot.itemID = resultData.itemID
         lot.kept = kept > 0 and kept or nil

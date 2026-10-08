@@ -10,7 +10,9 @@ local UI = addon.UI
 --   minROI      - ROI (%) a craft needs to count as worth crafting
 --   dealPercent - how far below its usual price a material counts as cheap
 --   heldDays    - days unsold before a crafted item is held too long
---   tooltips    - Goldsmith lines in item tooltips: "full", "short" or "off"
+--   keepDays    - days of transactions and daily gold kept; 0 = forever
+--                 (addon:TrimHistory, Data.lua)
+--   tooltips   - Goldsmith lines in item tooltips: "full", "short" or "off"
 --   chat        - chat messages: "all", "money" (sales, purchases,
 --                 deposits) or "off"
 --   excluded    - { [charKey] = true } for characters left out of stock,
@@ -24,6 +26,7 @@ local DEFAULTS = {
     minROI = 15,
     dealPercent = 10,
     heldDays = 7,
+    keepDays = 0,
     tooltips = "full",
     explain = "always",
     chat = "all",
@@ -355,6 +358,13 @@ local CHOICES = {
     minROI = {},
     dealPercent = {},
     heldDays = {},
+    keepDays = {
+        { value = 0, label = "Forever" },
+        { value = 730, label = "2 years" },
+        { value = 365, label = "1 year" },
+        { value = 180, label = "6 months" },
+        { value = 90, label = "3 months" },
+    },
     tooltips = {
         { value = "full", label = "Full (recommended)" },
         { value = "short", label = "Short" },
@@ -426,6 +436,12 @@ local HELP = {
         "Held too long",
         "How many days a crafted item can sit unsold before Goldsmith flags it: the Overview's Gold in stock, the Items tab's Held board and the Held column turn orange.",
         "Slow-selling gear might want 14 or more; fast consumables less.",
+    },
+    keepDays = {
+        "Keep history for",
+        "How long Goldsmith keeps your purchases, sales and AH deposits, and each day's gold. Older ones are deleted when you log in.",
+        "Forever is fine for most players: Goldsmith handles years of busy goldmaking. A shorter time keeps its saved data smaller.",
+        "Profit charts, gold per hour and History only go back as far as what's kept. Purchases of items you still hold are always kept, since what those items cost you comes from them.",
     },
     tooltips = {
         "Item tooltips",
@@ -521,8 +537,41 @@ local function CharacterLabel(entry)
     return (c.name or entry.key) .. realm .. (entry.key == addon.charKey and ", you" or "")
 end
 
+-- Keep history for: a shorter time deletes old transactions, so it asks
+-- first when there are any to delete
+local function ApplyKeepDays(value, panel)
+    addon:SetSetting("keepDays", value)
+    local removed = addon:TrimHistory()
+    if removed > 0 then
+        addon:Notify("info", "Deleted %d transactions from before %s.", removed,
+            date("%Y-%m-%d", time() - value * 86400))
+    end
+    panel:Update()
+end
+
+StaticPopupDialogs["GOLDSMITH_KEEP_DAYS"] = {
+    text = "Keep history for %s?\n\n%s transactions older than that will be deleted now. This can't be undone.",
+    button1 = YES,
+    button2 = NO,
+    OnAccept = function(self, data) ApplyKeepDays(data.value, data.panel) end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
+local function SetKeepDays(value, panel)
+    local count = addon:CountOldHistory(value)
+    if count == 0 then
+        ApplyKeepDays(value, panel)
+    else
+        StaticPopup_Show("GOLDSMITH_KEEP_DAYS", LabelFor(CHOICES.keepDays, value):lower(),
+            BreakUpLargeNumbers(count), { value = value, panel = panel })
+    end
+end
+
 local COLUMNS = {
-    { title = "Crafting and prices", rows = { "costMode", "priceSource", "minROI", "dealPercent", "heldDays", "ignored" } },
+    { title = "Crafting and prices", rows = { "costMode", "priceSource", "minROI", "dealPercent", "heldDays", "ignored", "keepDays" } },
     { title = "Display", rows = { "tooltips", "explain", "chat", "characters", "showMinimap", "keybind" } },
 }
 
@@ -559,6 +608,14 @@ function addon:CreateSettingsPanel(parent)
     rows.minROI = ChoiceRow(panel, "minROI", "Worth crafting at", "The ROI a craft needs for Profitable only and Best crafts.")
     rows.dealPercent = ChoiceRow(panel, "dealPercent", "Cheap materials", "How far below usual a material's price counts as cheap.")
     rows.heldDays = ChoiceRow(panel, "heldDays", "Held too long", "Days unsold before a crafted item is flagged.")
+    rows.keepDays = Row(panel, "keepDays", "Keep history for", "How long purchases, sales and deposits are kept.")
+    rows.keepDays.control = Dropdown(rows.keepDays, "keepDays", function(root)
+        for _, c in ipairs(CHOICES.keepDays) do
+            root:CreateRadio(c.label, function() return addon:Setting("keepDays") == c.value end,
+                function() SetKeepDays(c.value, panel) end)
+        end
+    end)
+    function rows.keepDays:Update() self.control:SetLabel(LabelFor(CHOICES.keepDays, addon:Setting("keepDays"))) end
     rows.tooltips = ChoiceRow(panel, "tooltips", "Item tooltips", "Goldsmith's lines in the game's item tooltips.")
     rows.explain = ChoiceRow(panel, "explain", "Hover explanations", "What the numbers in hovers mean, or only while you hold Ctrl.")
     rows.chat = ChoiceRow(panel, "chat", "Chat messages", "What Goldsmith says in chat as things happen.")
