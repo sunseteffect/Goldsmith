@@ -544,6 +544,8 @@ local function CreatePage(parent)
         row.label:SetPoint("LEFT", 6, 0)
         row.value = UI.Text(row, "small", "muted", "RIGHT")
         row.value:SetPoint("RIGHT", -6, 0)
+        -- A long name stops short of the price instead of running into it
+        row.label:SetPoint("RIGHT", row.value, "LEFT", -8, 0)
         row:SetScript("OnClick", function(self)
             page.item.itemID = self.itemID
             addon.RefreshWindow()
@@ -803,7 +805,7 @@ local function CreatePage(parent)
         local enough = #points >= 2
         page.chart:SetShown(enough)
         page.chartEmpty:SetShown(not enough)
-        page.chartEmpty:SetText("Goldsmith saves a price each day Auctionator scans. The chart starts after 2 days.")
+        page.chartEmpty:SetText("Goldsmith saves the AH price once a day you log in. The chart starts after 2 days.")
         if enough then
             local band = d.bandLow and { low = d.bandLow, high = d.bandHigh, usual = insight and insight.usual }
             page.chart:SetData(points, { band = band })

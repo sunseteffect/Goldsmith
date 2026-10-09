@@ -72,23 +72,14 @@ end
 -- Auctionator's own price history isn't available to other addons, so each
 -- time Auctionator updates its prices Goldsmith saves one price per day for
 -- every material and crafted item it knows. Kept for HISTORY_DAYS days in
--- GoldsmithDB.priceHistory[itemID]["YYYY-MM-DD"]. Not shown anywhere yet;
--- it builds up so later features can compare today's prices with the past.
+-- GoldsmithDB.priceHistory[itemID]["YYYY-MM-DD"], for the item page's
+-- chart, usual prices and Cheap materials. Each day's first login also
+-- saves the AH price Goldsmith shows (RecordDailyHistory), so all of that
+-- works without Auctionator too.
 local HISTORY_DAYS = 60
 
--- The same pass also notes when each item's Auctionator price was seen, as
--- GoldsmithDB.priceSeen[itemID] = { time, price }, because Auctionator only
--- gives ages in whole days. A full scan stamps every item priced today. A
--- search doesn't say which items it saw, so it only stamps items whose
--- price changed: an item it saw at the same price keeps its older time,
--- so a time is never newer than it should be.
-function addon:RecordPriceHistory(isFullScan)
-    local history = GoldsmithDB.priceHistory
-    local seen = GoldsmithDB.priceSeen
-    local now = time()
-    local today = date("%Y-%m-%d")
-    local cutoff = date("%Y-%m-%d", now - HISTORY_DAYS * 86400)
-
+-- Every material and crafted item Goldsmith knows: { [itemID] = name or true }
+local function HistoryItems()
     local items = addon:GetTrackedMaterials()
     for _, recipe in pairs(GoldsmithDB.recipes) do
         items[recipe.outputItemID] = recipe.outputName
@@ -106,8 +97,61 @@ function addon:RecordPriceHistory(isFullScan)
             end
         end
     end
+    return items
+end
 
-    for itemID in pairs(items) do
+local function PruneHistory(history)
+    local cutoff = date("%Y-%m-%d", time() - HISTORY_DAYS * 86400)
+    for itemID, days in pairs(history) do
+        for day in pairs(days) do
+            if day < cutoff then
+                days[day] = nil
+            end
+        end
+        if next(days) == nil then
+            history[itemID] = nil
+        end
+    end
+end
+
+-- Today's AH price as Goldsmith shows it (the freshest of TSM, Auctionator
+-- and Goldsmith Data, as the Prices setting says: user, 2026-10-09, so the
+-- chart matches the AH price tile), for each item without a price today.
+-- Once a day, at login. An Auctionator scan later that day overwrites it
+-- with what it saw; this never overwrites.
+function addon:RecordDailyHistory()
+    local day = date("%Y-%m-%d")
+    if GoldsmithDB.dataHistoryDay == day then return end
+    local history = GoldsmithDB.priceHistory
+    local added = 0
+    for itemID in pairs(HistoryItems()) do
+        if type(itemID) == "number" and not (history[itemID] and history[itemID][day]) then
+            local price = addon:GetAHPrice(itemID)
+            if price and price > 0 then
+                history[itemID] = history[itemID] or {}
+                history[itemID][day] = price
+                added = added + 1
+            end
+        end
+    end
+    GoldsmithDB.dataHistoryDay = day
+    PruneHistory(history)
+    if added > 0 then addon:DataChanged() end
+end
+
+-- The same pass also notes when each item's Auctionator price was seen, as
+-- GoldsmithDB.priceSeen[itemID] = { time, price }, because Auctionator only
+-- gives ages in whole days. A full scan stamps every item priced today. A
+-- search doesn't say which items it saw, so it only stamps items whose
+-- price changed: an item it saw at the same price keeps its older time,
+-- so a time is never newer than it should be.
+function addon:RecordPriceHistory(isFullScan)
+    local history = GoldsmithDB.priceHistory
+    local seen = GoldsmithDB.priceSeen
+    local now = time()
+    local today = date("%Y-%m-%d")
+
+    for itemID in pairs(HistoryItems()) do
         -- Only prices Auctionator saw today, so old prices aren't saved as new
         local price = addon:GetAuctionatorPrice(itemID)
         if price and addon:GetAuctionatorAge(itemID) == 0 then
@@ -125,16 +169,7 @@ function addon:RecordPriceHistory(isFullScan)
         if now - entry[1] > 2 * 86400 then seen[itemID] = nil end
     end
 
-    for itemID, days in pairs(history) do
-        for day in pairs(days) do
-            if day < cutoff then
-                days[day] = nil
-            end
-        end
-        if next(days) == nil then
-            history[itemID] = nil
-        end
-    end
+    PruneHistory(history)
 end
 
 -- Stock-up insights
@@ -219,6 +254,8 @@ end
 function addon:InitializeStock()
     GoldsmithDB.priceHistory = GoldsmithDB.priceHistory or {}
     GoldsmithDB.priceSeen = GoldsmithDB.priceSeen or {}
+    -- After login settles (recipes and tier data are in by then)
+    C_Timer.After(20, function() addon:RecordDailyHistory() end)
 end
 
 _G.Goldsmith = addon

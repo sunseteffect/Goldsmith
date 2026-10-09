@@ -88,9 +88,7 @@ local function PriceSourceText()
         -- prices, or when it's newer than the last Auctionator scan
         local updated = addon:GetBlizzardDataTime()
         local days = math.floor((time() - updated) / 86400)
-        return "Prices: Goldsmith Data " .. (date("%Y-%m-%d", updated) == date("%Y-%m-%d")
-            and ("at " .. date("%H:%M", updated))
-            or string.format("%d day%s ago", math.max(days, 1), days == 1 and "" or "s")),
+        return "Prices: Goldsmith Data " .. When(updated),
             days >= 1 and "warning" or "muted"
     elseif addon:HasAuctionator() then
         return "Prices: no Auctionator scan yet", "warning"
