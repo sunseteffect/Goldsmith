@@ -838,10 +838,13 @@ local function UpdateWhenOpen(recipe, update, tries)
 end
 
 
--- Materials whose AH price is missing or a day or more old. Every quality
--- of the recipe's own materials is checked, not just what the plan buys:
--- the best mix can switch to a quality whose price was out of date once
--- buying rescans it. Vendor items are skipped.
+-- Materials whose AH price is missing or old: an Auctionator scan a day or
+-- more old, Goldsmith Data two or more (it's released about once a day, so
+-- a day old is normal). Every quality of the recipe's own materials is
+-- checked, not just what the plan buys: the best mix can switch to a
+-- quality whose price was out of date once buying rescans it. Vendor
+-- items are skipped.
+local STALE_DATA_DAYS = 2
 local function StalePrices(plan)
     local seen, stale = {}, {}
     local function Check(itemID)
@@ -849,7 +852,9 @@ local function StalePrices(plan)
         seen[itemID] = true
         if addon:GetVendorPrice(itemID) then return end
         local price, source, age = addon:GetAHPriceInfo(itemID)
-        if not price or ((source == "Auctionator" or source == "Blizzard") and (age or 0) >= 1) then
+        local old = (source == "Auctionator" and (age or 0) >= 1)
+            or (source == "Blizzard" and (age or 0) >= STALE_DATA_DAYS)
+        if not price or old then
             table.insert(stale, { itemID = itemID })
         end
     end

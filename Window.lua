@@ -45,6 +45,9 @@ end
 -- price source setting). Automatic: an Auctionator scan made this session
 -- beats TSM; otherwise TSM. Without either, Blizzard AH data under a day
 -- old beats an older Auctionator scan. Returns text and a theme color.
+-- Goldsmith Data this many days old turns the header orange
+local DATA_STALE_DAYS = 2
+
 -- "at 14:32" today, else "2 days ago"
 local function When(ts)
     if date("%Y-%m-%d", ts) == date("%Y-%m-%d") then return "at " .. date("%H:%M", ts) end
@@ -86,10 +89,12 @@ local function PriceSourceText()
     elseif addon:GetBlizzardDataTime() then
         -- Blizzard AH data (commodities only) fills in without either addon's
         -- prices, or when it's newer than the last Auctionator scan
+        -- Releases come about once a day, so a day old is normal: orange
+        -- only from DATA_STALE_DAYS on
         local updated = addon:GetBlizzardDataTime()
         local days = math.floor((time() - updated) / 86400)
         return "Prices: Goldsmith Data " .. When(updated),
-            days >= 1 and "warning" or "muted"
+            days >= DATA_STALE_DAYS and "warning" or "muted"
     elseif addon:HasAuctionator() then
         return "Prices: no Auctionator scan yet", "warning"
     end
