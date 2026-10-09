@@ -303,7 +303,7 @@ end
 -- own bags count, and those aren't known here) and has no craft states.
 function addon:BuildQueue(charKey)
     local mine = charKey == addon.charKey
-    local useOnHand = mine and GoldsmithDB.ui2.planUseOnHand ~= false
+    local useOnHand = mine
     local pool = {}
     local q = { charKey = charKey, mine = mine, rows = {}, cost = 0, revenue = 0, profit = 0, complete = true,
                 listName = "Goldsmith: Queue (" .. CharName(charKey) .. ")", listKey = "queue:" .. charKey }
@@ -596,6 +596,8 @@ local function UpdatePanel()
     local q = addon:BuildQueue(addon.charKey)
     local row = addon:QueueNextRow(q)
     panel.row = row
+    -- Blocked by "Needs Anvil nearby": checked every second (below)
+    panel.nearby = row and row.state and row.state.nearby or nil
 
     local shown = math.min(#q.rows, PANEL_LINES)
     for i, line in ipairs(panel.lines) do
@@ -667,6 +669,12 @@ end
 events:SetScript("OnEvent", function(_, event)
     if event == "TRADE_SKILL_CLOSE" then syncedKey = nil end
     UpdateSoon()
+end)
+
+-- Walking up to an anvil fires no event, so while the next craft needs one
+-- nearby the panel is checked every second
+C_Timer.NewTicker(1, function()
+    if panel and panel:IsShown() and panel.nearby then UpdateSoon() end
 end)
 
 _G.Goldsmith = addon

@@ -395,6 +395,8 @@ function addon:Initialize()
     GoldsmithDB.debugPlans = nil
     -- The Hover explanations setting is gone (always Hold Ctrl now)
     if GoldsmithDB.settings then GoldsmithDB.settings.explain = nil end
+    -- So is "Use materials I have" (always on now)
+    if GoldsmithDB.ui2 then GoldsmithDB.ui2.planUseOnHand = nil end
     -- Left from v1's window; still holds the planner's Buy/Craft/Mill choices
     GoldsmithDB.ui = GoldsmithDB.ui or {}
     LearnProfessionIcons()

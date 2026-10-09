@@ -136,10 +136,14 @@ end
 -- The batch's lines: { title, item, details, profit (text or nil) }
 local function Describe(b)
     local finished = b.done >= b.crafts
+    -- Items still to make for the plan: multicraft can cover the crafts
+    -- concentration didn't (7 of 8 crafts made 15 of 8 items, 2026-10-09)
+    local left = b.planQuantity and math.max(b.planQuantity - b.made, 0)
+    local moreToGo = finished and b.planCrafts and b.planCrafts > b.crafts and (left == nil or left > 0)
     local title
     if not finished then
         title = string.format("Crafting stopped: %d of %d done", b.done, b.crafts)
-    elseif b.planCrafts and b.planCrafts > b.crafts then
+    elseif moreToGo then
         title = "Batch complete"
     else
         title = "Craft complete"
@@ -153,8 +157,12 @@ local function Describe(b)
     table.insert(details, string.format("%d craft%s", b.done, b.done == 1 and "" or "s")
         .. (b.concentrate and " with concentration" or ""))
     if b.extra > 0 then
-        table.insert(details, string.format("Multicraft: %s extra (%d proc%s)",
-            Colored("+" .. b.extra, "profit"), b.procs, b.procs == 1 and "" or "s"))
+        -- What the extra items sell for, after the AH cut
+        local price = addon:GetMarketPrice(b.itemID)
+        local worth = price and b.extra * price * (1 - AH_CUT)
+        table.insert(details, string.format("Multicraft: %s extra (%d proc%s)%s",
+            Colored("+" .. b.extra, "profit"), b.procs, b.procs == 1 and "" or "s",
+            worth and worth > 0 and Colored(" (" .. Money(worth) .. ")", "profit") or ""))
     end
     local saved = {}
     for id, qty in pairs(b.saved) do
@@ -176,9 +184,11 @@ local function Describe(b)
         table.insert(details, "Resourcefulness saved: " .. table.concat(names, ", ")
             .. (value > 0 and Colored(" (" .. Money(value) .. ")", "profit") or ""))
     end
-    if finished and b.planCrafts and b.planCrafts > b.crafts then
-        table.insert(details, Colored(string.format("The plan has %d more craft%s to go.",
-            b.planCrafts - b.crafts, b.planCrafts - b.crafts == 1 and "" or "s"), "warning"))
+    if moreToGo then
+        local text = left and string.format("The plan needs %d more.", left)
+            or string.format("The plan has %d more craft%s to go.", b.planCrafts - b.crafts,
+                b.planCrafts - b.crafts == 1 and "" or "s")
+        table.insert(details, Colored(text, "warning"))
     end
 
     local profit
@@ -263,6 +273,7 @@ function addon:StartCraftBatch(recipe, state)
     batch = {
         recipeID = recipe.recipeID, name = recipe.outputName, itemID = nil,
         crafts = state.crafts or 1, planCrafts = state.planCrafts, concentrate = state.concentrate,
+        planQuantity = state.planQuantity,
         fromPlan = state.fromPlan,
         done = 0, made = 0, extra = 0, procs = 0, saved = {}, cost = 0, partial = false,
     }
@@ -270,7 +281,10 @@ function addon:StartCraftBatch(recipe, state)
 end
 
 -- One craft finished (Pricing.lua's craft result, after its lot is saved)
-function addon:CraftBatchResult(recipeID, recipe, resultData, lot)
+-- used: what the craft used up ({ [itemID] = quantity }), priced here at
+-- today's prices like the planner (the lot's own cost is what yours cost
+-- you, so the notice and the plan disagreed, 2026-10-09)
+function addon:CraftBatchResult(recipeID, recipe, resultData, lot, used)
     local b = batch
     if not (b and recipeID == b.recipeID and resultData) then return end
     b.itemID = b.itemID or resultData.itemID
@@ -286,7 +300,18 @@ function addon:CraftBatchResult(recipeID, recipe, resultData, lot)
         local id = ret.itemID or (type(ret.reagent) == "table" and ret.reagent.itemID)
         if id and ret.quantity then b.saved[id] = (b.saved[id] or 0) + ret.quantity end
     end
-    if lot then
+    if used then
+        for id, qty in pairs(used) do
+            if qty > 0 then
+                local price = addon:GetMarketPrice(id)
+                if price then
+                    b.cost = b.cost + price * qty
+                else
+                    b.partial = true
+                end
+            end
+        end
+    elseif lot then
         b.cost = b.cost + (lot.unitCost or 0) * (lot.qty or 0)
         b.partial = b.partial or lot.partial
     else

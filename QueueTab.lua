@@ -258,6 +258,12 @@ local function Create(parent)
     view.shop:SetPoint("BOTTOMRIGHT", -14, 12)
     UI.SetTooltip(view.shop, function(tooltip)
         tooltip:AddLine("Send to Auctionator", 1, 1, 1)
+        -- Without Auctionator the button is greyed out; the hover says
+        -- what it would do (user, 2026-10-09: encourage Auctionator)
+        if not addon:HasAuctionator() then
+            addon:AuctionatorPitch(tooltip)
+            return
+        end
         tooltip:AddLine("One shopping list for everything in the queue. Items come off it as you buy them, and it's deleted once everything's bought.",
             0.8, 0.8, 0.8, true)
         local q = view.q
@@ -381,8 +387,9 @@ local function Refresh(v)
         v.vendorLine:SetText("")
     end
 
-    v.shop:SetEnabled(#q.buyAH > 0)
-    v.shop:SetAlpha(#q.buyAH > 0 and 1 or 0.5)
+    local canSend = #q.buyAH > 0 and addon:HasAuctionator()
+    v.shop:SetEnabled(canSend)
+    v.shop:SetAlpha(canSend and 1 or 0.5)
     v.warnings = not empty and Warnings(q) or nil
     v.warnLine:SetText(v.warnings and v.warnings.text or "")
 

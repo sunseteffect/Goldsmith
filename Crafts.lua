@@ -33,6 +33,11 @@ local SEARCH_DELAY = 0.3
 local SEARCH_MIN_LETTERS = 2
 
 local Money, Signed = function(c) return addon:FormatMoney(c) end, function(c) return addon:FormatSignedMoney(c) end
+-- ROI as a whole percent, rounded toward zero: 14.9% shown as "15%" looked
+-- like it met a 15% minimum it didn't (2026-10-09)
+local function Roi(margin)
+    return string.format("%d%%", margin >= 0 and math.floor(margin) or math.ceil(margin))
+end
 
 local SIMPLE_COLUMNS = {
     { key = "item", label = "Item" },
@@ -190,7 +195,7 @@ local function FillCraftRow(row, item)
     if info.profit then
         cells.profit:SetText(Signed(info.profit) .. (info.partial and "*" or ""))
         cells.profit:SetTextColor(addon:Color(addon:MoneyColor(info.profit)))
-        cells.margin:SetText(info.margin and string.format("%.0f%%", info.margin) or "-")
+        cells.margin:SetText(info.margin and Roi(info.margin) or "-")
         cells.margin:SetTextColor(addon:Color("muted"))
     else
         cells.profit:SetText("-")
@@ -299,7 +304,7 @@ local function SalvageTooltip(tooltip, item)
     end
     if info.profit then
         Line(tooltip, "Profit each", string.format("%s%s%s", Signed(info.profit),
-            info.margin and string.format(" (%.0f%% ROI)", info.margin) or "", info.partial and ", at least" or ""),
+            info.margin and (" (" .. Roi(info.margin) .. " ROI)") or "", info.partial and ", at least" or ""),
             addon:MoneyColor(info.profit))
         Line(tooltip, "Per 1,000 " .. s.inputName, Signed(info.profit / s.inputPerCast * 1000),
             addon:MoneyColor(info.profit))
@@ -400,7 +405,7 @@ local function CraftTooltip(tooltip, item)
             stale and "warning" or "muted")
         Why(tooltip, "What it sells for now: the lowest listing, or the usual price when the lowest is far below it (a stray cheap listing). Price data says where it came from and how old it is.")
         Line(tooltip, "Profit each", string.format("%s%s", Signed(info.profit),
-            info.margin and string.format(" (%.0f%% ROI)", info.margin) or ""), addon:MoneyColor(info.profit))
+            info.margin and (" (" .. Roi(info.margin) .. " ROI)") or ""), addon:MoneyColor(info.profit))
         Why(tooltip, "AH price less the 5% cut, less the cost. ROI is that profit as a share of the cost: 100% doubles your gold.")
     else
         Note(tooltip, "No AH price yet. Scan the AH with Auctionator.")
@@ -475,7 +480,7 @@ local function CraftTooltip(tooltip, item)
     end
     addon:ClickHint(tooltip, "Click to plan: materials, quantity, shopping list")
     addon:RightClickHint(tooltip, "Right-click to add it to the queue")
-    addon:ShiftClickHint(tooltip, "Shift-click for the item's page")
+    addon:ShiftClickHint(tooltip, "Shift-click for the item's page, or to search the AH while it's open")
 end
 
 -- Planner
@@ -522,8 +527,15 @@ local function FillPlanRow(row, node)
     if best then
         -- * marks your own choice (right-click) rather than the cheapest
         -- Salvage says how ("Prospect", "Crush"), not "Mill" for everything
-        cells.source:SetText((best.verb or best.method) .. (node.options.override and "*" or ""))
-        cells.source:SetTextColor(addon:Color(METHOD_COLORS[best.method] or "text"))
+        if node.toGet <= 0 and node.have > 0 then
+            -- Nothing left to get: say so, not how you'd get more (gemdust
+            -- turned from "Crush" to "Buy" once crushed, 2026-10-09)
+            cells.source:SetText("From stock")
+            cells.source:SetTextColor(addon:Color("muted"))
+        else
+            cells.source:SetText((best.verb or best.method) .. (node.options.override and "*" or ""))
+            cells.source:SetTextColor(addon:Color(METHOD_COLORS[best.method] or "text"))
+        end
         cells.each:SetText(Money(best.unit))
         -- Priced on what's expected to be used up (node.use, the craft's own
         -- materials), so the totals add up to the craft's cost
@@ -614,6 +626,7 @@ local function PlanTooltip(tooltip, node)
     end
     addon:ClickHint(tooltip, "Click for its item page")
     addon:RightClickHint(tooltip, "Right-click to choose how to get it")
+    addon:ShiftClickHint(tooltip, "Shift-click to search the AH for it (or link it in chat)")
 end
 
 -- Right-click a material: pick how to get it. The choice applies to that
@@ -885,8 +898,18 @@ local function ShoppingWarnings(plan)
     elseif #w.extra > 0 then
         w.text = "The plan changed since you sent the list (it needs less now). Hover Send for details."
     elseif #w.stale > 0 then
-        w.text = string.format("Old or missing AH prices for %d material%s (hover Send). Scan the AH first, or the plan may change after you buy.",
-            #w.stale, #w.stale == 1 and "" or "s")
+        -- The materials by name ("hover Send" pointed at the Send to
+        -- Auctionator button, which meant nothing without Auctionator)
+        local parts = {}
+        for i, item in ipairs(w.stale) do
+            if i > 2 then
+                table.insert(parts, string.format("%d more", #w.stale - 2))
+                break
+            end
+            table.insert(parts, MaterialName(item.itemID))
+        end
+        w.text = string.format("Old or missing AH prices: %s. Search the AH for %s first, or the plan may change after you buy.",
+            table.concat(parts, ", "), #w.stale == 1 and "it" or "them")
     else
         return nil
     end
@@ -920,8 +943,8 @@ end
 local function SwapNotes(state, swapped, tierInfo)
     if not swapped then return end
     for _, s in ipairs(swapped.swaps) do
-        table.insert(state.notes, string.format("Uses %d gold %s you have in place of silver.",
-            s.units, s.name or "material"))
+        table.insert(state.notes, string.format(s.down and "Uses %d silver %s you have in place of gold (same tier)."
+            or "Uses %d gold %s you have in place of silver.", s.units, s.name or "material"))
     end
     if tierInfo and swapped.tier and swapped.tier > tierInfo.tier then
         table.insert(state.notes, string.format("With it, this makes %s instead of %s.",
@@ -1068,19 +1091,46 @@ local function CraftStepState(node, state)
         table.insert(state.blockers, string.format("This character doesn't know %s.", node.name))
         return state
     end
-    local chosen = {}
-    for _, child in ipairs(node.children) do chosen[child.itemID] = true end
     local outputPerCraft = addon:GetCraftModel(recipe)
     local wanted = math.max(math.ceil(node.toGet / math.max(outputPerCraft, 0.01) - 0.0001), 1)
-    local reagents, needs, swapped = addon:GetCraftReagents(recipe.recipeID, { chosen = chosen },
-        GoldsmithDB.ui2.planUseOnHand ~= false and { crafts = wanted } or nil)
+    -- A tier item (gold ingot): the tier row's mix, and its concentration
+    -- when only that reaches the tier; else the qualities the plan chose
+    local row = node.best.tierRow
+    local scenario
+    if row then
+        scenario = row.scenario
+    else
+        local chosen = {}
+        for _, child in ipairs(node.children) do chosen[child.itemID] = true end
+        scenario = { chosen = chosen }
+    end
+    local concentrate = row and row.concentrate == true
+    local reagents, needs, swapped = addon:GetCraftReagents(recipe.recipeID, scenario,
+        { crafts = wanted, concentrate = concentrate, tier = row and row.tier })
     if not reagents then
         table.insert(state.blockers, "The game didn't give this recipe's materials. Try closing and reopening the profession.")
         return state
     end
-    SwapNotes(state, swapped)
+    SwapNotes(state, swapped, row)
+    if concentrate then
+        -- The full cost to start each craft; ingenuity refunds some after
+        local current = addon:GetConcentration(recipe.profession) or 0
+        local full = row.scenario.concentration or row.concentration or 0
+        local expected = math.max(row.concentration or full, 1)
+        local affordable = current >= full and (math.floor((current - full) / expected) + 1) or 0
+        if affordable == 0 then
+            table.insert(state.blockers, string.format("Not enough concentration to make %s: %d to start, you have %d.",
+                node.name, full, current))
+        elseif affordable < wanted then
+            table.insert(state.notes, string.format("Concentration for %d of the %d crafts.", affordable, wanted))
+            wanted = affordable
+        end
+        table.insert(state.notes, string.format("Makes %s with concentration (about %d a craft): your materials alone don't reach that quality.",
+            node.name, expected))
+    end
     local crafts = CheckMaterials(state, needs, wanted)
     state.recipeID, state.reagents, state.crafts = recipe.recipeID, reagents, crafts
+    state.concentrate = concentrate
     state.enabled = #state.blockers == 0 and crafts > 0
     state.label = StepLabel("Craft", crafts, node.name)
     return state
@@ -1143,7 +1193,7 @@ local function CraftState(p, tierInfo, plan)
 
     -- Materials you'll mill or craft yourself come first, one step per
     -- click; the button moves on as your bags fill up
-    local steps = GoldsmithDB.ui2.planUseOnHand ~= false and CollectSteps(plan.nodes, {}) or {}
+    local steps = CollectSteps(plan.nodes, {})
     if #steps > 0 then
         return StepState(steps, plan)
     end
@@ -1151,13 +1201,16 @@ local function CraftState(p, tierInfo, plan)
     if C_TradeSkillUI.GetRecipeRequirements then
         local ok, requirements = pcall(C_TradeSkillUI.GetRecipeRequirements, recipe.recipeID)
         for _, r in ipairs(ok and requirements or {}) do
-            if not r.met then table.insert(state.blockers, "Needs " .. (r.name or "something") .. " nearby.") end
+            if not r.met then
+                table.insert(state.blockers, "Needs " .. (r.name or "something") .. " nearby.")
+                -- Walking up to it fires no event: checked again every second
+                state.nearby = true
+            end
         end
     end
 
     local reagents, needs, swapped = addon:GetCraftReagents(recipe.recipeID, tierInfo and tierInfo.scenario,
-        GoldsmithDB.ui2.planUseOnHand ~= false
-            and { crafts = plan.crafts, concentrate = tierInfo and tierInfo.concentrate == true } or nil)
+        { crafts = plan.crafts, concentrate = tierInfo and tierInfo.concentrate == true, tier = tierInfo and tierInfo.tier })
     if not reagents then
         table.insert(state.blockers, "The game didn't give this recipe's materials. Try closing and reopening the profession.")
         return state
@@ -1195,7 +1248,7 @@ local function CraftState(p, tierInfo, plan)
     -- The plan's own item (not a step): its crafts get a "Craft complete"
     -- notice (CraftDone.lua). planCrafts is the whole plan, which can be
     -- more than one batch (concentration or materials for fewer).
-    state.final, state.planCrafts = true, plan.crafts
+    state.final, state.planCrafts, state.planQuantity = true, plan.crafts, plan.quantity
     return state
 end
 
@@ -1317,11 +1370,9 @@ local function CreatePlanScreen(parent)
     screen.crafts = UI.Text(screen, "small", "muted")
     screen.crafts:SetPoint("LEFT", screen.qty, "RIGHT", 10, 0)
 
-    screen.useHave = UI.Checkbox(screen, "Use materials I have", function(checked)
-        ui.planUseOnHand = checked
-        screen:Update()
-    end)
-    screen.useHave:SetPoint("TOPRIGHT", 0, -44)
+    -- (A "Use materials I have" checkbox was here: always on now, user
+    -- 2026-10-09. Off, the plan hid what you held and picked mixes you
+    -- hadn't bought, so the Craft button blocked after shopping.)
 
     -- For crafts with tiers: plan the tier with or without concentration
     screen.useConc = UI.Checkbox(screen, "Use concentration", function(checked)
@@ -1331,7 +1382,7 @@ local function CreatePlanScreen(parent)
         p.scenario = nil -- the chosen mix belongs to the other way
         screen:Update()
     end)
-    screen.useConc:SetPoint("RIGHT", screen.useHave, "LEFT", -20, 0)
+    screen.useConc:SetPoint("TOPRIGHT", 0, -44)
     UI.SetTooltip(screen.useConc, function(tooltip)
         tooltip:AddLine("Use concentration", 1, 1, 1)
         addon:Explain(tooltip, "Plan this tier with concentration, using the mix of material qualities that earns the most. Some tiers can only be reached with it.", 0.6, 0.6, 0.6, true)
@@ -1341,7 +1392,13 @@ local function CreatePlanScreen(parent)
         fill = FillPlanRow,
         tooltip = PlanTooltip,
         onClick = function(node, button)
-            if button == "RightButton" then PlanMenu(node) else addon:OpenItem(node.name, node.itemID) end
+            if button == "RightButton" then
+                PlanMenu(node)
+            elseif IsShiftKeyDown() and addon:ShiftClickItem(node.itemID, node.name) then
+                -- Into the AH search or chat
+            else
+                addon:OpenItem(node.name, node.itemID)
+            end
         end,
         empty = "Enter how many to make.",
     })
@@ -1620,6 +1677,12 @@ local function CreatePlanScreen(parent)
     screen.shop:SetPoint("BOTTOMRIGHT", -14, 12)
     UI.SetTooltip(screen.shop, function(tooltip)
         tooltip:AddLine("Send to Auctionator", 1, 1, 1)
+        -- Without Auctionator the button is greyed out; the hover says
+        -- what it would do (user, 2026-10-09: encourage Auctionator)
+        if not addon:HasAuctionator() then
+            addon:AuctionatorPitch(tooltip)
+            return
+        end
         tooltip:AddLine("Makes a shopping list of what to buy. Items come off it as you buy them, and it's deleted once everything's bought.",
             0.8, 0.8, 0.8, true)
         local w = screen.warnings
@@ -1733,11 +1796,10 @@ local function CreatePlanScreen(parent)
         local p = screen.plan
         if not p then return end
         local recipe = p.recipe
-        screen.useHave:SetChecked(ui.planUseOnHand ~= false)
 
         local tierInfo, tierNote = addon:WithCharacter(p.charKey, FindTierInfo, p)
         -- Using what you hold: a mix of the same tier that needs less buying
-        if ui.planUseOnHand ~= false and tierInfo then
+        if tierInfo then
             tierInfo = addon:WithCharacter(p.charKey, addon.PreferHeldMix, addon, recipe, tierInfo,
                 tonumber(screen.qty:GetText()) or 0)
         end
@@ -1771,7 +1833,7 @@ local function CreatePlanScreen(parent)
         end
 
         local plan = addon:WithCharacter(p.charKey, addon.BuildPlan, addon, recipe, quantity,
-            ui.planUseOnHand ~= false, tierInfo)
+            true, tierInfo)
         screen.current = plan
         screen.list:SetItems(addon:FlattenPlan(plan))
         screen.crafts:SetFormattedText("%d craft%s, about %.1f made", plan.crafts,
@@ -1802,7 +1864,7 @@ local function CreatePlanScreen(parent)
                 addon:PriceAgeText((tierInfo and tierInfo.itemID) or recipe.outputItemID) or ""))
             screen.profit.value:SetText(Signed(plan.profit))
             screen.profit.value:SetTextColor(addon:Color(addon:MoneyColor(plan.profit)))
-            screen.profit.note:SetText(plan.margin and string.format("%.0f%% ROI", plan.margin) or "")
+            screen.profit.note:SetText(plan.margin and (Roi(plan.margin) .. " ROI") or "")
         else
             screen.sells.value:SetText("-")
             screen.sells.value:SetTextColor(addon:Color("dim"))
@@ -1821,7 +1883,9 @@ local function CreatePlanScreen(parent)
         if level or (plan.demand and plan.demand > 0) then
             local parts, warn = {}, false
             if level then
-                table.insert(parts, addon:Colorize(addon:SellLevelText(level), addon:SellLevelColor(level)) .. " (Goldsmith Data).")
+                -- "Slow" alone is unclear outside the Crafts column
+                local levelText = level == addon.SELL_LEVEL.slow and "Slow seller" or addon:SellLevelText(level)
+                table.insert(parts, addon:Colorize(levelText, addon:SellLevelColor(level)) .. " (Goldsmith Data).")
                 warn = level ~= addon.SELL_LEVEL.sells
             end
             if plan.demand and plan.demand > 0 then
@@ -1866,8 +1930,9 @@ local function CreatePlanScreen(parent)
             screen.vendorLine:SetText("")
         end
 
-        screen.shop:SetEnabled(#plan.buyAH > 0)
-        screen.shop:SetAlpha(#plan.buyAH > 0 and 1 or 0.5)
+        local canSend = #plan.buyAH > 0 and addon:HasAuctionator()
+        screen.shop:SetEnabled(canSend)
+        screen.shop:SetAlpha(canSend and 1 or 0.5)
         -- Old prices only matter while there's something to buy
         local warnings = ShoppingWarnings(plan)
         if warnings and #warnings.more == 0 and #warnings.extra == 0 and #plan.buyAH == 0 then
@@ -2016,11 +2081,6 @@ local function CreateSalvageScreen(parent)
     screen.casts = UI.Text(screen, "small", "muted")
     screen.casts:SetPoint("LEFT", screen.qty, "RIGHT", 10, 0)
 
-    screen.useHave = UI.Checkbox(screen, "Use materials I have", function(checked)
-        ui.planUseOnHand = checked
-        screen:Update()
-    end)
-    screen.useHave:SetPoint("TOPRIGHT", 0, -44)
 
     screen.list = UI.List(screen, {
         fill = FillSalvageRow,
@@ -2076,6 +2136,12 @@ local function CreateSalvageScreen(parent)
     screen.shop:SetPoint("BOTTOMRIGHT", -14, 12)
     UI.SetTooltip(screen.shop, function(tooltip)
         tooltip:AddLine("Send to Auctionator", 1, 1, 1)
+        -- Without Auctionator the button is greyed out; the hover says
+        -- what it would do (user, 2026-10-09: encourage Auctionator)
+        if not addon:HasAuctionator() then
+            addon:AuctionatorPitch(tooltip)
+            return
+        end
         tooltip:AddLine("Makes a shopping list of what to buy. Items come off it as you buy them, and it's deleted once everything's bought.",
             0.8, 0.8, 0.8, true)
     end, "ANCHOR_TOP")
@@ -2135,8 +2201,6 @@ local function CreateSalvageScreen(parent)
         local t = screen.target
         if not t then return end
         local mine = t.charKey == addon.charKey
-        screen.useHave:SetChecked(ui.planUseOnHand ~= false)
-        screen.useHave:SetShown(mine)
         screen.queued = addon:FindQueueEntry(t.charKey, nil, nil, nil, t.itemID)
         screen.queue:SetLabel(screen.queued and "Update queue" or "Add to queue")
         screen.verbLabel:SetText(t.verb)
@@ -2155,7 +2219,7 @@ local function CreateSalvageScreen(parent)
             return
         end
 
-        local plan = addon:BuildSalvagePlan(t.itemID, quantity, mine and ui.planUseOnHand ~= false)
+        local plan = addon:BuildSalvagePlan(t.itemID, quantity, mine)
         screen.current = plan
         local found = plan.row.salvageRow
         local s = found and found.salvage
@@ -2265,8 +2329,9 @@ local function CreateSalvageScreen(parent)
         local buy = plan.buyAH[1]
         screen.spendLine:SetText(buy and string.format("To buy on the AH: %d %s, about %s", buy.quantity, t.name, Money(buy.cost))
             or "Nothing to buy: you have enough.")
-        screen.shop:SetEnabled(buy ~= nil)
-        screen.shop:SetAlpha(buy and 1 or 0.5)
+        local canSend = buy ~= nil and addon:HasAuctionator()
+        screen.shop:SetEnabled(canSend)
+        screen.shop:SetAlpha(canSend and 1 or 0.5)
 
         local profession = t.profession or "Inscription"
         if mine and not ProfessionOpen({ profession = profession }) then
@@ -2578,16 +2643,7 @@ local function Create(parent)
             if IsShiftKeyDown() then
                 local itemID = item.salvage and item.salvage.inputID or item.itemID
                 local name = item.salvage and item.salvage.inputName or item.recipe.outputName
-                local link = itemID and select(2, C_Item.GetItemInfo(itemID))
-                -- Old and newer names of the chat functions
-                local chat = (ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow())
-                    or (ChatFrameUtil and ChatFrameUtil.GetActiveWindow and ChatFrameUtil.GetActiveWindow())
-                local insert = (ChatFrameUtil and ChatFrameUtil.InsertLink) or ChatEdit_InsertLink
-                if chat and link and insert then
-                    insert(link)
-                else
-                    addon:OpenItem(name, itemID)
-                end
+                if not addon:ShiftClickItem(itemID, name) then addon:OpenItem(name, itemID) end
                 return
             end
             if item.unlearned then
@@ -2742,9 +2798,21 @@ local function Refresh(v, state)
     -- Recommended: what Do this next would suggest (no reason against it,
     -- every material priced)
     if show == "recommended" then
+        -- Concentration ways need enough extra gold per point, like Do this
+        -- next (less when that character's concentration is full)
+        local floors = {}
+        local function GoodUse(item)
+            local info = item.info
+            if not (info.concentrate and item.recipe) then return true end
+            local key = (item.charKey or addon.charKey) .. ":" .. tostring(item.recipe.profession)
+            if floors[key] == nil then
+                floors[key] = addon:ConcentrationFloor(item.charKey or addon.charKey, item.recipe.profession)
+            end
+            return (info.concentrationValue or 0) >= floors[key]
+        end
         local kept = {}
         for _, item in ipairs(items) do
-            if not item.whyNot and not item.info.partial then table.insert(kept, item) end
+            if not item.whyNot and not item.info.partial and GoodUse(item) then table.insert(kept, item) end
         end
         items = kept
     end
@@ -2820,7 +2888,7 @@ local function Refresh(v, state)
         end
         v.footnote:SetText((unlearnedMode
             and "Recipes you haven't learned, costed with your skill today. Hover one for where to learn it, click for its page."
-            or "Hover a craft for how its cost is worked out, click it to plan, right-click to queue it, shift-click for its page.")
+            or "Hover a craft for how its cost is worked out, click it to plan, right-click to queue it, shift-click for its page (or the AH search).")
             .. (partial and "   + some material costs unknown,  * profit is at most this" or ""))
     end
 end
@@ -2858,6 +2926,16 @@ craftEvents:SetScript("OnEvent", function()
         if view.plan:IsVisible() and view.plan.plan then view.plan:Update() end
         if view.salvage:IsVisible() and view.salvage.target then view.salvage:Update() end
     end)
+end)
+
+-- "Needs Anvil nearby": nothing tells an addon you walked up to it, so
+-- while that's what blocks the Craft button it's checked every second
+-- (user, 2026-10-09: still greyed out next to the anvil)
+C_Timer.NewTicker(1, function()
+    local screen = view and view.plan
+    if screen and screen:IsVisible() and screen.plan and screen.craftState and screen.craftState.nearby then
+        screen:Update()
+    end
 end)
 
 _G.Goldsmith = addon

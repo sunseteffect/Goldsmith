@@ -189,6 +189,43 @@ function addon:AddItemDescription(tooltip, itemID)
     end
 end
 
+-- What Auctionator would add, on Goldsmith's Send to Auctionator buttons
+-- while it isn't installed or turned on (they're greyed out then)
+function addon:AuctionatorPitch(tooltip)
+    tooltip:AddLine("Needs the Auctionator addon (free on CurseForge).", 1, 0.82, 0, true)
+    tooltip:AddLine("With it, this makes a shopping list on the AH that crosses items off as you buy them, and one scan refreshes every price in Goldsmith.",
+        0.8, 0.8, 0.8, true)
+end
+
+-- Shift-clicking an item in Goldsmith, like shift-clicking one in your
+-- bags: into the chat you're typing in as a link, else into the AH's
+-- search (and searched) when the AH is open. Returns true if it went
+-- somewhere; the caller does its own thing otherwise (the item's page).
+function addon:ShiftClickItem(itemID, name)
+    local link = itemID and select(2, C_Item.GetItemInfo(itemID))
+    -- Old and newer names of the chat functions
+    local chat = (ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow())
+        or (ChatFrameUtil and ChatFrameUtil.GetActiveWindow and ChatFrameUtil.GetActiveWindow())
+    local insert = (ChatFrameUtil and ChatFrameUtil.InsertLink) or ChatEdit_InsertLink
+    if chat and link and insert then
+        insert(link)
+        return true
+    end
+    local ah = AuctionHouseFrame
+    local bar = ah and ah:IsShown() and ah.SearchBar
+    name = name or (itemID and C_Item.GetItemNameByID(itemID))
+    if bar and bar.SearchBox and name then
+        -- The Buy tab, where the search is
+        if ah.SetDisplayMode and AuctionHouseFrameDisplayMode then
+            pcall(ah.SetDisplayMode, ah, AuctionHouseFrameDisplayMode.Buy)
+        end
+        bar.SearchBox:SetText(strtrim((name:gsub("|A.-|a", ""))))
+        if bar.StartSearch then pcall(bar.StartSearch, bar) end
+        return true
+    end
+    return false
+end
+
 local modifierWatch = CreateFrame("Frame")
 modifierWatch:RegisterEvent("MODIFIER_STATE_CHANGED")
 modifierWatch:SetScript("OnEvent", function(_, _, key)

@@ -1456,9 +1456,9 @@ local function OnCraftResult(resultData)
     end
 
     -- Order crafts still teach the proc sizes above; only the lot differs
-    local lot = addon:RecordCraftLot(recipe, resultData, currentCraftReagents, currentCraftIsOrder, currentOrderTerms)
+    local lot, used = addon:RecordCraftLot(recipe, resultData, currentCraftReagents, currentCraftIsOrder, currentOrderTerms)
     -- The planner's "Craft complete" notice (CraftDone.lua)
-    if not currentCraftIsOrder then addon:CraftBatchResult(currentCraftRecipeID, recipe, resultData, lot) end
+    if not currentCraftIsOrder then addon:CraftBatchResult(currentCraftRecipeID, recipe, resultData, lot, used) end
 end
 
 -- Crafted lots
@@ -1560,7 +1560,8 @@ function addon:RepairOrderLots()
 end
 
 -- Saves one craft's lot (see Crafted lots above) and returns it, or nil
--- if the craft made nothing
+-- if the craft made nothing; for your own crafts also what it used up
+-- ({ [itemID] = quantity }, resourcefulness returns taken off)
 function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTerms)
     local made = resultData.quantity or 0
     if made <= 0 then return end
@@ -1680,7 +1681,7 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTe
     while #lots > CRAFT_LOT_LIMIT do
         table.remove(lots, 1)
     end
-    return lot
+    return lot, used
 end
 
 -- Average cost of the newest lots covering `units` items (you'd normally
@@ -1784,9 +1785,15 @@ function addon:GetOwnCost(itemName, excludeItemID)
     return total / qty, table.concat(labels, "+")
 end
 
--- Unit cost of one reagent slot, from the first source that has data:
---   1. what it cost you (purchases and milling)
---   2. Auctionator's current AH price
+-- Unit cost of one reagent slot, the cheapest of its qualities:
+--   - today's price (the AH, or the vendor when it's cheaper): what the
+--     materials you hold could be sold for, so what using them costs
+--   - what making it yourself cost (your milling or crafts), when that's
+--     cheaper: making it is a real way to get it, as in the planner
+--   - what you paid, only when there's no price at all
+-- What you paid used to come first, so a held Petrified Root counted at
+-- 331g here and 340g in the planner (user, 2026-10-09: one basis, today's
+-- price, so Crafts, Do this next and the plan agree).
 -- Returns cost, source and the item name used, or nil.
 local SlotCost
 -- The same for every character and recipe using the slot, so it's kept
@@ -1805,36 +1812,41 @@ local function GetSlotCost(slot)
 end
 
 SlotCost = function(slot)
-    local best, bestSource, bestName
+    local best, bestSource, bestName, bestID
+    -- Today's price: the AH, or the vendor when it's cheaper. Recipes saved
+    -- before item IDs were stored have no itemIDs until re-crafted.
+    for i, itemID in ipairs(slot.itemIDs or {}) do
+        local price, source = addon:GetMarketPriceInfo(itemID)
+        if price and (not best or price < best) then
+            best, bestName, bestID = price, slot.names[i], itemID
+            bestSource = source == "Vendor" and "vendor" or "AH price"
+        end
+    end
+    -- Making it yourself, when that's cheaper
+    for _, name in ipairs(slot.names) do
+        local milled = addon:GetMilledCost(name)
+        local crafted = addon:GetCraftedCostByName(name)
+        for _, made in ipairs({ { milled, "milled" }, { crafted, "crafted" } }) do
+            if made[1] and (not best or made[1] < best) then
+                best, bestSource, bestName, bestID = made[1], made[2], name, nil
+            end
+        end
+    end
+    if best then
+        return best, bestSource, bestName, bestSource == "AH price" and bestID or nil
+    end
+    -- No price at all: what you paid
     for _, name in ipairs(slot.names) do
         local cost, source = addon:GetOwnCost(name)
         if cost and (not best or cost < best) then
             best, bestSource, bestName = cost, source, name
         end
     end
-    if best then
-        return best, bestSource, bestName
-    end
-
-    -- Recipes saved before item IDs were stored have no itemIDs until re-crafted
-    -- Market price: the AH, or the vendor when it's cheaper
-    local bestID, bestMarketSource
-    for i, itemID in ipairs(slot.itemIDs or {}) do
-        local price, source = addon:GetMarketPriceInfo(itemID)
-        if price and (not best or price < best) then
-            best, bestName, bestID, bestMarketSource = price, slot.names[i], itemID, source
-        end
-    end
-    if best then
-        if bestMarketSource == "Vendor" then
-            return best, "vendor", bestName
-        end
-        return best, "AH price", bestName, bestID
-    end
+    if best then return best, bestSource, bestName end
 end
 
--- Cheapest known unit cost for a recipe slot (what you paid or milled, else
--- the AH price), for other files. Returns cost and source, or nil.
+-- Cheapest known unit cost for a recipe slot (see SlotCost), for other
+-- files. Returns cost and source, or nil.
 function addon:GetSlotUnitCost(slot)
     local cost, source = GetSlotCost(slot)
     return cost, source
@@ -2020,10 +2032,23 @@ local function AddTooltipLines(tooltip, data)
     end
     local short = mode == "short"
 
+    -- What you paid for the ones you bought, unless the ones you hold are
+    -- your own crafts ("avg cost 160.55g (newest 1 bought)" showed on 28
+    -- crafted alloys, 2026-10-09)
+    local madeFor, madeUnits, madePartial = addon:GetCraftedCost(data.id)
     local avg, qty = addon:GetAverageCost(name)
-    if avg then
-        tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r avg cost",
-            string.format("%s (newest %d bought)", FormatGold(avg), qty), 1, 1, 1, 1, 1, 1)
+    if avg and not madeFor then
+        tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r you paid",
+            string.format("%s each (last %d bought)", FormatGold(avg), qty), 1, 1, 1, 1, 1, 1)
+    end
+    -- Today's AH price, for things you don't craft (crafted items show it
+    -- under their profit), when Auctionator or TSM aren't there to show it
+    if not recipe and not addon:HasAuctionator() and not addon:HasTSM() then
+        local price = addon:GetAHPrice(data.id)
+        if price then
+            tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r AH price",
+                string.format("%s (%s)", FormatGold(price), addon:AHPriceAgeText(data.id) or "?"), 1, 1, 1, 1, 1, 1)
+        end
     end
 
     if not short then addon:AddMillingTooltipLines(tooltip, data.id, name) end
@@ -2041,11 +2066,10 @@ local function AddTooltipLines(tooltip, data)
     if short then return end
 
     -- What the ones you crafted cost you (this exact quality), from your
-    -- latest crafts of it
-    local madeFor, madeUnits, madePartial = addon:GetCraftedCost(data.id)
+    -- latest crafts of it, at the prices then
     if madeFor then
-        tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r you made yours for",
-            string.format("%s%s each (%d from your crafts)", FormatGold(madeFor), madePartial and "+" or "", madeUnits),
+        tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r yours cost you",
+            string.format("%s%s each (%d you crafted)", FormatGold(madeFor), madePartial and "+" or "", madeUnits),
             1, 1, 1, 1, 1, 1)
     end
 
@@ -2057,7 +2081,7 @@ local function AddTooltipLines(tooltip, data)
         unitCost, partial = addon:GetUnitCostBasis(name)
     end
     if unitCost and unitCost > 0 then
-        tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r break-even price",
+        tooltip:AddDoubleLine(madeFor and "|cFF00FF00Goldsmith|r break-even on yours" or "|cFF00FF00Goldsmith|r break-even price",
             FormatGold(unitCost / (1 - AH_CUT)) .. (partial and "+" or ""), 1, 1, 1, 1, 1, 1)
     end
 
@@ -2089,7 +2113,8 @@ function addon:AddRecipeTooltipLines(tooltip, recipe, itemID, showBreakdown, sho
     if info.partial then
         costText = costText .. " (missing " .. #info.missing .. ")"
     end
-    tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r craft cost", costText, 1, 1, 1, 1, 1, 1)
+    -- "Now": today's prices and your stats, unlike "yours cost you" above
+    tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r cost to craft now", costText, 1, 1, 1, 1, 1, 1)
 
     -- Profit if sold at the current AH price, after the AH cut
     if info.profit then
@@ -2097,12 +2122,23 @@ function addon:AddRecipeTooltipLines(tooltip, recipe, itemID, showBreakdown, sho
         if info.profit < 0 then r, g, b = 1, 0.3, 0.3 end
         local profitText = string.format("%s%s each", info.profit >= 0 and "+" or "-", FormatGold(math.abs(info.profit)))
         if info.margin then
-            profitText = profitText .. string.format(" (%.0f%%)", info.margin)
+            -- Toward zero, as in the Crafts tab
+            local m = info.margin >= 0 and math.floor(info.margin) or math.ceil(info.margin)
+            profitText = profitText .. string.format(" (%d%%)", m)
         end
         -- Unknown costs can only lower the profit, so it's an upper bound
-        local label = info.partial and "|cFF00FF00Goldsmith|r profit (at most)" or "|cFF00FF00Goldsmith|r profit"
+        local label = info.partial and "|cFF00FF00Goldsmith|r profit crafting now (at most)"
+            or "|cFF00FF00Goldsmith|r profit crafting now"
         tooltip:AddDoubleLine(label, profitText, 1, 1, 1, r, g, b)
-        if not short then tooltip:AddLine("  AH price " .. info.priceAgeText, 0.6, 0.6, 0.6) end
+        -- Without Auctionator or TSM the price itself, not just its age:
+        -- nothing else in the tooltip shows it then (2026-10-09)
+        if not short then
+            if addon:HasAuctionator() or addon:HasTSM() then
+                tooltip:AddLine("  AH price " .. info.priceAgeText, 0.6, 0.6, 0.6)
+            else
+                tooltip:AddLine(string.format("  AH price %s (%s)", FormatGold(info.price), info.priceAgeText), 0.6, 0.6, 0.6)
+            end
+        end
     end
     if short then return end
 

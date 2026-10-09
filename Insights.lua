@@ -305,8 +305,10 @@ end
 -- Concentration comes back slowly, so it's only worth spending on crafts
 -- that earn at least MIN_CONC_VALUE extra gold per point. When it's full,
 -- or will be within NEAR_FULL_MINUTES, what comes back would be wasted, so
--- any profitable use is suggested.
+-- the floor drops to FULL_CONC_VALUE: not to nothing (user, 2026-10-09:
+-- with enchanting full, crafts at 0.05g a point were recommended).
 local MIN_CONC_VALUE = 0.5 * 10000   -- copper per concentration point
+local FULL_CONC_VALUE = 0.25 * 10000
 local NEAR_FULL_MINUTES = 24 * 60
 local GOOD_CONC_VALUE = 1.5 * 10000  -- copper per point; above this it's a good use
 local planCache = addon:NewCache()
@@ -325,13 +327,29 @@ local function NearFull(current, max, minutesToFull)
     return current >= max or (minutesToFull ~= nil and minutesToFull <= NEAR_FULL_MINUTES)
 end
 
+-- The least extra gold per point worth suggesting for a character's
+-- profession: lower when its concentration is (nearly) full. For the
+-- Crafts tab's Recommended, the same as Do this next.
+function addon:ConcentrationFloor(charKey, profession)
+    local current, max, minutesToFull
+    if charKey == addon.charKey then current, max, minutesToFull = addon:GetConcentration(profession) end
+    if not current then current, max, minutesToFull = addon:GetCharacterConcentration(charKey, profession) end
+    if current and max and max > 0 and NearFull(current, max, minutesToFull) then return FULL_CONC_VALUE end
+    return MIN_CONC_VALUE
+end
+
 local function CachedPlan(key, profession, current, nearFull)
     local store = planCache:Get()
     local id = string.format("%s:%s:%d:%s", key, profession, current, tostring(nearFull))
     local cached = store[id]
     if not cached then
+        local floor = nearFull and FULL_CONC_VALUE or MIN_CONC_VALUE
+        local minROI = addon:Setting("minROI")
         local function Accept(recipe, row)
-            if not nearFull and (row.concentrationValue or 0) < MIN_CONC_VALUE then return false end
+            if (row.concentrationValue or 0) < floor then return false end
+            -- The minimum ROI too, as Best crafts and Crafts > Recommended
+            -- (a 14.9% scroll was a to-do but not recommended, 2026-10-09)
+            if (row.margin or 0) < minROI then return false end
             return IsRecommendable(recipe, row)
         end
         local plan, used, gain = addon:WithCharacter(key, addon.PlanConcentration, addon,

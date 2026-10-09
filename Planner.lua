@@ -20,6 +20,11 @@ local AH_CUT = 0.05
 -- The cheapest available option wins.
 
 local MAX_DEPTH = 4
+-- Salvage (mill, prospect, crush) is only planned from your own rates
+-- after this many salvages of the item, and only when it's this much
+-- cheaper than the other ways (user, 2026-10-09)
+local MIN_SALVAGE_CASTS = 10
+local SALVAGE_MARGIN = 0.10
 
 local function GetOnHand(itemID)
     return C_Item.GetItemCount(itemID, true, false, true, true) or 0
@@ -127,6 +132,31 @@ GetOptions = function(itemID, name, depth, memo, visiting)
 
     -- Craft it
     local recipe = depth < MAX_DEPTH and not visiting[itemID] and FindRecipeForItem(itemID, name)
+    -- A recipe with quality tiers makes the tier your skill and materials
+    -- reach, not whichever the plan wants: a gold ingot was planned as
+    -- crafted from the cheapest materials, and the step made silver ones
+    -- (user, 2026-10-09). Such an item is crafted the way its tier row says
+    -- (the cheapest mix reaching it, with concentration if only that
+    -- reaches it), or not at all if no way does.
+    local td = recipe and addon:StatsChar().tierData[recipe.recipeID]
+    if td then
+        local tier
+        for t, out in pairs(td.outputs or {}) do
+            if out.itemID == itemID then tier = t end
+        end
+        local row
+        if tier then
+            for _, r in ipairs(addon:GetTierRows(recipe) or {}) do
+                -- Without concentration first: it's limited
+                if r.tier == tier and (not row or (row.concentrate and not r.concentrate)) then row = r end
+            end
+        end
+        if row and row.cost and not row.partial then
+            options.craft = { method = "Craft", unit = row.cost, recipe = recipe, tierRow = row,
+                verb = row.concentrate and "Craft + conc" or nil }
+        end
+        recipe = nil
+    end
     if recipe then
         visiting[itemID] = true
         local outputQty, slots = GetCraftNumbers(recipe)
@@ -145,10 +175,13 @@ GetOptions = function(itemID, name, depth, memo, visiting)
         end
     end
 
-    -- Mill it from a herb you've milled before
+    -- Mill it from a herb you've milled before, once you've salvaged it
+    -- MIN_SALVAGE_CASTS times: fewer is luck, not a rate (3 gems crushed
+    -- into 1 gemdust planned crushing at a loss, 2026-10-09)
     for herbID, record in pairs(GoldsmithDB.milling) do
         local out = record.outputs[itemID]
-        if out and out.qty > 0 and record.milled > 0 then
+        local casts = record.milled / math.max(record.perCast or 1, 1)
+        if out and out.qty > 0 and record.milled > 0 and casts >= MIN_SALVAGE_CASTS then
             local herbCost = addon:GetMarketPrice(herbID) or addon:GetAverageCost(record.name)
             if herbCost then
                 -- Split the herb's cost across its pigments by AH value
@@ -178,9 +211,12 @@ GetOptions = function(itemID, name, depth, memo, visiting)
         end
     end
 
+    -- Salvaging is work: it has to beat the rest by SALVAGE_MARGIN to be
+    -- the cheapest way, not by a few silver
     for _, key in ipairs({ "buy", "vendor", "craft", "mill" }) do
         local option = options[key]
-        if option and (not options.cheapest or option.unit < options.cheapest.unit) then
+        local unit = option and (key == "mill" and option.unit * (1 + SALVAGE_MARGIN) or option.unit)
+        if option and (not options.cheapest or unit < options.cheapest.unit) then
             options.cheapest = option
         end
     end
@@ -308,10 +344,19 @@ local function BuildNode(itemID, name, need, depth, ctx, quality, gold)
         local outputQty, slots = GetCraftNumbers(best.recipe)
         local crafts = WholeCrafts(node.toGet, SurePerCraft(best.recipe, outputQty))
         for _, s in ipairs(slots) do
-            local choice = GetSlotChoice(s.slot, depth + 1, ctx.memo, {})
-            if choice then
-                table.insert(node.children,
-                    BuildNode(choice.itemID, choice.name, MaterialNeed(s, crafts), depth + 1, ctx, choice))
+            if best.tierRow then
+                -- A tier item: its materials in the qualities its tier row uses
+                for _, part in ipairs(TopSlotParts(s.slot, best.tierRow, ctx.memo, best.recipe)) do
+                    local choice = part.choice
+                    table.insert(node.children, BuildNode(choice.itemID, choice.name,
+                        PartNeed(s, part.units, crafts), depth + 1, ctx, choice))
+                end
+            else
+                local choice = GetSlotChoice(s.slot, depth + 1, ctx.memo, {})
+                if choice then
+                    table.insert(node.children,
+                        BuildNode(choice.itemID, choice.name, MaterialNeed(s, crafts), depth + 1, ctx, choice))
+                end
             end
         end
     elseif best and best.method == "Mill" and node.toGet > 0 then
@@ -631,7 +676,7 @@ end
 --
 -- The tier rows pick a mix on AH prices alone, so with gold 0.04g cheaper
 -- than silver a plan said to buy 15 gold while 15 silver sat in the bags
--- (2026-10-08). With "Use materials I have", mixes reaching the same tier
+-- (2026-10-08). Plans always use materials you have: mixes reaching the same tier
 -- the same way (and, with concentration, needing no more of it) are scored
 -- on what you'd still spend: what you'd buy at its price, plus for what
 -- you hold and would use, how much more it's worth than the other quality

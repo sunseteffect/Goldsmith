@@ -440,8 +440,8 @@ local HELP = {
     },
     tooltips = {
         "Item tooltips",
-        "Full: everything Goldsmith knows about the item, such as your average cost, how today's price compares, what yours cost to make, break-even, and craft cost and profit with your stats.",
-        "Short: craft cost and profit for things you craft, otherwise your average cost and today's price against usual.",
+        "Full: everything Goldsmith knows about the item, such as what you paid, how today's price compares, what yours cost you, break-even, and the cost and profit of crafting it now with your stats.",
+        "Short: cost and profit of crafting it now for things you craft, otherwise what you paid and today's price against usual.",
         "Off: no Goldsmith lines. Everything is still on the item's page in /gsm.",
     },
     chat = {

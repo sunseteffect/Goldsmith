@@ -493,17 +493,54 @@ function addon:GetCraftReagents(recipeID, scenario, held)
             end
         end
     end
-    local list = BuildList(qslots, highUnits)
-    if swapped then
-        -- Which tier this list really makes
-        local op = Operation(recipeID, list, held.concentrate == true)
-        local td = addon:StatsChar().tierData[recipeID]
-        if op and td then
-            for tier, qualityID in ipairs(td.qualities) do
-                if qualityID == op.craftingQualityID then swapped.tier = tier end
+    -- Which tier a list really makes, by the game
+    local td = addon:StatsChar().tierData[recipeID]
+    local function TierOf(list)
+        local op = Operation(recipeID, list, held and held.concentrate == true)
+        if not (op and td) then return nil end
+        for tier, qualityID in ipairs(td.qualities) do
+            if qualityID == op.craftingQualityID then return tier end
+        end
+    end
+
+    -- The other way: silver you hold for gold you're short of, when it
+    -- costs about the same (user, 2026-10-09: interchangeable both ways).
+    -- Less gold can drop the tier, so the game is asked first and the swap
+    -- is undone if it would. Without concentration only: with it, the
+    -- concentration cost would rise past what the plan counted.
+    if held and (held.crafts or 0) > 0 and held.tier and not held.concentrate then
+        local n, before, down = held.crafts, {}, {}
+        for i, s in ipairs(qslots) do
+            before[i] = highUnits[i]
+            local high = math.min(highUnits[i] or 0, s.quantity)
+            local low = s.quantity - high
+            if high > 0 and s.low ~= s.high and addon:MayUseHeldSilver(s.low, s.high) then
+                local haveHigh = C_Item.GetItemCount(s.high, true, false, true, true) or 0
+                local spareLow = (C_Item.GetItemCount(s.low, true, false, true, true) or 0) - low * n
+                if haveHigh < high * n and spareLow >= n then
+                    local short = math.ceil((high * n - haveHigh) / n)
+                    local units = math.min(short, math.floor(spareLow / n), high)
+                    if units > 0 then
+                        highUnits[i] = high - units
+                        table.insert(down, { itemID = s.low, units = units, down = true,
+                            name = C_Item.GetItemNameByID(s.low) })
+                    end
+                end
+            end
+        end
+        if #down > 0 then
+            local tier = TierOf(BuildList(qslots, highUnits))
+            if tier and tier >= held.tier then
+                swapped = swapped or { swaps = {} }
+                for _, d in ipairs(down) do table.insert(swapped.swaps, d) end
+            else
+                for i in ipairs(qslots) do highUnits[i] = before[i] end
             end
         end
     end
+
+    local list = BuildList(qslots, highUnits)
+    if swapped then swapped.tier = TierOf(list) end
     local needs = {}
     for _, entry in ipairs(list) do
         needs[entry.reagent.itemID] = (needs[entry.reagent.itemID] or 0) + entry.quantity
@@ -541,6 +578,14 @@ function addon:MayUseHeldGold(lowID, highID)
     local low, high = addon:GetMarketPrice(lowID), addon:GetMarketPrice(highID)
     if not low or not high then return false end
     return high <= low * (1 + HELD_UPGRADE_MARGIN)
+end
+
+-- And silver you hold for gold you're short of: when silver costs about
+-- the same or less (it's worth no more used than sold)
+function addon:MayUseHeldSilver(lowID, highID)
+    local low, high = addon:GetMarketPrice(lowID), addon:GetMarketPrice(highID)
+    if not low or not high then return false end
+    return low <= high * (1 + HELD_UPGRADE_MARGIN)
 end
 
 -- Plain description of a scenario's materials by the quality icons the
@@ -610,13 +655,17 @@ local function BuildTierRows(recipe)
 
     -- Concentration value: extra profit per craft from concentrating,
     -- compared with the most profitable way without concentration, per
-    -- point of concentration spent
+    -- point of concentration spent. A way without it that loses gold isn't
+    -- the alternative (you'd not craft it), so the comparison is with 0:
+    -- a scroll losing 1,000g without concentration and making 5g with it
+    -- looked like a great use of 400 points (user, 2026-10-09).
     local bestPlain
     for _, e in ipairs(evaluated) do
         if not e.concentrate and e.profit and (not bestPlain or e.profit > bestPlain) then
             bestPlain = e.profit
         end
     end
+    if bestPlain and bestPlain < 0 then bestPlain = 0 end
     for _, e in ipairs(evaluated) do
         if e.concentrate and e.concentration > 0 and e.profit and bestPlain then
             e.concentrationValue = (e.profit - bestPlain) * e.outputPerCraft / e.concentration
@@ -743,8 +792,13 @@ function addon:PlanConcentration(profession, budget, accept)
     for _, recipeID in ipairs(addon:Keys(GoldsmithDB.recipes)) do
         addon:Yield()
         local recipe = GoldsmithDB.recipes[recipeID] or {}
-        local stats = addon:StatsChar().recipeStats[recipe.recipeID]
-        if recipe.profession == profession and stats and stats.concentrationCurrencyID == currencyID then
+        local char = addon:StatsChar()
+        local stats = char.recipeStats[recipe.recipeID]
+        -- Only recipes this character knows: stats are also read for
+        -- recipes only looked at (Mark of the Magister was a to-do on a
+        -- character who hadn't learned it, 2026-10-09)
+        local known = char.knownRecipes and char.knownRecipes[recipe.recipeID]
+        if recipe.profession == profession and known and stats and stats.concentrationCurrencyID == currencyID then
             local rows = addon:GetTierRows(recipe) or {}
             for _, e in ipairs(rows[1] and rows[1].scenarios or {}) do
                 if e.concentrate and e.concentration > 0 and e.concentrationValue and e.concentrationValue > 0
