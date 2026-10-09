@@ -242,6 +242,8 @@ local function Create(parent)
     end
     view.warnLine = SummaryLine(46)
     view.warnLine:SetTextColor(addon:Color("warning"))
+    view.warnLine:SetWordWrap(true)
+    view.warnLine:SetMaxLines(2)
     view.spendLine = SummaryLine(28)
     view.vendorLine = SummaryLine(10)
 
@@ -334,8 +336,18 @@ local function Warnings(q)
     elseif #w.extra > 0 then
         w.text = "The queue changed since you sent the list (it needs less now). Hover Send for details."
     elseif #w.stale > 0 then
-        w.text = string.format("Old or missing AH prices for %d material%s (hover Send). Scan the AH first, or the plans may change after you buy.",
-            #w.stale, #w.stale == 1 and "" or "s")
+        -- By name, like the planner ("hover Send" meant nothing without
+        -- Auctionator)
+        local parts = {}
+        for i, item in ipairs(w.stale) do
+            if i > 2 then
+                table.insert(parts, string.format("%d more", #w.stale - 2))
+                break
+            end
+            table.insert(parts, C_Item.GetItemNameByID(item.itemID) or "?")
+        end
+        w.text = string.format("Old or missing AH prices: %s. Search the AH for %s before buying.",
+            table.concat(parts, ", "), #w.stale == 1 and "it" or "them")
     else
         return nil
     end

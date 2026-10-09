@@ -908,7 +908,7 @@ local function ShoppingWarnings(plan)
             end
             table.insert(parts, MaterialName(item.itemID))
         end
-        w.text = string.format("Old or missing AH prices: %s. Search the AH for %s first, or the plan may change after you buy.",
+        w.text = string.format("Old or missing AH prices: %s. Search the AH for %s before buying.",
             table.concat(parts, ", "), #w.stale == 1 and "it" or "them")
     else
         return nil
@@ -1660,6 +1660,10 @@ local function CreatePlanScreen(parent)
     -- its list was sent (see ShoppingWarnings)
     screen.warnLine = SummaryLine(64)
     screen.warnLine:SetTextColor(addon:Color("warning"))
+    -- Long lists of materials wrap onto a second line (growing upward,
+    -- there's room under the figures) instead of running off
+    screen.warnLine:SetWordWrap(true)
+    screen.warnLine:SetMaxLines(2)
     screen.demandLine = SummaryLine(46)
     screen.spendLine = SummaryLine(28)
     screen.vendorLine = SummaryLine(10)
@@ -2119,6 +2123,8 @@ local function CreateSalvageScreen(parent)
         return fs
     end
     screen.warnLine = SummaryLine(64)
+    screen.warnLine:SetWordWrap(true)
+    screen.warnLine:SetMaxLines(2)
     screen.compareLine = SummaryLine(46)
     screen.spendLine = SummaryLine(28)
     screen.noteLine = SummaryLine(10)
