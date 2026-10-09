@@ -113,6 +113,40 @@ local function RecordOrderBook(itemID)
     end
 end
 
+-- AH search results (the list a search shows, before clicking an item):
+-- each item's lowest price, so searching updates prices without
+-- Auctionator (user, 2026-10-09: Goldsmith Data was 1,250g, the AH 866g).
+-- Kept as GoldsmithDB.searchPrices[itemID] = { time, price, quantity }
+-- and used for ORDER_BOOK_FRESH like an order book. Materials only from
+-- SEARCH_MIN_PRICE on: for cheap bulk materials one cheap listing is often
+-- a one-unit undercut, and clicking in gives the depth. Crafted items at
+-- any price (a 5g ring scroll was left out at first).
+local SEARCH_MIN_PRICE = 25 * 10000 -- 25g
+
+local function RecordSearchResults(results)
+    GoldsmithDB.searchPrices = GoldsmithDB.searchPrices or {}
+    local now, recorded = time(), false
+    for _, r in ipairs(results or {}) do
+        local key = r.itemKey
+        local itemID = key and key.itemID
+        if itemID and (key.battlePetSpeciesID or 0) == 0 and type(r.minPrice) == "number" and r.minPrice > 0 then
+            GoldsmithDB.searchPrices[itemID] = { time = now, price = r.minPrice, quantity = r.totalQuantity }
+            recorded = true
+        end
+    end
+    return recorded
+end
+
+function addon:GetSearchPrice(itemID)
+    local s = GoldsmithDB.searchPrices and GoldsmithDB.searchPrices[itemID]
+    if not (s and time() - s.time <= ORDER_BOOK_FRESH) then return nil end
+    local name = C_Item.GetItemNameByID(itemID)
+    local material = name and GoldsmithDB.reagents[name] and not addon:FindRecipeByOutput(name)
+    if s.price >= SEARCH_MIN_PRICE or not material then
+        return s.price
+    end
+end
+
 local function GetFreshOrderBook(itemID)
     local book = GoldsmithDB.orderBooks and GoldsmithDB.orderBooks[itemID]
     if book and time() - book.time <= ORDER_BOOK_FRESH then
@@ -220,15 +254,23 @@ local MARKET_TRUST_RATIO = 3
 -- An item that doesn't sell well (Slow or Hardly sells) priced more than
 -- SOLD_HIGH_RATIO times what it sold for this week is a shelf price: the
 -- cheap ones sold and what's left sits (silver Orc Gleeful Glamour: lowest
--- 35.65g, sold for 0.60g). Same idea as TSM's sale average check. Returns
--- the sale price and a note, or nil when the price is fine.
+-- 35.65g, sold for 0.60g). Same idea as TSM's sale average check. Not for
+-- a deep market (SOLD_DEEP_QTY or more listed): a wall of listings at the
+-- lowest price is what you'd list at, not a shelf price (silver Thalassian
+-- Haste scroll: 16,515 at 5.03g, "sold for" 0.95g, priced 0.95g, user
+-- 2026-10-09); the sale price is only noted. Returns the sale price and a
+-- note, nil and a note, or nil when the price is fine.
 local SOLD_HIGH_RATIO = 3
+local SOLD_DEEP_QTY = 100
 
 local function SoldCap(itemID, price)
     local data = GoldsmithPriceData
     local entry = data and data.items and data.items[itemID]
-    local level, sold = entry and entry[5], entry and entry[6]
+    local level, sold, quantity = entry and entry[5], entry and entry[6], entry and entry[4]
     if level and level < addon.SELL_LEVEL.sells and sold and price > sold * SOLD_HIGH_RATIO then
+        if quantity and quantity >= SOLD_DEEP_QTY then
+            return nil, string.format("it sold for %s this week", FormatGold(sold))
+        end
         return sold, string.format("listed at %s, but it sold for %s this week", FormatGold(price), FormatGold(sold))
     end
 end
@@ -248,7 +290,7 @@ local function GetBlizzardPrice(itemID)
         price = market
     end
     local sold, soldNote = SoldCap(itemID, price)
-    if sold then price, note = sold, soldNote end
+    if sold then price, note = sold, soldNote elseif soldNote then note = note or soldNote end
     local age = math.max(0, math.floor((time() - (data.updated or time())) / 86400))
     return price, age, note
 end
@@ -306,6 +348,7 @@ end
 -- price's age in days (Auctionator only), and a note when the price was
 -- adjusted. Sources:
 --   "Live"         - a fresh order book from an AH search
+--   "Search"       - the lowest price in fresh AH search results
 --   "Auctionator"  - Auctionator's last scan
 --   "TSM"          - TSM's minimum buyout
 --   "TSM market"   - TSM's market value, used because the lowest price
@@ -326,6 +369,10 @@ function addon:GetAHPriceInfo(itemID)
     local book = preferred ~= "tsm" and GetFreshOrderBook(itemID)
     if book then
         return GetRobustBookPrice(book), "Live", nil
+    end
+    local searched = preferred ~= "tsm" and addon:GetSearchPrice(itemID)
+    if searched then
+        return searched, "Search", nil
     end
 
     local auctionator = addon:GetAuctionatorPrice(itemID)
@@ -384,7 +431,7 @@ function addon:CheckAgainstMarket(itemID, price, source, age)
         if sold then
             return sold, "Blizzard", blizzardAge, soldNote
         end
-        return price, source, age, note
+        return price, source, age, note or soldNote
     end
     if price < market * UNDERCUT_RATIO then
         price, source, age = market, "TSM market", nil
@@ -448,6 +495,10 @@ function addon:PriceSourceText(itemID, source, age)
     if source == "Live" then
         local book = itemID and GoldsmithDB.orderBooks[itemID]
         return book and string.format("live, %dm ago", math.floor((time() - book.time) / 60)) or "live"
+    end
+    if source == "Search" then
+        local s = itemID and GoldsmithDB.searchPrices and GoldsmithDB.searchPrices[itemID]
+        return s and string.format("AH search, %dm ago", math.floor((time() - s.time) / 60)) or "AH search"
     end
     if source == "TSM" then return "TSM" end
     if source == "TSM market" then return "TSM market value" end
@@ -875,8 +926,16 @@ local function SaveRecipe(recipeID, quiet, attempt, profession, unlearned)
     if not ok or not schematic or not IsCraftRecipe(schematic) then return end
 
     if not profession then
-        local profInfo = C_TradeSkillUI.GetBaseProfessionInfo()
-        profession = (profInfo and profInfo.professionName) or "Unassigned"
+        -- The recipe's own profession first: the open window can be
+        -- another one (an Enchanting recipe was saved as Jewelcrafting from
+        -- a jewelcrafter's window, so no enchanter ever read its tiers)
+        local okL, _, _, _, parentName = pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe, recipeID)
+        if okL and type(parentName) == "string" and parentName ~= "" then
+            profession = parentName
+        else
+            local profInfo = C_TradeSkillUI.GetBaseProfessionInfo()
+            profession = (profInfo and profInfo.professionName) or "Unassigned"
+        end
     end
 
     local outputItemID = GetOutputItemID(recipeID, schematic)
@@ -2359,6 +2418,29 @@ function addon:InitializePricing()
     GoldsmithDB.recipes = GoldsmithDB.recipes or {}
     GoldsmithDB.reagents = GoldsmithDB.reagents or {}
 
+    -- Recipes saved under the profession window that was open rather than
+    -- their own (its skill line says: "Midnight Enchanting"): put them
+    -- right, and drop stats a character without that profession saved
+    local CRAFTING = { "Alchemy", "Blacksmithing", "Enchanting", "Engineering", "Inscription",
+                       "Jewelcrafting", "Leatherworking", "Tailoring" }
+    for recipeID, recipe in pairs(GoldsmithDB.recipes) do
+        local line = recipe.skillLine
+        for _, prof in ipairs(CRAFTING) do
+            if line and recipe.profession ~= prof and line:sub(-#prof) == prof then
+                if GoldsmithDB.products[recipe.outputName] == recipe.profession then
+                    GoldsmithDB.products[recipe.outputName] = prof
+                end
+                recipe.profession = prof
+                addon.recipesVersion = addon.recipesVersion + 1
+                for _, c in pairs(GoldsmithDB.characters or {}) do
+                    if c.recipeStats and c.recipeStats[recipeID] and not (c.professions and c.professions[prof]) then
+                        c.recipeStats[recipeID] = nil
+                    end
+                end
+            end
+        end
+    end
+
     -- Remove salvage recipes saved before they were filtered out
     for recipeID, recipe in pairs(GoldsmithDB.recipes) do
         local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
@@ -2402,6 +2484,41 @@ function addon:InitializePricing()
                 addon.Refresh()
             end
         end
+    end)
+
+    -- Search results: the list comes in pages as it loads, so one refresh
+    -- for the lot shortly after
+    GoldsmithDB.searchPrices = GoldsmithDB.searchPrices or {}
+    for itemID, s in pairs(GoldsmithDB.searchPrices) do
+        if time() - s.time > ORDER_BOOK_KEEP then GoldsmithDB.searchPrices[itemID] = nil end
+    end
+    local searchRefreshPending = false
+    local searchFrame = CreateFrame("Frame")
+    searchFrame:RegisterEvent("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+    searchFrame:RegisterEvent("AUCTION_HOUSE_BROWSE_RESULTS_ADDED")
+    searchFrame:RegisterEvent("AUCTION_HOUSE_SHOW")
+    searchFrame:SetScript("OnEvent", function(_, event, added)
+        -- The first time at the AH without Auctionator: one tip, once ever
+        if event == "AUCTION_HOUSE_SHOW" then
+            if not addon:HasAuctionator() and not GoldsmithDB.auctionatorTipShown then
+                GoldsmithDB.auctionatorTipShown = true
+                addon:Notify("info", "Tip: with Auctionator, one scan refreshes every Goldsmith price.")
+            end
+            return
+        end
+        local ok, results
+        if event == "AUCTION_HOUSE_BROWSE_RESULTS_ADDED" then
+            ok, results = true, added
+        else
+            ok, results = pcall(C_AuctionHouse.GetBrowseResults)
+        end
+        if not (ok and type(results) == "table" and RecordSearchResults(results)) then return end
+        if searchRefreshPending or not addon.Refresh then return end
+        searchRefreshPending = true
+        C_Timer.After(0.5, function()
+            searchRefreshPending = false
+            addon.Refresh()
+        end)
     end)
 
     GoldsmithDB.craftLog = GoldsmithDB.craftLog or {}

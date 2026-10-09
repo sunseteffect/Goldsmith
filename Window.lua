@@ -376,6 +376,21 @@ function addon:CreateWindow()
     priceText:SetPoint("RIGHT", closeButton, "LEFT", -12, 0)
     priceText:SetWordWrap(true)
     priceText:SetMaxLines(2)
+    -- Without Auctionator: a hover on where prices come from, and how to
+    -- get fresher ones (user, 2026-10-09: encourage Auctionator)
+    local priceHover = CreateFrame("Frame", nil, header)
+    priceHover:SetAllPoints(priceText)
+    priceHover:EnableMouse(true)
+    UI.SetTooltip(priceHover, function(tooltip)
+        tooltip:AddLine("AH prices", 1, 1, 1)
+        if addon:HasAuctionator() then
+            tooltip:AddLine("From Auctionator's scans, Goldsmith Data (the region's prices, updated daily) and your AH searches.", 0.8, 0.8, 0.8, true)
+        else
+            tooltip:AddLine("From Goldsmith Data (the region's prices, updated daily) and your AH searches.", 0.8, 0.8, 0.8, true)
+            local r, g, b = addon:Color("gold")
+            tooltip:AddLine("Tip: with Auctionator, one scan refreshes every price.", r, g, b, true)
+        end
+    end, "ANCHOR_BOTTOM")
 
     -- Tabs
     local tabArea = UI.Panel(frame, "header")

@@ -956,8 +956,11 @@ function addon:GetCraftRows(prof, opts)
             and (not opts.showExpansion or opts.showExpansion(addon:GetRecipeExpansion(recipe)))
             and (opts.showIgnored or not addon:IsIgnored(recipe.outputItemID))
             and (not opts.match or opts.match({ recipe.outputName, recipe.name }))
-            -- Recipes only excluded characters know are left out
-            and (opts.onlyMine or addon:IsCharacterIncluded(CrafterFor(recipeID) or addon.charKey)) then
+            -- Recipes only excluded characters know are left out, and so are
+            -- recipes nobody knows (saved from a link or another profession's
+            -- window: Amani Resourcefulness showed as a craft, 2026-10-09)
+            and (opts.onlyMine or (#addon:GetCrafters(recipeID) > 0
+                and addon:IsCharacterIncluded(CrafterFor(recipeID) or addon.charKey))) then
             local charKey = opts.onlyMine and addon.charKey or CrafterFor(recipeID) or addon.charKey
             -- Rows for one character: the plain ways or the concentration
             -- ways (cached until data changes)
