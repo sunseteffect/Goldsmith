@@ -15,6 +15,7 @@ Widgets.lua
 Settings.lua
 Report.lua
 Characters.lua
+Gathered.lua
 Pricing.lua
 Milling.lua
 Stock.lua
@@ -26,6 +27,7 @@ Window.lua
 Minimap.lua
 Overview.lua
 Crafts.lua
+CraftDone.lua
 Queue.lua
 QueueTab.lua
 Items.lua

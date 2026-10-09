@@ -143,6 +143,7 @@ local function CreateTodoLine(card, i)
         local item = line.item
         if not item then return end
         tooltip:AddLine(ItemText(item.itemID, item.recipe.outputName, item.row.tier, item.tierCount), 1, 1, 1)
+        addon:AddItemDescription(tooltip, item.itemID or item.recipe.outputItemID)
         tooltip:AddDoubleLine("Crafts", tostring(item.crafts), 0.8, 0.8, 0.8, 1, 1, 1)
         tooltip:AddDoubleLine("Makes about", tostring(item.quantity), 0.8, 0.8, 0.8, 1, 1, 1)
         addon:Explain(tooltip, "The crafts times what each makes, with multicraft's extra items on average.")
@@ -202,7 +203,7 @@ local function CreateTodoLine(card, i)
             addon:Explain(tooltip, "Once you've made them it drops off, and comes back when they've all sold.",
                 0.6, 0.6, 0.6, true)
         end
-        addon:Explain(tooltip, "Click to plan it: materials and shopping list.", 0.37, 0.81, 0.48)
+        addon:ClickHint(tooltip, "Click to plan it: materials and shopping list.")
     end)
     return line
 end
@@ -285,9 +286,9 @@ local function CreateCard(parent)
         end
         tooltip:AddLine(" ")
         if card.key ~= addon.charKey then
-            addon:Explain(tooltip, "Right-click to leave it out or remove it.", 0.6, 0.6, 0.6, true)
+            addon:RightClickHint(tooltip, "Right-click to leave it out or remove it")
         end
-        addon:Explain(tooltip, "Click a to-do line to plan that craft.", 0.37, 0.81, 0.48)
+        addon:ClickHint(tooltip, "Click a to-do line to plan that craft.")
     end)
     return card
 end

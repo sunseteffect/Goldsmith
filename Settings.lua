@@ -28,7 +28,6 @@ local DEFAULTS = {
     heldDays = 7,
     keepDays = 0,
     tooltips = "full",
-    explain = "always",
     chat = "all",
     showMinimap = true,
 }
@@ -370,10 +369,6 @@ local CHOICES = {
         { value = "short", label = "Short" },
         { value = "off", label = "Off" },
     },
-    explain = {
-        { value = "always", label = "Always (recommended)" },
-        { value = "ctrl", label = "Hold Ctrl" },
-    },
     chat = {
         { value = "all", label = "Everything (recommended)" },
         { value = "money", label = "Sales and purchases" },
@@ -448,11 +443,6 @@ local HELP = {
         "Full: everything Goldsmith knows about the item, such as your average cost, how today's price compares, what yours cost to make, break-even, and craft cost and profit with your stats.",
         "Short: craft cost and profit for things you craft, otherwise your average cost and today's price against usual.",
         "Off: no Goldsmith lines. Everything is still on the item's page in /gsm.",
-    },
-    explain = {
-        "Hover explanations",
-        "Always: Goldsmith's hovers explain what each number means and how it's worked out, and what clicking does.",
-        "Hold Ctrl: hovers show just the numbers and warnings. Hold Ctrl over one to see its explanations; let go and they're gone. Once you know how Goldsmith works.",
     },
     chat = {
         "Chat messages",
@@ -572,7 +562,7 @@ end
 
 local COLUMNS = {
     { title = "Crafting and prices", rows = { "costMode", "priceSource", "minROI", "dealPercent", "heldDays", "ignored", "keepDays" } },
-    { title = "Display", rows = { "tooltips", "explain", "chat", "characters", "showMinimap", "keybind" } },
+    { title = "Display", rows = { "tooltips", "chat", "characters", "showMinimap", "keybind" } },
 }
 
 function addon:CreateSettingsPanel(parent)
@@ -617,7 +607,6 @@ function addon:CreateSettingsPanel(parent)
     end)
     function rows.keepDays:Update() self.control:SetLabel(LabelFor(CHOICES.keepDays, addon:Setting("keepDays"))) end
     rows.tooltips = ChoiceRow(panel, "tooltips", "Item tooltips", "Goldsmith's lines in the game's item tooltips.")
-    rows.explain = ChoiceRow(panel, "explain", "Hover explanations", "What the numbers in hovers mean, or only while you hold Ctrl.")
     rows.chat = ChoiceRow(panel, "chat", "Chat messages", "What Goldsmith says in chat as things happen.")
 
     rows.characters = Row(panel, "characters", "Exclude characters", "Characters left out of stock, concentration, Crafts and Do this next.")
@@ -764,7 +753,7 @@ local HELP_SECTIONS = {
         addon:Colorize("Characters", "text") .. ": a to-do list for each character, its craft cooldowns, and which characters count.",
       }, "\n") },
     { "Hovers",
-      "Hover any number to see what it means and how it's worked out. Once you know, Settings > Hover explanations > Hold Ctrl keeps hovers short: hold Ctrl over one to see the explanations again." },
+      "Hovers show the numbers. Hold Ctrl over one to see what each number means, how it's worked out and what clicking does; let go and they're gone." },
     { "Item tooltips",
       "Show your cost, profit and break-even price. Hold Shift for each material's cost. Settings > Item tooltips makes them shorter or turns them off." },
     { "Recommended: Auctionator",

@@ -128,7 +128,7 @@ local function FillStockTile(tile, stock, prof)
                     string.format("%d days", days), 0.9, 0.9, 0.9, 1, 0.6, 0.2)
             end
         end
-        addon:Explain(tooltip, "Click to see everything you hold.", 0.37, 0.81, 0.48)
+        addon:ClickHint(tooltip, "Click to see everything you hold.")
     end
 end
 
@@ -183,7 +183,7 @@ local function ConcentrationAction(conc)
                 end
             end
             addon:Explain(tooltip, "Extra = profit on top of crafting the same thing without concentration.", 0.6, 0.6, 0.6, true)
-            addon:Explain(tooltip, "Click to plan it: materials and shopping list.", 0.37, 0.81, 0.48)
+            addon:ClickHint(tooltip, "Click to plan it: materials and shopping list.")
         end,
         onClick = function()
             addon:OpenCraftPlan(first.recipe, first.row, best.key,
@@ -221,8 +221,7 @@ local function CooldownAction(prof)
                     Signed(c.profit * c.crafts * (c.outputPerCraft or 1)), 0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
             end
             tooltip:AddLine(" ")
-            addon:Explain(tooltip, "Click to plan the first one. Every character's cooldowns are on the Characters tab.",
-                0.37, 0.81, 0.48, true)
+            addon:ClickHint(tooltip, "Click to plan the first one. Every character's cooldowns are on the Characters tab.")
         end,
         onClick = function()
             addon:OpenCraftPlan(first.recipe, first.row, first.charKey,
@@ -272,7 +271,7 @@ local function CraftsAction(crafts, prof)
                 end
             end
             tooltip:AddLine(" ")
-            addon:Explain(tooltip, "Click to see these in Crafts.", 0.37, 0.81, 0.48)
+            addon:ClickHint(tooltip, "Click to see these in Crafts.")
         end,
         onClick = function()
             local keys = {}
@@ -307,7 +306,7 @@ local function SalvageAction(prof)
                     string.format("%s (%.0f%% ROI)", Signed(r.info.profit), r.info.margin), 0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
             end
             tooltip:AddLine(" ")
-            addon:Explain(tooltip, "Click to see these in Crafts.", 0.37, 0.81, 0.48)
+            addon:ClickHint(tooltip, "Click to see these in Crafts.")
         end,
         onClick = function()
             local keys = {}
@@ -351,8 +350,7 @@ local function DealsAction(prof)
                 tooltip:AddDoubleLine(d.name, string.format("%.0f%%  %s (usually %s)", d.diff * 100, Money(d.now), Money(d.usual)),
                     0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
             end
-            addon:Explain(tooltip, "Click to see them on the Items tab: what you have, what they're used in, price history.",
-                0.37, 0.81, 0.48, true)
+            addon:ClickHint(tooltip, "Click to see them on the Items tab: what you have, what they're used in, price history.")
         end,
         onClick = function() addon:OpenItems({ cheap = true }) end,
     }
@@ -510,8 +508,7 @@ local function CreateProfessionCell(parent, i)
             tooltip:AddDoubleLine("Concentration", string.format("%d / %d", cell.item.concCurrent, cell.item.concMax),
                 0.8, 0.8, 0.8, 0.91, 0.76, 0.35)
         end
-        tooltip:AddLine(cell.selected and "Click to show all professions." or "Click to show only this profession.",
-            0.6, 0.6, 0.6)
+        addon:ClickHint(tooltip, cell.selected and "Click to show all professions" or "Click to show only this profession", true)
     end)
     return cell
 end

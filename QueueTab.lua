@@ -82,7 +82,7 @@ local function SalvageTooltip(tooltip, item)
         for _, line in ipairs(s.blockers) do tooltip:AddLine(line, 1, 0.6, 0.2, true) end
     end
     tooltip:AddLine(" ")
-    addon:Explain(tooltip, "Click to open its plan (change how many there). Right-click to move or remove it.", 0.37, 0.81, 0.48, true)
+    addon:ClickHint(tooltip, "Click to open its plan (change how many there). Right-click to move or remove it.")
 end
 
 local function FillRow(row, item)
@@ -111,6 +111,7 @@ end
 local function RowTooltip(tooltip, item)
     if item.entry.salvageID then return SalvageTooltip(tooltip, item) end
     tooltip:AddLine(ItemText(item), 1, 1, 1)
+    addon:AddItemDescription(tooltip, item.recipe and item.recipe.outputItemID)
     local plan = item.plan
     local made = item.entry.made or 0
     tooltip:AddDoubleLine("To make", made > 0 and string.format("%d more (%d of %d made)", item.remaining, made,
@@ -146,7 +147,7 @@ local function RowTooltip(tooltip, item)
         for _, line in ipairs(s.blockers) do tooltip:AddLine(line, 1, 0.6, 0.2, true) end
     end
     tooltip:AddLine(" ")
-    addon:Explain(tooltip, "Click to open its plan (change how many there). Right-click to move or remove it.", 0.37, 0.81, 0.48, true)
+    addon:ClickHint(tooltip, "Click to open its plan (change how many there). Right-click to move or remove it.")
 end
 
 local function RowMenu(item)

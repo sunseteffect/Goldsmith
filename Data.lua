@@ -393,6 +393,8 @@ function addon:TrimHistory()
     if not before then return 0 end
     local keep = PurchasesInUse()
     local removed = addon.ledger:trim(before, function(e) return keep[e] end)
+    -- Gathered materials too, except lots still covering what you hold
+    local gatheredRemoved = addon:TrimGathered(before, addon:GatheredInUse({}))
 
     local cutoff = date("%Y-%m-%d", before)
     local function Prune(days, keepLatest)
@@ -411,7 +413,7 @@ function addon:TrimHistory()
     end
     Prune(GoldsmithDB.warbandGold, true)
 
-    if removed > 0 and addon.Refresh then addon.Refresh() end
+    if (removed > 0 or gatheredRemoved > 0) and addon.Refresh then addon.Refresh() end
     return removed
 end
 

@@ -323,6 +323,25 @@ function addon:RefreshTierData(recipeID)
         if mix then AddScenario(mix, true) end
     end
 
+    -- Gold no dearer than silver (it happens): the mixes above only use as
+    -- many better units as the skill needs, so silver could still be bought
+    -- where gold costs less. Each mix is also tried with those materials all
+    -- gold; the cheapest way to each tier then picks it up (2026-10-08).
+    local free = {}
+    for i, s in ipairs(qslots) do
+        local lowPrice, highPrice = addon:GetMarketPrice(s.low), addon:GetMarketPrice(s.high)
+        if lowPrice and highPrice and highPrice <= lowPrice then free[i] = s.quantity end
+    end
+    if next(free) then
+        local built = {}
+        for i, sc in ipairs(scenarios) do built[i] = sc end
+        for _, sc in ipairs(built) do
+            local units = {}
+            for i, s in ipairs(qslots) do units[i] = math.max(sc.mix[s.low] or 0, free[i] or 0) end
+            AddScenario(units, sc.concentrate)
+        end
+    end
+
     addon:DataChanged()
     addon.char.tierData[recipeID] = {
         qualities = qualities,
@@ -406,6 +425,11 @@ local function ScenarioCost(recipe, scenario, noProcs)
     return perCraft / outputPerCraft, complete, outputPerCraft
 end
 
+-- The same, for other files (the planner prices mixes it builds itself)
+function addon:GetScenarioCost(recipe, scenario)
+    return ScenarioCost(recipe, scenario)
+end
+
 -- The worst case for a Crafts row (a tier row or GetRecipeProfit's
 -- result): cost per item with no multicraft or resourcefulness, like TSM's
 -- crafting cost. Worked out on request (hover) rather than for every row.
@@ -424,7 +448,13 @@ end
 -- it; the game adds the fixed ones itself.
 -- Returns the list and what one craft needs of every material, quality and
 -- fixed ({ [itemID] = quantity }), or nil.
-function addon:GetCraftReagents(recipeID, scenario)
+-- held = { crafts = n, concentrate = bool }: where you're short of the
+-- lower quality for n crafts but hold spare gold, the gold is used instead
+-- if MayUseHeldGold says so (better materials only add skill, so the tier
+-- can only stay or go up).
+-- Then a third value: { swaps = { { itemID (gold), name, units (per
+-- craft) } }, tier = the tier the game says the list makes, or nil }.
+function addon:GetCraftReagents(recipeID, scenario, held)
     local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
     if not ok or not schematic then return nil end
     local qslots = QualitySlots(schematic)
@@ -439,7 +469,41 @@ function addon:GetCraftReagents(recipeID, scenario)
             highUnits[i] = scenario.chosen[s.high] and s.quantity or 0
         end
     end
+    local swapped
+    if held and (held.crafts or 0) > 0 then
+        local n = held.crafts
+        for i, s in ipairs(qslots) do
+            local high = math.min(highUnits[i] or 0, s.quantity)
+            local low = s.quantity - high
+            if low > 0 and s.low ~= s.high and addon:MayUseHeldGold(s.low, s.high) then
+                local haveLow = C_Item.GetItemCount(s.low, true, false, true, true) or 0
+                local spareHigh = (C_Item.GetItemCount(s.high, true, false, true, true) or 0) - high * n
+                if haveLow < low * n and spareHigh >= n then
+                    -- Per craft: enough gold to cover the shortfall, as far
+                    -- as the gold you hold goes
+                    local short = math.ceil((low * n - haveLow) / n)
+                    local units = math.min(short, math.floor(spareHigh / n), low)
+                    if units > 0 then
+                        highUnits[i] = high + units
+                        swapped = swapped or { swaps = {} }
+                        table.insert(swapped.swaps, { itemID = s.high, units = units,
+                            name = C_Item.GetItemNameByID(s.high) })
+                    end
+                end
+            end
+        end
+    end
     local list = BuildList(qslots, highUnits)
+    if swapped then
+        -- Which tier this list really makes
+        local op = Operation(recipeID, list, held.concentrate == true)
+        local td = addon:StatsChar().tierData[recipeID]
+        if op and td then
+            for tier, qualityID in ipairs(td.qualities) do
+                if qualityID == op.craftingQualityID then swapped.tier = tier end
+            end
+        end
+    end
     local needs = {}
     for _, entry in ipairs(list) do
         needs[entry.reagent.itemID] = (needs[entry.reagent.itemID] or 0) + entry.quantity
@@ -450,26 +514,60 @@ function addon:GetCraftReagents(recipeID, scenario)
             needs[only] = (needs[only] or 0) + slot.quantityRequired
         end
     end
-    return list, needs
+    return list, needs, swapped
 end
 
--- Plain description of a scenario's materials, e.g. "cheapest materials",
--- "best materials", or "8 better Powder Pigment, 2 better Sanguithorn Pigment"
+-- Whether a scenario uses gold of a material whose gold costs no more than
+-- its silver right now (so a gold pick isn't a puzzle)
+function addon:MixUsesCheaperGold(recipe, scenario)
+    for _, slot in ipairs(recipe.reagents) do
+        local ids = slot.itemIDs or {}
+        if #ids > 1 and addon:ScenarioHighUnits(scenario, slot) > 0 then
+            local low, high = addon:GetMarketPrice(ids[1]), addon:GetMarketPrice(ids[#ids])
+            if low and high and high <= low then return true end
+        end
+    end
+    return false
+end
+
+-- Whether gold you hold may stand in for silver you're short of: when it
+-- costs about the same (within HELD_UPGRADE_MARGIN), or you chose to on the
+-- plan's material row (ui2.useHeldGold[gold itemID]). Pricier gold is kept:
+-- it's worth more sold than used for silver's job.
+local HELD_UPGRADE_MARGIN = 0.10
+function addon:MayUseHeldGold(lowID, highID)
+    local chosen = GoldsmithDB.ui2.useHeldGold and GoldsmithDB.ui2.useHeldGold[highID]
+    if chosen ~= nil then return chosen end
+    local low, high = addon:GetMarketPrice(lowID), addon:GetMarketPrice(highID)
+    if not low or not high then return false end
+    return high <= low * (1 + HELD_UPGRADE_MARGIN)
+end
+
+-- Plain description of a scenario's materials by the quality icons the
+-- player sees: "all silver", "all gold", or "8 gold Powder Pigment, 2 gold
+-- Sanguithorn Pigment" (the rest silver). Older materials with three
+-- qualities start at bronze; a mix of both kinds says "lowest quality".
+-- (Not "cheapest": gold is sometimes cheaper than silver.) Also returns
+-- "low", "high" or "mix".
 function addon:DescribeMix(recipe, scenario)
-    local parts, anyLow, anyHigh = {}, false, false
+    local parts, anyLow, anyHigh, lowNames = {}, false, false, {}
     for _, slot in ipairs(recipe.reagents) do
         if slot.itemIDs and #slot.itemIDs > 1 then
             local high = addon:ScenarioHighUnits(scenario, slot)
             if high > 0 then
                 anyHigh = true
-                table.insert(parts, string.format("%d better %s", high, slot.names[1]))
+                table.insert(parts, string.format("%d gold %s", high, slot.names[1]))
             end
             if high < slot.quantity then anyLow = true end
+            lowNames[#slot.itemIDs >= 3 and "bronze" or "silver"] = true
         end
     end
-    if not anyHigh then return "cheapest materials" end
-    if not anyLow then return "best materials" end
-    return table.concat(parts, ", ")
+    if not anyHigh then
+        local only = next(lowNames)
+        return (only and not next(lowNames, only)) and ("all " .. only) or "all lowest quality", "low"
+    end
+    if not anyLow then return "all gold", "high" end
+    return table.concat(parts, ", "), "mix"
 end
 
 -- Expected concentration spent per craft, after ingenuity refunds

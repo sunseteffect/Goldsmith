@@ -227,6 +227,8 @@ local function TopSlotParts(slot, tier, memo, recipe)
                         options = GetOptions(ids[part.index], slot.names[part.index], 1, memo, visiting),
                         qualityTier = part.index,
                         tierCount = #ids,
+                        -- The lowest quality, for comparing prices on the row
+                        lowID = ids[1],
                     },
                 })
             end
@@ -255,22 +257,40 @@ end
 -- One row of the plan tree. need is how many the parent needs; toGet is
 -- what's left after what you already have (if useOnHand). Children are
 -- only built for the chosen method, for toGet.
-local function BuildNode(itemID, name, need, depth, ctx, quality)
+-- gold (top-level silver rows only): { itemID, units } spare gold of the
+-- same material you hold, used for what silver you're short of when
+-- MayUseHeldGold allows (node.gold = how many), else node.goldKept.
+local function BuildNode(itemID, name, need, depth, ctx, quality, gold)
     local options = GetOptions(itemID, name, depth, ctx.memo, {})
     -- In a queue, what earlier crafts already count on isn't yours to use again
     local have = ctx.useOnHand and math.max(GetOnHand(itemID) - (ctx.pool and ctx.pool[itemID] or 0), 0) or 0
+    local short = math.max(need - have, 0)
+    local goldUsed, goldKept = 0, nil
+    if gold and gold.units > 0 and short > 0 then
+        if gold.allowed then
+            goldUsed = math.min(gold.units, short)
+        else
+            goldKept = { itemID = gold.itemID, units = math.min(gold.units, short) }
+        end
+    end
     local node = {
         itemID = itemID,
         name = name,
         depth = depth,
         need = need,
-        have = math.min(have, need),
-        toGet = math.max(need - have, 0),
+        have = math.min(have, need) + goldUsed,
+        toGet = short - goldUsed,
         options = options,
         best = options.best,
         children = {},
+        gold = goldUsed > 0 and { itemID = gold.itemID, units = goldUsed } or nil,
+        goldKept = goldKept,
+        lowID = quality and quality.lowID,
     }
-    if ctx.pool then ctx.pool[itemID] = (ctx.pool[itemID] or 0) + node.have end
+    if ctx.pool then
+        ctx.pool[itemID] = (ctx.pool[itemID] or 0) + node.have - goldUsed
+        if goldUsed > 0 then ctx.pool[gold.itemID] = (ctx.pool[gold.itemID] or 0) + goldUsed end
+    end
     -- Quality tier of this exact item, so the plan and shopping list say
     -- which quality to buy. Herbs from milling aren't slot choices, so ask
     -- the game (Midnight materials have 2 tiers).
@@ -359,9 +379,26 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
     local plan = { recipe = recipe, quantity = quantity, crafts = crafts, nodes = {}, cost = 0, complete = true,
                    expectedOutput = crafts * outputQty }
     for _, s in ipairs(slots) do
-        for _, part in ipairs(TopSlotParts(s.slot, tier, ctx.memo, recipe)) do
+        local parts = TopSlotParts(s.slot, tier, ctx.memo, recipe)
+        -- Gold you hold beyond what this slot's own gold part needs can
+        -- stand in for silver you're short of (see BuildNode)
+        local ids = s.slot.itemIDs or {}
+        local highID = #ids > 1 and ids[#ids] or nil
+        local spareGold
+        if highID and useOnHand then
+            local highNeed = 0
+            for _, part in ipairs(parts) do
+                if part.choice.itemID == highID then highNeed = PartNeed(s, part.units, crafts) end
+            end
+            local spare = GetOnHand(highID) - (ctx.pool and ctx.pool[highID] or 0) - highNeed
+            if spare > 0 then
+                spareGold = { itemID = highID, units = spare, allowed = addon:MayUseHeldGold(ids[1], highID) }
+            end
+        end
+        for _, part in ipairs(parts) do
             local choice = part.choice
-            local node = BuildNode(choice.itemID, choice.name, PartNeed(s, part.units, crafts), 1, ctx, choice)
+            local gold = choice.itemID ~= highID and spareGold or nil
+            local node = BuildNode(choice.itemID, choice.name, PartNeed(s, part.units, crafts), 1, ctx, choice, gold)
             node.use = PartUse(s, part.units, crafts)
             table.insert(plan.nodes, node)
             if node.best then
@@ -588,6 +625,121 @@ function addon:ShoppingListBought(itemID, quantity)
     DeleteList(list.name)
     GoldsmithDB.shoppingList = nil
     addon:Notify("info", "Everything on %s is bought; the list is removed from Auctionator.", list.name)
+end
+
+-- Materials you hold, when picking the mix
+--
+-- The tier rows pick a mix on AH prices alone, so with gold 0.04g cheaper
+-- than silver a plan said to buy 15 gold while 15 silver sat in the bags
+-- (2026-10-08). With "Use materials I have", mixes reaching the same tier
+-- the same way (and, with concentration, needing no more of it) are scored
+-- on what you'd still spend: what you'd buy at its price, plus for what
+-- you hold and would use, how much more it's worth than the other quality
+-- (using pricey gold you could sell isn't free). The lowest score wins.
+-- Returns the entry to plan with (a copy, with heldPick = true, when it
+-- isn't tierInfo itself), or tierInfo.
+local HELD_PICK_MIN_SAVING = 10000 -- 1g: not worth switching for less
+
+function addon:PreferHeldMix(recipe, tierInfo, quantity)
+    if not (tierInfo and tierInfo.scenarios and quantity and quantity > 0) then return tierInfo end
+    local outputPerCraft = GetCraftNumbers(recipe)
+    local crafts = WholeCrafts(quantity, SurePerCraft(recipe, outputPerCraft))
+    if crafts <= 0 then return tierInfo end
+
+    -- Quality material slots, and one slot's score with `high` gold units
+    local qslots = {}
+    for _, slot in ipairs(recipe.reagents) do
+        if slot.itemIDs and #slot.itemIDs > 1 then table.insert(qslots, slot) end
+    end
+    local function SlotScore(slot, high)
+        local ids, score = slot.itemIDs, 0
+        local parts = { { ids[1], slot.quantity - high, ids[#ids] }, { ids[#ids], high, ids[1] } }
+        for _, p in ipairs(parts) do
+            local id, units, other = p[1], p[2], p[3]
+            if units > 0 then
+                local need = units * crafts
+                local price = addon:GetMarketPrice(id) or 0
+                local used = math.min(need, GetOnHand(id))
+                local premium = math.max(price - (addon:GetMarketPrice(other) or price), 0)
+                score = score + (need - used) * price + used * premium
+            end
+        end
+        return score
+    end
+    local function Score(scenario)
+        local score = 0
+        for _, slot in ipairs(qslots) do score = score + SlotScore(slot, addon:ScenarioHighUnits(scenario, slot)) end
+        return score
+    end
+
+    local same = {}
+    for _, e in ipairs(tierInfo.scenarios) do
+        if e.tier == tierInfo.tier and (e.concentrate == true) == (tierInfo.concentrate == true)
+            and (not tierInfo.concentrate or e.scenario == tierInfo.scenario
+                or (e.concentrationValue and e.concentration <= tierInfo.concentration)) then
+            table.insert(same, e)
+        end
+    end
+
+    local best, bestScore = tierInfo, Score(tierInfo.scenario)
+    local pickedScore = bestScore
+    for _, e in ipairs(same) do
+        local score = Score(e.scenario)
+        if score < bestScore then best, bestScore = e, score end
+    end
+
+    -- In between two confirmed mixes of this tier, slot by slot, every mix
+    -- reaches it too (gold only adds skill: no less than the lower one, no
+    -- more than the upper), so mixes the game wasn't asked about can be
+    -- built, e.g. 1 gold and 1 silver bolt when that's what you hold.
+    -- Without concentration only: its cost would change, and only the game
+    -- knows by how much.
+    local built
+    if not tierInfo.concentrate and #qslots > 0 then
+        for _, a in ipairs(same) do
+            for _, b in ipairs(same) do
+                local below, mix, score = a ~= b, {}, 0
+                for _, slot in ipairs(qslots) do
+                    if addon:ScenarioHighUnits(a.scenario, slot) > addon:ScenarioHighUnits(b.scenario, slot) then below = false end
+                end
+                if below then
+                    for _, slot in ipairs(qslots) do
+                        local lo, hi = addon:ScenarioHighUnits(a.scenario, slot), addon:ScenarioHighUnits(b.scenario, slot)
+                        local bestUnits, bestSlot = lo, SlotScore(slot, lo)
+                        for units = lo + 1, hi do
+                            local s = SlotScore(slot, units)
+                            if s < bestSlot then bestUnits, bestSlot = units, s end
+                        end
+                        if bestUnits > 0 then mix[slot.itemIDs[1]] = bestUnits end
+                        score = score + bestSlot
+                    end
+                    if score < bestScore then
+                        bestScore, built = score, mix
+                        best = nil
+                    end
+                end
+            end
+        end
+    end
+
+    if best == tierInfo or pickedScore - bestScore < HELD_PICK_MIN_SAVING then return tierInfo end
+    local pick = {}
+    if built then
+        -- A mix built here: priced like the others
+        for k, v in pairs(tierInfo) do pick[k] = v end
+        pick.scenario = { mix = built, concentrate = false, tier = tierInfo.tier, concentration = 0, ingenuityRefund = 0 }
+        pick.cost, pick.partial = addon:GetScenarioCost(recipe, pick.scenario)
+        pick.partial = not pick.partial
+        pick.profit = pick.price and (pick.price * (1 - AH_CUT) - pick.cost)
+        pick.margin = pick.profit and pick.cost > 0 and (pick.profit / pick.cost * 100) or nil
+        pick.description = addon:DescribeMix(recipe, pick.scenario)
+        pick.built = true
+    else
+        for k, v in pairs(best) do pick[k] = v end
+    end
+    pick.scenarios, pick.heldPick = tierInfo.scenarios, true
+    pick.demand, pick.demandSource, pick.saleRate = tierInfo.demand, tierInfo.demandSource, tierInfo.saleRate
+    return pick
 end
 
 _G.Goldsmith = addon

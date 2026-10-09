@@ -246,12 +246,13 @@ end
 
 -- Costs
 
--- What one herb costs you: your average purchase price, or the current AH
--- price for herbs you gathered yourself (what you could have sold them for).
+-- What one herb costs you: your average purchase price, and the current AH
+-- price for herbs you gathered yourself (what you could have sold them for),
+-- weighted by how many of each you hold (GetOwnCost).
 function addon:GetHerbUnitCost(herbID, herbName)
-    local paid = addon:GetAverageCost(herbName)
-    if paid then
-        return paid, "paid"
+    local own, source = addon:GetOwnCost(herbName)
+    if own then
+        return own, source
     end
     local market = addon:GetMarketPrice(herbID)
     if market then

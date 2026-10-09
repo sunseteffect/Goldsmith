@@ -88,7 +88,7 @@ local STEPS = {
       text = "A card per character: professions, concentration, craft cooldowns and a to-do list. Click a to-do to open its plan. Exclude a bank alt so it doesn't count.",
       target = function() return select(2, Screen("characters")) end },
     { title = "Settings",
-      text = "Costs, prices, item tooltips, chat messages and characters, plus Help. Hovers explain every number; once you know Goldsmith, set Hover explanations to Hold Ctrl for shorter ones.\n\nThat's the tour. /gsm tour starts it again.",
+      text = "Costs, prices, item tooltips, chat messages and characters, plus Help. Hold Ctrl over any hover to see what its numbers mean.\n\nThat's the tour. /gsm tour starts it again.",
       target = function() return Part("settings") end },
 }
 

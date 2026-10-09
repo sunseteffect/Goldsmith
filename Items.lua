@@ -142,8 +142,9 @@ local function CreateBoard(parent, def)
         row:SetScript("OnClick", function(self) addon:OpenItem(self.item.name, self.item.itemID) end)
         UI.SetTooltip(row, function(tooltip, self)
             tooltip:AddLine(ItemText(self.item.name, self.item.itemID), 1, 1, 1)
+            addon:AddItemDescription(tooltip, self.item.itemID)
             def.tooltip(tooltip, self.item)
-            addon:Explain(tooltip, "Click to open its page.", 0.37, 0.81, 0.48)
+            addon:ClickHint(tooltip, "Click to open its page.")
         end)
         board.rows[i] = row
     end
@@ -255,6 +256,7 @@ local CHEAP_RECIPES_SHOWN = 8
 
 local function CheapTooltip(tooltip, item)
     tooltip:AddLine(ItemText(item.name, item.itemID), 1, 1, 1)
+    addon:AddItemDescription(tooltip, item.itemID)
     tooltip:AddDoubleLine("Price now", Money(item.now), 0.8, 0.8, 0.8, 0.37, 0.81, 0.48)
     tooltip:AddDoubleLine("Usually", string.format("%s (median of %d days)", Money(item.usual), item.days),
         0.8, 0.8, 0.8, 1, 1, 1)
@@ -285,7 +287,7 @@ local function CheapTooltip(tooltip, item)
     elseif item.milled then
         addon:Explain(tooltip, "A herb you mill into pigments.", 0.6, 0.6, 0.6, true)
     end
-    addon:Explain(tooltip, "Click to open its page: price history and more.", 0.37, 0.81, 0.48)
+    addon:ClickHint(tooltip, "Click to open its page: price history and more.")
 end
 
 -- Sold per day and sale rate for list rows, looked up once per refresh
@@ -412,12 +414,13 @@ end
 
 local function StockTooltip(tooltip, item)
     tooltip:AddLine(ItemText(item.name, item.itemID), 1, 1, 1)
+    addon:AddItemDescription(tooltip, item.itemID)
     for _, entry in ipairs(item.byCharacter or {}) do
         tooltip:AddDoubleLine(entry.name, tostring(entry.count), 0.8, 0.8, 0.8, 1, 1, 1)
     end
     tooltip:AddLine(item.crafted and "Valued at what your latest crafts cost you."
         or "Valued at what you paid, or the AH price when there's no cost.", 0.6, 0.6, 0.6, true)
-    addon:Explain(tooltip, "Click to open its page.", 0.37, 0.81, 0.48)
+    addon:ClickHint(tooltip, "Click to open its page.")
 end
 
 -- Item page
@@ -475,6 +478,19 @@ local function CreatePage(parent)
     page.sub = UI.Text(page, "small", "muted")
     page.sub:SetPoint("TOPLEFT", page.name, "BOTTOMLEFT", 0, -4)
     page.sub:SetPoint("RIGHT", page, "RIGHT", -140, 0)
+    -- Hovering the icon or name: what the item does, as everywhere else
+    local titleHover = CreateFrame("Frame", nil, page)
+    titleHover:SetPoint("TOPLEFT", page.icon, "TOPLEFT")
+    titleHover:SetPoint("BOTTOMLEFT", page.icon, "BOTTOMLEFT")
+    titleHover:SetPoint("RIGHT", page.name, "RIGHT", 0, 0)
+    titleHover:EnableMouse(true)
+    UI.SetTooltip(titleHover, function(tooltip)
+        local d = page.details
+        if not d then return end
+        tooltip:AddLine(page.name:GetText() or d.name or "", 1, 1, 1)
+        addon:AddItemDescription(tooltip, d.itemID)
+    end)
+    page.titleHover = titleHover
     page.craft = UI.Button(page, "Craft this", 120, 28, function()
         local d = page.details
         if d and d.recipe then
@@ -743,7 +759,8 @@ local function CreatePage(parent)
                 StatsText(d.stats))
             r[3]:Set("Worst case", d.worst and Money(d.worst) or "-", "muted", "no multicraft or resourcefulness")
         else
-            local sources = { paid = "bought", milled = "milled", crafted = "crafted" }
+            local sources = { paid = "bought", milled = "milled", crafted = "crafted",
+                              gathered = "gathered (at the AH price)" }
             local how = {}
             for part in (d.paidSource or "paid"):gmatch("[^+]+") do table.insert(how, sources[part] or part) end
             r[1]:Set("What you paid", d.paid and Money(d.paid) or "-", d.paid and "text" or "dim",
@@ -945,8 +962,10 @@ local function Create(parent)
             elseif view.listMode == "cheap" then
                 CheapTooltip(tooltip, item)
             else
+                -- Name, what it does, and the click (always: it's all there is)
                 tooltip:AddLine(ItemText(item.name, item.itemID), 1, 1, 1)
-                addon:Explain(tooltip, "Click to open its page.", 0.37, 0.81, 0.48)
+                addon:AddItemDescription(tooltip, item.itemID)
+                addon:ClickHint(tooltip, "Click to open its page.", true)
             end
         end,
         onClick = function(item) addon:OpenItem(item.name, item.itemID) end,

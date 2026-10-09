@@ -41,6 +41,13 @@ addon.themes = {
             -- The expansion after a craft's name (Crafts): its own
             -- color, so it still reads on a greyed-out row
             expansion   = Hex("7fa7d9"),
+            -- What clicking does, at the end of hovers, one color per kind
+            -- everywhere: click blue, right-click lavender, shift-click
+            -- peach. Not green, so they never run into an item's green
+            -- Use/Equip text or a profit.
+            hint        = Hex("9cc3ef"),
+            hintRight   = Hex("c4adef"),
+            hintShift   = Hex("efb79c"),
 
             profit      = Hex("5fcf7b"),
             loss        = Hex("e5645a"),

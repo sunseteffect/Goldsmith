@@ -1509,6 +1509,9 @@ end
 -- "Purchase", "Deposit", "Craft" or nil for all), character ("Name-Realm"
 -- or nil), item (a name or nil).
 -- Crafts for crafting orders (GoldsmithDB.orderCrafts) are "Order" rows.
+-- Gathered materials (GoldsmithDB.gathered) are one "Gathered" row a day
+-- with worth (at the AH price when gathered), items ({ itemID, name, qty,
+-- value, profession }, most valuable first) and entries (to delete them).
 -- Returns rows newest first: { kind, time, item, itemID, qty, gold (signed;
 -- nil for crafts), profit, costSource (sales: see GetUnitCostBasis, or
 -- "today" for today's estimate), profitEstimated, cost (crafts: per item),
@@ -1635,6 +1638,52 @@ History = function(filters)
             end
         end
     end
+
+    -- Gathered materials: one row a day, whatever and whoever gathered them.
+    -- No gold changed hands, so they're not in the totals.
+    local days = {}
+    for i, e in ipairs(GoldsmithDB.gathered or {}) do
+        if i % 64 == 0 then addon:Yield() end
+        local character = e.character and e.realm and (e.character .. "-" .. e.realm)
+        local profession = addon:GetProfessionForItemName(e.name) or "Unassigned"
+        if Keep("Gathered", e.time or 0, e.name, profession, character, e.itemID) then
+            local row = days[e.day]
+            if not row then
+                row = { kind = "Gathered", time = 0, qty = 0, worth = 0, entries = {}, items = {} }
+                days[e.day] = row
+                table.insert(rows, row)
+            end
+            row.time = math.max(row.time, e.time or 0)
+            row.qty = row.qty + e.qty
+            row.worth = row.worth + (e.value or 0)
+            table.insert(row.entries, e)
+            local item = row.items[e.itemID]
+            if not item then
+                item = { itemID = e.itemID, name = e.name, qty = 0, value = 0, profession = profession }
+                row.items[e.itemID] = item
+            end
+            item.qty = item.qty + e.qty
+            item.value = item.value + (e.value or 0)
+        end
+    end
+    for _, row in pairs(days) do
+        local list, professions = {}, {}
+        for _, item in pairs(row.items) do
+            table.insert(list, item)
+            professions[item.profession] = true
+        end
+        table.sort(list, function(a, b) return a.value > b.value end)
+        row.items = list
+        -- One kind of material shows as itself; several as a count
+        if #list == 1 then
+            row.item, row.itemID = list[1].name, list[1].itemID
+        else
+            row.item = string.format("%d materials", #list)
+        end
+        local only = next(professions)
+        if only and not next(professions, only) then row.profession = only end
+    end
+
     -- Can be thousands of rows: a sort that can wait for a frame
     addon:Sort(rows, function(a, b) return a.time > b.time end)
     return rows, totals

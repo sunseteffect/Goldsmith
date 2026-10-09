@@ -4,7 +4,7 @@ local UI = addon.UI
 -- History tab
 --
 -- "What happened?" Every sale, purchase, AH deposit and craft, newest
--- first. Filter by type (the chips) and character; the header's
+-- first, and one line a day for materials you gathered (Gathered.lua). Filter by type (the chips) and character; the header's
 -- profession, date and expansion filters apply too (not to one item's
 -- history, from its page). Click an entry for its item's page;
 -- right-click to assign the item to a profession or delete the entry
@@ -22,9 +22,12 @@ local KINDS = {
     { key = "Deposit", label = "Deposits" },
     { key = "Craft", label = "Crafts" },
     { key = "Order", label = "Orders" },
+    { key = "Gathered", label = "Gathered" },
 }
-local KIND_COLORS = { Sale = "profit", Purchase = "loss", Deposit = "warning", Craft = "line", Order = "muted" }
-local KIND_LONG = { Sale = "Sale", Purchase = "Purchase", Deposit = "AH deposit", Craft = "Craft", Order = "Crafting order" }
+local KIND_COLORS = { Sale = "profit", Purchase = "loss", Deposit = "warning", Craft = "line", Order = "muted",
+                      Gathered = "gold" }
+local KIND_LONG = { Sale = "Sale", Purchase = "Purchase", Deposit = "AH deposit", Craft = "Craft", Order = "Crafting order",
+                    Gathered = "Gathered" }
 
 -- Where a sale's cost came from, for the hover
 local COST_LABELS = {
@@ -63,6 +66,10 @@ local function FillRow(r, row)
         -- No + or -: white is money in, red money out
         c.gold:SetText(Money(math.abs(row.gold)))
         c.gold:SetTextColor(addon:Color(row.gold >= 0 and "text" or "loss"))
+    elseif row.worth and row.worth > 0 then
+        -- Gathered: what it's worth, grey because no gold moved
+        c.gold:SetText(Money(row.worth))
+        c.gold:SetTextColor(addon:Color("muted"))
     else
         c.gold:SetText("-")
         c.gold:SetTextColor(addon:Color("dim"))
@@ -75,15 +82,36 @@ local function FillRow(r, row)
     end
 end
 
+-- A gathered day's hover lists this many materials, most valuable first
+local GATHERED_LINES = 15
+
 local function Tooltip(tooltip, row)
     tooltip:AddLine(ItemText(row), 1, 1, 1)
+    -- What the item does (a gathered day of several materials has no one item)
+    addon:AddItemDescription(tooltip, row.itemID)
     local function Line(left, right, color)
         local r, g, b = addon:Color(color or "text")
         tooltip:AddDoubleLine(left, right, 0.8, 0.8, 0.8, r, g, b)
     end
     Line("Type", KIND_LONG[row.kind], KIND_COLORS[row.kind])
     Line("Quantity", tostring(row.qty))
-    if row.kind == "Order" then
+    if row.kind == "Gathered" then
+        for i, item in ipairs(row.items) do
+            if i > GATHERED_LINES and #row.items > GATHERED_LINES + 1 then
+                tooltip:AddLine(string.format("and %d more", #row.items - GATHERED_LINES), 0.6, 0.6, 0.6)
+                break
+            end
+            Line(addon:ProfessionIconText(item.profession) .. item.name .. " x" .. item.qty,
+                item.value > 0 and Money(item.value) or "no price", item.value > 0 and "text" or "dim")
+        end
+        Line("Worth at the AH price", Money(row.worth))
+        addon:Explain(tooltip, "Materials you got without buying them: gathering, loot, and bags you opened (patron order rewards, caches). Costs count them at the AH price, since you could sell them instead, and what you paid for others no longer gets spread over them.", 0.6, 0.6, 0.6, true)
+        Line("When", row.time > 0 and date("%Y-%m-%d", row.time) or "?")
+        tooltip:AddLine(" ")
+        if row.itemID then addon:ClickHint(tooltip, "Click for the item's page") end
+        addon:RightClickHint(tooltip, "Right-click for more")
+        return
+    elseif row.kind == "Order" then
         -- Your materials only; the customer's aren't a cost of yours
         Line("Your materials", Money((row.cost or 0) * (row.qty or 0)) .. (row.partial and "+" or ""))
         if row.gold then
@@ -122,7 +150,8 @@ local function Tooltip(tooltip, row)
     if row.profession then Line("Profession", row.profession) end
     Line("When", date("%Y-%m-%d %H:%M", row.time))
     tooltip:AddLine(" ")
-    addon:Explain(tooltip, "Click for the item's page, right-click for more", 0.37, 0.81, 0.48)
+    addon:ClickHint(tooltip, "Click for the item's page")
+    addon:RightClickHint(tooltip, "Right-click for more")
 end
 
 StaticPopupDialogs["GOLDSMITH_HISTORY_DELETE"] = {
@@ -139,7 +168,23 @@ StaticPopupDialogs["GOLDSMITH_HISTORY_DELETE"] = {
     preferredIndex = 3,
 }
 
+StaticPopupDialogs["GOLDSMITH_HISTORY_DELETE_GATHERED"] = {
+    text = "Delete these gathered materials?\n\n%s\n\nCosts will treat them as if you'd bought them.",
+    button1 = YES,
+    button2 = NO,
+    OnAccept = function(_, entries) addon:RemoveGathered(entries) end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
 local function ConfirmDelete(row)
+    if row.kind == "Gathered" then
+        local summary = string.format("%s, %s x%d", date("%b %d", row.time), row.item, row.qty)
+        StaticPopup_Show("GOLDSMITH_HISTORY_DELETE_GATHERED", summary, nil, row.entries)
+        return
+    end
     local summary = string.format("%s: %s x%d (%s)", KIND_LONG[row.kind], row.item, row.qty, Money(math.abs(row.gold)))
     StaticPopup_Show("GOLDSMITH_HISTORY_DELETE", summary, nil, row.entry.id)
 end
@@ -148,6 +193,13 @@ local function Menu(row)
     if not (MenuUtil and MenuUtil.CreateContextMenu) then return end
     MenuUtil.CreateContextMenu(UIParent, function(_, root)
         root:CreateTitle(row.item)
+        if row.kind == "Gathered" then
+            if row.itemID then
+                root:CreateButton("Open the item's page", function() addon:OpenItem(row.item, row.itemID) end)
+            end
+            root:CreateButton("Delete these entries", function() ConfirmDelete(row) end)
+            return
+        end
         root:CreateButton("Open the item's page", function() addon:OpenItem(row.item, row.itemID) end)
         if row.kind == "Craft" then
             root:CreateButton("This was a crafting order", function() addon:MarkCraftAsOrder(row.itemID, row.lot) end)
@@ -254,7 +306,11 @@ local function Create(parent)
         fill = FillRow,
         tooltip = Tooltip,
         onClick = function(row, button)
-            if button == "RightButton" then Menu(row) else addon:OpenItem(row.item, row.itemID) end
+            if button == "RightButton" then
+                Menu(row)
+            elseif row.kind ~= "Gathered" or row.itemID then
+                addon:OpenItem(row.item, row.itemID)
+            end
         end,
     })
     view.list:SetPoint("TOPLEFT", 0, -(TOP_HEIGHT + 12))

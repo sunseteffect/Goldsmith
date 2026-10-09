@@ -94,19 +94,19 @@ function UI.Text(parent, fontName, colorName, justify)
     return fs
 end
 
--- Hover explanations (Settings: Hover explanations). Lines that explain
--- what a number means, how it's worked out or what a click does go through
--- addon:Explain; numbers and warnings are always shown. With "Hold Ctrl"
--- they show only while Ctrl is held: the hover is redrawn when Ctrl goes
--- down or up, and ends with "Hold Ctrl to explain" when something was left
--- out, so the key is never a secret. With "Always" (the default), a hover
--- that explained something ends with where to turn them off.
+-- Hover explanations. Lines that explain what a number means, how it's
+-- worked out or what a click does go through addon:Explain; numbers and
+-- warnings are always shown. Explanations show only while Ctrl is held: the
+-- hover is redrawn when Ctrl goes down or up, and ends with "Hold Ctrl to
+-- explain" when something was left out, so the key is never a secret.
+-- (There was a setting to always show them; the user found hovers wordy and
+-- that people would turn it off anyway, so it went, 2026-10-08.)
 -- Every Goldsmith hover is drawn between UI.BeginTooltip and UI.EndTooltip
 -- (the widgets below do it); redraw = function that draws it again.
 local tip = { owner = nil, redraw = nil, hidden = false, explained = false }
 
 function addon:ExplanationsShown()
-    return addon:Setting("explain") ~= "ctrl" or IsControlKeyDown()
+    return IsControlKeyDown()
 end
 
 -- An explanation line: grey and wrapped unless a color is given
@@ -127,8 +127,65 @@ function UI.EndTooltip(tooltip)
     local r, g, b = addon:Color("dim")
     if tip.hidden then
         tooltip:AddLine("Hold Ctrl to explain", r, g, b)
-    elseif tip.explained and addon:Setting("explain") ~= "ctrl" then
-        tooltip:AddLine("To turn off explanations: Settings > Hover explanations", r, g, b, true)
+    end
+end
+
+-- What an item does, as the game's own tooltip says it: its green lines
+-- ("Use: Drink to increase your primary stat…", "Equip: …"). Kept per
+-- item once read. Returns a list of lines, or nil (none, or the game
+-- hasn't loaded the item yet: it's asked for, so the next hover has it).
+local descriptions = {}
+
+local function IsGreen(color)
+    if type(color) ~= "table" or (canaccesstable and not canaccesstable(color)) then return false end
+    local r, g, b = color.r, color.g, color.b
+    if issecretvalue and (issecretvalue(r) or issecretvalue(g) or issecretvalue(b)) then return false end
+    return type(r) == "number" and r < 0.3 and g > 0.8 and b < 0.3
+end
+
+function addon:GetItemDescription(itemID)
+    if type(itemID) ~= "number" then return nil end
+    -- Only found lines are kept: a spell's text can arrive after the item
+    if descriptions[itemID] then return descriptions[itemID] end
+    if not (C_TooltipInfo and C_TooltipInfo.GetItemByID) then return nil end
+    if C_Item.IsItemDataCachedByID and not C_Item.IsItemDataCachedByID(itemID) then
+        C_Item.RequestLoadItemDataByID(itemID)
+        return nil
+    end
+    local ok, data = pcall(C_TooltipInfo.GetItemByID, itemID)
+    if not ok or type(data) ~= "table" or (canaccesstable and not canaccesstable(data)) then return nil end
+    local lines = {}
+    for i, line in ipairs(data.lines or {}) do
+        local text = line.leftText
+        -- The first line is the name
+        if i > 1 and type(text) == "string" and not (issecretvalue and issecretvalue(text)) and text ~= ""
+            and IsGreen(line.leftColor) then
+            table.insert(lines, text)
+        end
+    end
+    if #lines == 0 then return nil end
+    descriptions[itemID] = lines
+    return lines
+end
+
+-- What a click does, at the end of a hover: one line per kind of click,
+-- each kind its own color everywhere (theme hint, hintRight, hintShift).
+-- Always shown, not behind Ctrl: what you can do should never be hidden,
+-- only why the numbers are what they are (2026-10-08). `always` is kept
+-- for callers that passed it.
+local function Hint(tooltip, text, _, colorName)
+    local r, g, b = addon:Color(colorName)
+    tooltip:AddLine(text, r, g, b, true)
+end
+
+function addon:ClickHint(tooltip, text, always) Hint(tooltip, text, always, "hint") end
+function addon:RightClickHint(tooltip, text, always) Hint(tooltip, text, always, "hintRight") end
+function addon:ShiftClickHint(tooltip, text, always) Hint(tooltip, text, always, "hintShift") end
+
+-- Adds an item's description lines (green, wrapped) to a hover
+function addon:AddItemDescription(tooltip, itemID)
+    for _, text in ipairs(addon:GetItemDescription(itemID) or {}) do
+        tooltip:AddLine(text, 0.1, 1, 0.1, true)
     end
 end
 
@@ -136,7 +193,7 @@ local modifierWatch = CreateFrame("Frame")
 modifierWatch:RegisterEvent("MODIFIER_STATE_CHANGED")
 modifierWatch:SetScript("OnEvent", function(_, _, key)
     if key ~= "LCTRL" and key ~= "RCTRL" then return end
-    if addon:Setting("explain") ~= "ctrl" or not tip.redraw then return end
+    if not tip.redraw then return end
     if GameTooltip:IsShown() and GameTooltip:GetOwner() == tip.owner then tip.redraw() end
 end)
 
@@ -170,11 +227,28 @@ function UI.Button(parent, text, width, height, onClick)
     button.label:SetText(text or "")
     button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     button:SetScript("OnClick", onClick)
+    -- A greyed-out button still shows its hover, which says why it's off
+    -- (WoW skips hover scripts on disabled buttons otherwise)
+    button:SetMotionScriptsWhileDisabled(true)
     button:HookScript("OnEnter", function(self) self:SetBackdropBorderColor(addon:Color("gold")) end)
     button:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderStrong")) end)
 
-    function button:SetLabel(value) self.label:SetText(value) end
+    -- A new label usually means the button does something else now (Open
+    -- Alchemy becomes Craft 1), so an open hover on it is drawn again
+    function button:SetLabel(value)
+        local changed = self.label:GetText() ~= value
+        self.label:SetText(value)
+        if changed then UI.RedrawTooltip(self) end
+    end
     return button
+end
+
+-- Draws the hover again if it's showing for this frame (its content
+-- changed while the mouse stayed on it)
+function UI.RedrawTooltip(frame)
+    if tip.redraw and tip.owner == frame and GameTooltip:IsShown() and GameTooltip:GetOwner() == frame then
+        tip.redraw()
+    end
 end
 
 -- A button that opens a menu, for filters. build(root) fills the menu

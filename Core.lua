@@ -393,6 +393,8 @@ function addon:Initialize()
     GoldsmithDB.products = GoldsmithDB.products or {}
     -- A temporary plan log from testing the Characters tab
     GoldsmithDB.debugPlans = nil
+    -- The Hover explanations setting is gone (always Hold Ctrl now)
+    if GoldsmithDB.settings then GoldsmithDB.settings.explain = nil end
     -- Left from v1's window; still holds the planner's Buy/Craft/Mill choices
     GoldsmithDB.ui = GoldsmithDB.ui or {}
     LearnProfessionIcons()
@@ -405,6 +407,7 @@ function addon:Initialize()
     addon:InitializeStock()
     addon:InitializePricing()
     addon:InitializeMilling()
+    addon:InitializeGathered()
     addon:InitializeQuality()
     addon:InitializeCooldowns()
 
@@ -516,6 +519,8 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:ListRecipes()
     elseif cmd == "milling" then
         addon:ListMilling()
+    elseif cmd == "gathered" then
+        addon:ListGathered()
     elseif cmd == "chars" then
         addon:ListCharacters()
     elseif cmd == "data" then

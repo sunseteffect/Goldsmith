@@ -19,35 +19,13 @@ addon.recipesVersion = 0
 -- (or just the newest one when you hold none, e.g. right after using them
 -- up in a craft). Prices you paid long ago stop counting once those items
 -- are gone, so the cost follows the market. The same rule as crafted items
--- (GetCraftedCost).
--- Returns copper per unit and units covered, or nil if never bought.
+-- (GetCraftedCost). Materials you gathered take their place in that line
+-- (Gathered.lua), so they aren't costed at what you paid for others.
+-- Returns copper per unit and units covered, or nil if never bought (or
+-- what you hold was all gathered since).
 function addon:GetAverageCost(itemName)
-    -- Oldest first (the ledger's index)
-    local purchases, ids = {}, {}
-    for _, e in ipairs(addon.ledger:index().purchases[itemName] or {}) do
-        if (e.quantity or 0) > 0 then
-            table.insert(purchases, e)
-            if e.itemID then ids[e.itemID] = true end
-        end
-    end
-    if #purchases == 0 then return nil end
-
-    local held = 0
-    for itemID in pairs(ids) do
-        held = held + (addon.GetHeld and addon:GetHeld(itemID)
-            or C_Item.GetItemCount(itemID, true, false, true, true) or 0)
-    end
-
-    local remaining, totalCopper, covered = math.max(held, 1), 0, 0
-    for i = #purchases, 1, -1 do
-        local e = purchases[i]
-        local take = math.min(e.quantity, remaining)
-        totalCopper = totalCopper + e.totalCopper / e.quantity * take
-        covered = covered + take
-        remaining = remaining - take
-        if remaining <= 0 then break end
-    end
-    return totalCopper / covered, covered
+    local paid, covered = addon:GetAcquiredCost(itemName)
+    if paid then return paid, covered end
 end
 
 -- Market prices (Auctionator, optional)
@@ -142,13 +120,22 @@ local function GetFreshOrderBook(itemID)
     end
 end
 
--- Lowest price with meaningful quantity behind it
+-- Lowest price with meaningful quantity behind it: THIN_MIN_UNITS units
+-- (or THIN_SHARE of the total), but no more than THIN_SMALL_SHARE of a
+-- small market, and enough once THIN_MIN_VALUE of gold is listed at or
+-- below the price. A scroll with 64 listed was priced at the 20th cheapest
+-- (about 3,000g) when one sold for 950g (2026-10-08): for pricey items one
+-- listing is the real price, not an undercut.
+local THIN_SMALL_SHARE = 0.1
+local THIN_MIN_VALUE = 500 * 10000 -- 500g
 local function GetRobustBookPrice(book)
     local threshold = math.max(THIN_MIN_UNITS, book.total * THIN_SHARE)
-    local cumulative = 0
+    threshold = math.max(math.min(threshold, math.ceil(book.total * THIN_SMALL_SHARE)), 1)
+    local cumulative, value = 0, 0
     for _, level in ipairs(book.levels) do
         cumulative = cumulative + level.qty
-        if cumulative >= threshold then
+        value = value + level.qty * level.price
+        if cumulative >= threshold or value >= THIN_MIN_VALUE then
             return level.price
         end
     end
@@ -251,7 +238,12 @@ local function GetBlizzardPrice(itemID)
     local entry = data and data.items and data.items[itemID]
     if not entry then return nil end
     local price, market, note = entry[1], entry[2], nil
-    if market and price < market * UNDERCUT_RATIO and market <= price * MARKET_TRUST_RATIO then
+    -- Not when this week's sales are well under the market price: then the
+    -- low listing is the real price (silver Arcane Mastery scroll: lowest
+    -- 950g, market 2,322g, sold for 364g; it was priced at 2,322g)
+    local sold = entry[6]
+    local salesBackMarket = not sold or (market and sold >= market * UNDERCUT_RATIO)
+    if market and price < market * UNDERCUT_RATIO and market <= price * MARKET_TRUST_RATIO and salesBackMarket then
         note = string.format("lowest listing %s looked like a small undercut", FormatGold(price))
         price = market
     end
@@ -671,8 +663,9 @@ end)
 -- made recommendations flicker. They're remembered once seen, in
 -- GoldsmithDB.itemFacts[itemID] = { expansion, bind }.
 local function ItemFacts(itemID)
-    -- Some rows have no item (a recipe without one)
-    if not itemID then return nil end
+    -- Some rows have no item (a recipe without one); anything but a number
+    -- makes the game raise an error instead of returning nothing
+    if type(itemID) ~= "number" then return nil end
     GoldsmithDB.itemFacts = GoldsmithDB.itemFacts or {}
     local facts = GoldsmithDB.itemFacts[itemID]
     if facts then return facts end
@@ -1404,7 +1397,9 @@ local function OnCraftResult(resultData)
     end
 
     -- Order crafts still teach the proc sizes above; only the lot differs
-    addon:RecordCraftLot(recipe, resultData, currentCraftReagents, currentCraftIsOrder, currentOrderTerms)
+    local lot = addon:RecordCraftLot(recipe, resultData, currentCraftReagents, currentCraftIsOrder, currentOrderTerms)
+    -- The planner's "Craft complete" notice (CraftDone.lua)
+    if not currentCraftIsOrder then addon:CraftBatchResult(currentCraftRecipeID, recipe, resultData, lot) end
 end
 
 -- Crafted lots
@@ -1505,6 +1500,8 @@ function addon:RepairOrderLots()
     end
 end
 
+-- Saves one craft's lot (see Crafted lots above) and returns it, or nil
+-- if the craft made nothing
 function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTerms)
     local made = resultData.quantity or 0
     if made <= 0 then return end
@@ -1615,7 +1612,7 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTe
             end
         end
         AddOrderCraft(lot)
-        return
+        return lot
     end
     local lots = GoldsmithDB.craftLots[resultData.itemID] or {}
     GoldsmithDB.craftLots[resultData.itemID] = lots
@@ -1624,6 +1621,7 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTe
     while #lots > CRAFT_LOT_LIMIT do
         table.remove(lots, 1)
     end
+    return lot
 end
 
 -- Average cost of the newest lots covering `units` items (you'd normally
@@ -1697,15 +1695,19 @@ function addon:GetCraftedCostByName(itemName, units)
     return LotAverage(byName.lots, units or onHand)
 end
 
--- What an item has cost you: purchases, your own milling and your own
--- crafts combined, weighted by how many you got each way. Returns cost and
--- source ("paid", "milled", "crafted", or several joined with "+"), or nil.
+-- What an item has cost you: purchases, gathering (at today's AH price),
+-- your own milling and your own crafts combined, weighted by how many you
+-- got each way. Returns cost and source ("paid", "gathered", "milled",
+-- "crafted", or several joined with "+"), or nil.
 -- excludeItemID leaves out that item's own crafts (so a craft's cost isn't
 -- worked out from itself).
 function addon:GetOwnCost(itemName, excludeItemID)
     local sources = {}
-    local paid, paidQty = addon:GetAverageCost(itemName)
+    local paid, paidQty, _, gatheredIDs = addon:GetAcquiredCost(itemName)
     if paid then table.insert(sources, { "paid", paid, paidQty }) end
+    -- Gathered ones at today's AH price: what you could sell them for
+    local gathered, gatheredQty = addon:GatheredValue(gatheredIDs)
+    if gathered then table.insert(sources, { "gathered", gathered, gatheredQty }) end
     local milled, milledQty = addon:GetMilledCost(itemName)
     if milled then table.insert(sources, { "milled", milled, milledQty }) end
     local crafted, craftedQty = addon:GetCraftedCostByName(itemName)
@@ -2531,13 +2533,32 @@ function addon:InitializePricing()
     TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, AddTooltipLines)
 
     -- Tooltips don't redraw on key presses, so redraw on Shift to show or
-    -- hide the material breakdown while hovering.
+    -- hide the material breakdown while hovering. Item tooltips only, and
+    -- never in combat or with secret data in them: a redraw started by an
+    -- addon can't touch the game's secret values (Midnight), and the game
+    -- blames Goldsmith for the error (2026-10-08).
+    local function SafeToRedraw(tooltip)
+        if InCombatLockdown() or not (tooltip:IsShown() and tooltip.RefreshData and tooltip.GetPrimaryTooltipData) then
+            return false
+        end
+        local data = tooltip:GetPrimaryTooltipData()
+        if type(data) ~= "table" or (canaccesstable and not canaccesstable(data)) then return false end
+        if data.type ~= Enum.TooltipDataType.Item then return false end
+        for _, line in ipairs(data.lines or {}) do
+            if canaccesstable and not canaccesstable(line) then return false end
+            for _, value in pairs(line) do
+                if issecretvalue and issecretvalue(value) then return false end
+                if type(value) == "table" and canaccesstable and not canaccesstable(value) then return false end
+            end
+        end
+        return true
+    end
     local modifierFrame = CreateFrame("Frame")
     modifierFrame:RegisterEvent("MODIFIER_STATE_CHANGED")
     modifierFrame:SetScript("OnEvent", function(_, _, key)
         if key ~= "LSHIFT" and key ~= "RSHIFT" then return end
         for _, tooltip in ipairs({ GameTooltip, ItemRefTooltip }) do
-            if tooltip:IsShown() and tooltip.RefreshData then
+            if SafeToRedraw(tooltip) then
                 tooltip:RefreshData()
             end
         end

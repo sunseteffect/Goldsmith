@@ -22,6 +22,12 @@ local STALE_PRICE_DAYS = 3
 local TOP_HEIGHT = 26
 local FOOTER_HEIGHT = 44
 local PLAN_SUMMARY_HEIGHT = 158
+-- The planner's "Why this mix" panel: mixes shown, and its height
+local MIX_SHOWN = 3
+local MIX_HEIGHT = 158
+local MIX_BAR_HEIGHT = 34
+-- The planner's sales line turns orange past this many days of sales
+local PLAN_DAYS_WARN = 3
 -- Search box: seconds to wait after typing, letters before searching
 local SEARCH_DELAY = 0.3
 local SEARCH_MIN_LETTERS = 2
@@ -315,14 +321,17 @@ local function SalvageTooltip(tooltip, item)
     if item.whyNot then
         Note(tooltip, "Not recommended: " .. item.whyNot, "warning")
     end
-    Why(tooltip, string.format("Click to plan it (buy or %s?), right-click to queue a batch, shift-click for %s's page.",
-        (item.recipe.outputName:match("^(%S+)") or "Salvage"):lower(), s.inputName), "profit")
+    addon:ClickHint(tooltip, string.format("Click to plan it (buy or %s?)",
+        (item.recipe.outputName:match("^(%S+)") or "Salvage"):lower()))
+    addon:RightClickHint(tooltip, "Right-click to queue a batch")
+    addon:ShiftClickHint(tooltip, string.format("Shift-click for %s's page", s.inputName))
 end
 
 local function CraftTooltip(tooltip, item)
     if item.salvage then return SalvageTooltip(tooltip, item) end
     local info, recipe = item.info, item.recipe
     tooltip:AddLine(ItemText(item), 1, 1, 1)
+    addon:AddItemDescription(tooltip, item.itemID or recipe.outputItemID)
     if item.unlearned then
         -- Not learned yet: what it'd make if learned today, and where
         Note(tooltip, string.format("Not learned yet. Costed with %s skill and stats as they are now, as if learned today.",
@@ -340,8 +349,15 @@ local function CraftTooltip(tooltip, item)
             .. (better and (": " .. better .. ".") or "."))
     end
     if item.tier then
-        Line(tooltip, "How", (info.description or "") .. (info.concentrate and " + concentration" or ""))
-        Why(tooltip, "The mix of material qualities that reaches this tier for the least gold.")
+        -- Short: the full mix is long, and the planner shows it with the
+        -- alternatives ("Why this mix")
+        local how = info.description
+        -- "all silver" / "all gold" are short enough; a mix isn't
+        if how and not how:find("^all ") then how = "a mix of material qualities" end
+        Line(tooltip, "How", (how or "") .. (info.concentrate and " + concentration" or ""))
+        Why(tooltip, info.concentrate
+            and "The mix of material qualities earning the most per concentration point. Open the plan to see it and the others compared."
+            or "The mix of material qualities that reaches this tier for the least gold. Open the plan to see it and the others compared.")
     end
 
     tooltip:AddLine(" ")
@@ -453,11 +469,13 @@ local function CraftTooltip(tooltip, item)
     end
     tooltip:AddLine(" ")
     if item.unlearned then
-        Why(tooltip, "Click for the item's page. Once learned, open the profession and it moves to your crafts.", "profit")
+        Why(tooltip, "Once learned, open the profession and it moves to your crafts.")
+        addon:ClickHint(tooltip, "Click for the item's page")
         return
     end
-    Why(tooltip, "Click to plan: materials, quantity, shopping list", "profit")
-    Why(tooltip, "Right-click to add it to the queue, shift-click for the item's page")
+    addon:ClickHint(tooltip, "Click to plan: materials, quantity, shopping list")
+    addon:RightClickHint(tooltip, "Right-click to add it to the queue")
+    addon:ShiftClickHint(tooltip, "Shift-click for the item's page")
 end
 
 -- Planner
@@ -496,7 +514,9 @@ local function FillPlanRow(row, node)
     local quality = node.qualityTier and (addon:TierIconText(node.qualityTier, node.tierCount or 2) .. " ") or ""
     cells.item:SetText(indent .. quality .. node.name)
     cells.need:SetText(Whole(node.need))
-    cells.have:SetText(node.have > 0 and Whole(node.have) or "-")
+    -- Gold you hold counted for this silver row: a gold icon after the count
+    local goldIcon = node.gold and (" " .. addon:TierIconText(node.tierCount or 2, node.tierCount or 2)) or ""
+    cells.have:SetText(node.have > 0 and (Whole(node.have) .. goldIcon) or "-")
     if node.have <= 0 then cells.have:SetTextColor(addon:Color("dim")) end
     local best = node.best
     if best then
@@ -525,14 +545,30 @@ end
 local function PlanTooltip(tooltip, node)
     local o = node.options
     tooltip:AddLine(node.name, 1, 1, 1)
+    addon:AddItemDescription(tooltip, node.itemID)
     if node.qualityTier then
         Line(tooltip, "Quality", string.format("tier %d of %d %s", node.qualityTier, node.tierCount or 2,
             addon:TierIconText(node.qualityTier, node.tierCount or 2)))
     end
     Line(tooltip, "Need", tostring(Whole(node.need)))
+    -- A gold row chosen because gold is cheaper than silver right now
+    if node.lowID and node.lowID ~= node.itemID and node.qualityTier and node.qualityTier == node.tierCount then
+        local low, high = addon:GetMarketPrice(node.lowID), addon:GetMarketPrice(node.itemID)
+        if low and high and high <= low then
+            Note(tooltip, string.format("Gold is cheaper than silver right now: %s vs %s.", Money(high), Money(low)), "profit")
+        end
+    end
+    if node.gold then
+        local chosen = GoldsmithDB.ui2.useHeldGold and GoldsmithDB.ui2.useHeldGold[node.gold.itemID]
+        Note(tooltip, string.format("Using %d gold %s you have in place of silver%s.", node.gold.units, node.name,
+            chosen and " (your choice)" or ": about the same price"))
+    elseif node.goldKept then
+        Note(tooltip, string.format("You have %d gold %s, kept: it's worth more than silver, so buying silver is cheaper. Right-click to use it anyway.",
+            node.goldKept.units, node.name))
+    end
     if node.use and node.need - node.use >= 0.5 then
-        tooltip:AddLine(string.format("Each craft takes the full amount. About %s come back from resourcefulness and stay in your bags; the cost counts only what's used up.",
-            Whole(node.need - node.use)), 0.6, 0.6, 0.6, true)
+        Why(tooltip, string.format("Each craft takes the full amount. About %s come back from resourcefulness and stay in your bags; the cost counts only what's used up.",
+            Whole(node.need - node.use)))
     end
     if node.have > 0 then
         Line(tooltip, "You have", tostring(Whole(node.have)))
@@ -576,7 +612,8 @@ local function PlanTooltip(tooltip, node)
         Note(tooltip, string.format("Your choice (%s) costs %s more here", node.best.verb or node.best.method,
             Money((node.best.unit - o.cheapest.unit) * node.need)), "warning")
     end
-    Why(tooltip, "Right-click to choose how to get it, click for its item page")
+    addon:ClickHint(tooltip, "Click for its item page")
+    addon:RightClickHint(tooltip, "Right-click to choose how to get it")
 end
 
 -- Right-click a material: pick how to get it. The choice applies to that
@@ -606,9 +643,23 @@ local function PlanMenu(node)
                     end)
             end
         end
+        -- Gold you hold for this silver row: use it, or keep it to sell
+        local g = node.gold or node.goldKept
+        if g then
+            local useGold = GoldsmithDB.ui2.useHeldGold or {}
+            GoldsmithDB.ui2.useHeldGold = useGold
+            root:CreateDivider()
+            root:CreateCheckbox(string.format("Use my gold %s here", node.name),
+                function() return node.gold ~= nil end,
+                function()
+                    useGold[g.itemID] = node.gold == nil
+                    addon.Refresh()
+                end)
+        end
         root:CreateDivider()
         root:CreateButton("Reset all my choices", function()
             addon:ClearMethodOverrides()
+            if GoldsmithDB.ui2.useHeldGold then wipe(GoldsmithDB.ui2.useHeldGold) end
             addon.Refresh()
         end)
     end)
@@ -859,6 +910,20 @@ local function CheckMaterials(state, needs, crafts)
     return crafts
 end
 
+-- Gold you hold standing in for silver you're short of (GetCraftReagents):
+-- say so, and if the game says it lifts the craft a tier, that too
+local function SwapNotes(state, swapped, tierInfo)
+    if not swapped then return end
+    for _, s in ipairs(swapped.swaps) do
+        table.insert(state.notes, string.format("Uses %d gold %s you have in place of silver.",
+            s.units, s.name or "material"))
+    end
+    if tierInfo and swapped.tier and swapped.tier > tierInfo.tier then
+        table.insert(state.notes, string.format("With it, this makes %s instead of %s.",
+            addon:TierIconText(swapped.tier, tierInfo.tierCount), addon:TierIconText(tierInfo.tier, tierInfo.tierCount)))
+    end
+end
+
 -- Steps before the final craft: plan rows you'll mill or craft yourself
 -- that you don't have enough of yet, deepest first (pigments are milled
 -- before the ink that uses them is made)
@@ -916,6 +981,15 @@ local function LargestBagStack(itemID)
         end
     end
     return best, count
+end
+
+-- A vellum for an enchant scroll: the biggest stack in your bags and how
+-- many you have there, or nil
+local function FindVellum(vellumID)
+    if not vellumID then return nil end
+    local location = LargestBagStack(vellumID)
+    if not location then return nil end
+    return location, C_Item.GetItemCount(vellumID) or 0
 end
 
 -- Button label: "Mill 15 Tranquility Bloom", shortened if it won't fit
@@ -991,13 +1065,15 @@ local function CraftStepState(node, state)
     end
     local chosen = {}
     for _, child in ipairs(node.children) do chosen[child.itemID] = true end
-    local reagents, needs = addon:GetCraftReagents(recipe.recipeID, { chosen = chosen })
+    local outputPerCraft = addon:GetCraftModel(recipe)
+    local wanted = math.max(math.ceil(node.toGet / math.max(outputPerCraft, 0.01) - 0.0001), 1)
+    local reagents, needs, swapped = addon:GetCraftReagents(recipe.recipeID, { chosen = chosen },
+        GoldsmithDB.ui2.planUseOnHand ~= false and { crafts = wanted } or nil)
     if not reagents then
         table.insert(state.blockers, "The game didn't give this recipe's materials. Try closing and reopening the profession.")
         return state
     end
-    local outputPerCraft = addon:GetCraftModel(recipe)
-    local wanted = math.max(math.ceil(node.toGet / math.max(outputPerCraft, 0.01) - 0.0001), 1)
+    SwapNotes(state, swapped)
     local crafts = CheckMaterials(state, needs, wanted)
     state.recipeID, state.reagents, state.crafts = recipe.recipeID, reagents, crafts
     state.enabled = #state.blockers == 0 and crafts > 0
@@ -1031,10 +1107,6 @@ end
 local function CraftState(p, tierInfo, plan)
     local recipe = p.recipe
     local state = { label = "Craft", blockers = {}, notes = {} }
-    if GoldsmithDB.scrollOutputs[recipe.recipeID] then
-        table.insert(state.blockers, "Enchant scrolls need a vellum as their target, so craft them in the profession window for now.")
-        return state
-    end
     local learned = addon:KnowsRecipe(recipe.recipeID)
     if not learned and ProfessionOpen(recipe) then
         local info = C_TradeSkillUI.GetRecipeInfo(recipe.recipeID)
@@ -1052,6 +1124,18 @@ local function CraftState(p, tierInfo, plan)
         return state
     end
 
+    -- Enchant scrolls are an enchant put on a vellum from your bags
+    local scroll = GoldsmithDB.scrollOutputs[recipe.recipeID]
+    if scroll then
+        local location, vellums = FindVellum(scroll.vellumID)
+        if not location then
+            table.insert(state.blockers, string.format("Needs %s in your bags to put the enchant on.",
+                (scroll.vellumID and C_Item.GetItemNameByID(scroll.vellumID)) or "an Enchanting Vellum"))
+            return state
+        end
+        state.vellum, state.vellums = location, vellums
+    end
+
     -- Materials you'll mill or craft yourself come first, one step per
     -- click; the button moves on as your bags fill up
     local steps = GoldsmithDB.ui2.planUseOnHand ~= false and CollectSteps(plan.nodes, {}) or {}
@@ -1066,11 +1150,14 @@ local function CraftState(p, tierInfo, plan)
         end
     end
 
-    local reagents, needs = addon:GetCraftReagents(recipe.recipeID, tierInfo and tierInfo.scenario)
+    local reagents, needs, swapped = addon:GetCraftReagents(recipe.recipeID, tierInfo and tierInfo.scenario,
+        GoldsmithDB.ui2.planUseOnHand ~= false
+            and { crafts = plan.crafts, concentrate = tierInfo and tierInfo.concentrate == true } or nil)
     if not reagents then
         table.insert(state.blockers, "The game didn't give this recipe's materials. Try closing and reopening the profession.")
         return state
     end
+    SwapNotes(state, swapped, tierInfo)
     state.reagents = reagents
     local crafts = plan.crafts
 
@@ -1092,9 +1179,18 @@ local function CraftState(p, tierInfo, plan)
     end
 
     crafts = CheckMaterials(state, needs, crafts)
+    -- One vellum per scroll
+    if state.vellums and state.vellums < crafts then
+        table.insert(state.notes, string.format("Vellums for %d scroll%s.", state.vellums, state.vellums == 1 and "" or "s"))
+        crafts = state.vellums
+    end
     state.crafts = crafts
     state.enabled = #state.blockers == 0 and crafts > 0
     state.label = string.format("Craft %d", crafts)
+    -- The plan's own item (not a step): its crafts get a "Craft complete"
+    -- notice (CraftDone.lua). planCrafts is the whole plan, which can be
+    -- more than one batch (concentration or materials for fewer).
+    state.final, state.planCrafts = true, plan.crafts
     return state
 end
 
@@ -1115,6 +1211,13 @@ local function PerformCraftState(state, recipe, onOpened)
     if state.salvage then
         -- CraftSalvage(recipeID, casts, itemLocation)
         C_TradeSkillUI.CraftSalvage(state.salvage.recipeID, state.salvage.casts, state.salvage.location)
+        return
+    end
+    if state.final then addon:StartCraftBatch(recipe, state) end
+    if state.vellum then
+        -- CraftEnchant(recipeID, count, reagents, itemTarget, concentrate):
+        -- an enchant scroll, put on the vellum
+        C_TradeSkillUI.CraftEnchant(recipe.recipeID, state.crafts, state.reagents, state.vellum, state.concentrate)
         return
     end
     -- CraftRecipe(recipeID, count, reagents, recipeLevel, orderID, concentrate)
@@ -1147,8 +1250,13 @@ local function CreatePlanScreen(parent)
     titleButton:SetScript("OnClick", function()
         if screen.plan then addon:OpenItem(screen.plan.recipe.outputName, screen.tierItemID) end
     end)
+    -- The item and what it does; the click hint always shows (it's the
+    -- only thing to explain here)
     UI.SetTooltip(titleButton, function(tooltip)
-        addon:Explain(tooltip, "Click for the item's page", 1, 1, 1)
+        if not screen.plan then return end
+        tooltip:AddLine(screen.title:GetText() or screen.plan.recipe.outputName, 1, 1, 1)
+        addon:AddItemDescription(tooltip, screen.tierItemID)
+        addon:ClickHint(tooltip, "Click for the item's page", true)
     end)
     screen.subtitle = UI.Text(screen, "small", "muted")
     screen.subtitle:SetPoint("LEFT", screen.title, "RIGHT", 10, 0)
@@ -1184,9 +1292,23 @@ local function CreatePlanScreen(parent)
     makeLabel:SetText("Make")
     screen.qty = UI.NumberBox(screen, 70, function(quantity)
         if screen.plan and quantity and quantity > 0 then ui.planQty[screen.plan.recipe.recipeID] = quantity end
+        screen.allMade = nil
         screen:Update()
     end)
     screen.qty:SetPoint("LEFT", makeLabel, "RIGHT", 10, 0)
+
+    -- Crafts from this screen's Craft button finished or stopped
+    -- (CraftDone.lua): what was made comes off Make, so the plan is for
+    -- what's left (Make 15, 5 made: Make 10). All made: Make 0, and the
+    -- plan says so instead of offering to craft it all again.
+    function screen:CraftsDone(recipeID, made)
+        if not (screen.plan and screen.plan.recipe.recipeID == recipeID) or made <= 0 then return end
+        local left = math.max((tonumber(screen.qty:GetText()) or 0) - made, 0)
+        screen.qty:SetText(tostring(left))
+        if left > 0 then ui.planQty[recipeID] = left end
+        screen.allMade = left == 0 or nil
+        screen:Update()
+    end
     screen.crafts = UI.Text(screen, "small", "muted")
     screen.crafts:SetPoint("LEFT", screen.qty, "RIGHT", 10, 0)
 
@@ -1221,6 +1343,228 @@ local function CreatePlanScreen(parent)
     screen.list:SetPoint("TOPLEFT", 0, -80)
     screen.list:SetPoint("BOTTOMRIGHT", 0, PLAN_SUMMARY_HEIGHT + 12)
     screen.list:SetColumns(PLAN_COLUMNS)
+
+    -- Why this mix of material qualities: the best few the game confirmed
+    -- for this tier, so the choice can be checked (see UpdateMixes)
+    local mixes = UI.Panel(screen)
+    mixes:SetPoint("BOTTOMLEFT", 0, PLAN_SUMMARY_HEIGHT + 10)
+    mixes:SetPoint("BOTTOMRIGHT", 0, PLAN_SUMMARY_HEIGHT + 10)
+    mixes:SetHeight(MIX_HEIGHT)
+    mixes:Hide()
+    screen.mixes = mixes
+    -- Closed by default: one bar saying what was picked; click to open
+    -- the comparison (remembered in ui.planMixOpen)
+    mixes.bar = CreateFrame("Button", nil, mixes)
+    mixes.bar:SetPoint("TOPLEFT")
+    mixes.bar:SetPoint("TOPRIGHT")
+    mixes.bar:SetHeight(MIX_BAR_HEIGHT)
+    mixes.bar:SetScript("OnClick", function()
+        ui.planMixOpen = not ui.planMixOpen
+        screen:UpdateMixes(screen.tierInfo)
+    end)
+    mixes.bar:SetScript("OnEnter", function() mixes:SetBackdropBorderColor(addon:Color("gold")) end)
+    mixes.bar:SetScript("OnLeave", function() mixes:SetBackdropBorderColor(addon:Color("border")) end)
+    mixes.title = UI.Text(mixes.bar, "label", "muted")
+    mixes.title:SetPoint("LEFT", 16, 0)
+    mixes.title:SetText("WHY THIS MIX OF MATERIAL QUALITIES")
+    mixes.toggle = UI.Text(mixes.bar, "small", "hint", "RIGHT")
+    mixes.toggle:SetPoint("RIGHT", -16, 0)
+    mixes.picked = UI.Text(mixes.bar, "small", "text")
+    mixes.picked:SetPoint("LEFT", mixes.title, "RIGHT", 14, 0)
+    mixes.picked:SetPoint("RIGHT", mixes.toggle, "LEFT", -14, 0)
+    -- The comparison, shown when open
+    mixes.body = CreateFrame("Frame", nil, mixes)
+    mixes.body:SetPoint("TOPLEFT", 0, -MIX_BAR_HEIGHT + 6)
+    mixes.body:SetPoint("BOTTOMRIGHT")
+    mixes.why = UI.Text(mixes.body, "small", "muted")
+    mixes.why:SetPoint("TOPLEFT", 16, 0)
+    mixes.why:SetPoint("RIGHT", -16, 0)
+    -- Columns: right edges, from the panel's left
+    local MIX_COLUMNS = {
+        { key = "cost", label = "Cost each", right = 520 },
+        { key = "conc", label = "Concentration", right = 630 },
+        { key = "profit", label = "Profit each", right = 735 },
+        { key = "perPoint", label = "Per point", right = 840 },
+    }
+    local function Cell(parent, y, font, color, column)
+        local fs = UI.Text(parent, font, color, column and "RIGHT" or "LEFT")
+        if column then
+            fs:SetPoint("TOPRIGHT", parent, "TOPLEFT", column.right, y)
+            fs:SetWidth(100)
+        else
+            fs:SetPoint("TOPLEFT", 16, y)
+            fs:SetWidth(MIX_COLUMNS[1].right - 120)
+        end
+        return fs
+    end
+    local body = mixes.body
+    mixes.header = { mix = Cell(body, -22, "label", "muted") }
+    mixes.header.mix:SetText("MIX")
+    for _, c in ipairs(MIX_COLUMNS) do
+        mixes.header[c.key] = Cell(body, -22, "label", "muted", c)
+        mixes.header[c.key]:SetText(c.label:upper())
+    end
+    mixes.rows = {}
+    -- The top mixes, then two lines without concentration
+    for i = 1, MIX_SHOWN + 2 do
+        local y = -40 - (i - 1) * 18
+        local row = { mix = Cell(body, y, "small", "text") }
+        for _, c in ipairs(MIX_COLUMNS) do row[c.key] = Cell(body, y, "small", "text", c) end
+        mixes.rows[i] = row
+    end
+
+    -- Fills the panel from the tier row the plan uses (GetTierRows: its
+    -- scenarios are every mix the game confirmed, with cost, concentration
+    -- and profit). Ranked the way the choice was made: with concentration,
+    -- most extra gold per concentration point; without, cheapest to reach
+    -- the tier. With concentration, the two extremes without it (all
+    -- silver, all gold) are the last lines, each with the tier it reaches,
+    -- to show what concentrating adds (often even all gold can't reach the
+    -- tier). Hidden for crafts without material qualities, and the
+    -- materials list takes the space back.
+    -- planCostEach (once the plan is built): the plan's cost per item. The
+    -- tier rows value materials that come in one quality at what yours cost
+    -- you, the plan at today's price, so every row is shifted by the
+    -- difference: the mixes differ only in quality materials, so the order
+    -- and the gaps stay, and the picked row matches the cost below.
+    function screen:UpdateMixes(tierInfo, planCostEach)
+        -- Opening or closing the panel redraws it without the plan's cost:
+        -- keep the last one for the same mix, so the numbers don't jump
+        if planCostEach then
+            screen.mixPlanCost = { scenario = tierInfo and tierInfo.scenario, cost = planCostEach }
+        elseif screen.mixPlanCost and tierInfo and screen.mixPlanCost.scenario == tierInfo.scenario then
+            planCostEach = screen.mixPlanCost.cost
+        end
+        local candidates, baselines = {}, {}
+        if tierInfo and tierInfo.scenarios then
+            local seen, allLow, allHigh = {}, nil, nil
+            for _, e in ipairs(tierInfo.scenarios) do
+                local fits = e.tier == tierInfo.tier and (e.concentrate == true) == (tierInfo.concentrate == true)
+                    and (not tierInfo.concentrate or e.concentrationValue)
+                local key = e.description or tostring(e)
+                if fits and not seen[key] then
+                    seen[key] = true
+                    table.insert(candidates, e)
+                end
+                if tierInfo.concentrate and not e.concentrate and e.description then
+                    if e.description == "all gold" then
+                        allHigh = allHigh or e
+                    elseif e.description:find("^all ") then
+                        allLow = allLow or e
+                    end
+                end
+            end
+            if allLow then table.insert(baselines, allLow) end
+            if allHigh then table.insert(baselines, allHigh) end
+            if tierInfo.concentrate then
+                table.sort(candidates, function(a, b) return a.concentrationValue > b.concentrationValue end)
+            else
+                table.sort(candidates, function(a, b) return a.cost < b.cost end)
+            end
+        end
+        local shown = #candidates >= 2 or (#candidates == 1 and #baselines > 0)
+        mixes:SetShown(shown)
+        screen.list:ClearAllPoints()
+        screen.list:SetPoint("TOPLEFT", 0, -80)
+        local open = ui.planMixOpen == true
+        local height = open and MIX_HEIGHT or MIX_BAR_HEIGHT
+        mixes:SetHeight(height)
+        mixes.body:SetShown(open)
+        screen.list:SetPoint("BOTTOMRIGHT", 0, PLAN_SUMMARY_HEIGHT + 12 + (shown and height + 8 or 0))
+        if not shown then return end
+
+        -- Ranks 1-3; the one the plan uses is always listed (with its
+        -- real rank if that's lower)
+        local list, ranks = {}, {}
+        for i = 1, math.min(#candidates, MIX_SHOWN) do list[i], ranks[i] = candidates[i], i end
+        local chosenShown = false
+        for _, e in ipairs(list) do
+            if e.scenario == tierInfo.scenario then chosenShown = true end
+        end
+        if not chosenShown and tierInfo.built then
+            -- A mix built in between: its own line under the top ones
+            -- (without concentration, so the baseline lines aren't there)
+            table.insert(list, tierInfo)
+        elseif not chosenShown then
+            list[#list] = tierInfo
+            for i, e in ipairs(candidates) do
+                if e.scenario == tierInfo.scenario then ranks[#list] = i end
+            end
+        end
+
+        local conc = tierInfo.concentrate == true
+        local offset = (planCostEach and tierInfo.cost) and (planCostEach - tierInfo.cost) or 0
+        local top = math.min(#candidates, MIX_SHOWN)
+        local pickedRank
+        for i, e in ipairs(candidates) do
+            if e.scenario == tierInfo.scenario then pickedRank = i end
+        end
+        mixes.why:SetText(string.format(conc
+            and "The top %d of %d mixes that reach this tier, ranked by extra gold per concentration point.%s"
+            or "The top %d of %d mixes that reach this tier, cheapest first.%s", top, #candidates,
+            (tierInfo.built and " Picked: a mix in between that uses materials you have.")
+            or ((tierInfo.heldPick and pickedRank) and string.format(" Picked #%d: it uses materials you have.", pickedRank))
+            or ""))
+        mixes.header.mix:SetText(string.format("TOP %d MIXES", top))
+        mixes.header.conc:SetShown(conc)
+        mixes.header.perPoint:SetShown(conc)
+
+        -- The bar, open or closed: what was picked, in a line
+        local pickedText = (tierInfo.description or "?"):gsub("^%l", string.upper)
+        local pickedNumbers = conc and tierInfo.concentrationValue
+            and string.format("%s per point", Money(tierInfo.concentrationValue)) or Money(tierInfo.cost + offset) .. " each"
+        mixes.picked:SetText(string.format("Picked: %s  %s", pickedText,
+            addon:Colorize(string.format(tierInfo.heldPick and "(%s, uses materials you have)" or "(%s, best of %d)",
+                pickedNumbers, #candidates), "muted")))
+        mixes.toggle:SetText(open and "Hide" or "Compare")
+
+        local function Fill(row, e, label, color)
+            row.mix:SetText(label)
+            row.mix:SetTextColor(addon:Color(color))
+            row.cost:SetText(Money(e.cost + offset) .. (e.partial and "+" or ""))
+            row.cost:SetTextColor(addon:Color(color))
+            row.conc:SetText(e.concentrate and string.format("%d", e.concentration) or "-")
+            row.conc:SetTextColor(addon:Color(color))
+            row.conc:SetShown(conc)
+            if e.profit then
+                row.profit:SetText(Signed(e.profit - offset))
+                row.profit:SetTextColor(addon:Color(addon:MoneyColor(e.profit - offset)))
+            else
+                row.profit:SetText("-")
+                row.profit:SetTextColor(addon:Color("dim"))
+            end
+            row.perPoint:SetText(e.concentrationValue and Money(e.concentrationValue) or "-")
+            row.perPoint:SetTextColor(addon:Color(color))
+            row.perPoint:SetShown(conc)
+            for _, fs in pairs(row) do if fs ~= row.conc and fs ~= row.perPoint then fs:Show() end end
+        end
+        local function Clear(row)
+            for _, fs in pairs(row) do fs:Hide() end
+        end
+
+        for i, row in ipairs(mixes.rows) do
+            local e = list[i]
+            if e then
+                local picked = e.scenario == tierInfo.scenario
+                -- A mix built in between has no rank
+                local label = ((e.description or "?"):gsub("^%l", string.upper))
+                local text = e.built and ("     " .. label) or string.format("%d.  %s", ranks[i] or i, label)
+                -- Gold picked because it's cheaper than silver right now
+                local recipe = screen.plan and screen.plan.recipe
+                if recipe and addon:MixUsesCheaperGold(recipe, e.scenario) then
+                    text = text .. addon:Colorize("  (gold is cheaper)", "dim")
+                end
+                Fill(row, e, picked and (text .. addon:Colorize("  (picked)", "dim")) or text, picked and "gold" or "text")
+            elseif baselines[i - #list] then
+                -- Without concentration, each extreme and the tier it reaches
+                local b = baselines[i - #list]
+                Fill(row, b, string.format("Without concentration, %s makes %s", b.description,
+                    addon:TierIconText(b.tier, b.tierCount)), "muted")
+            else
+                Clear(row)
+            end
+        end
+    end
 
     -- Summary: cost, sells for, profit; then sales, shopping and the button
     local summary = UI.Panel(screen)
@@ -1296,6 +1640,8 @@ local function CreatePlanScreen(parent)
     screen.craft = UI.Button(summary, "Craft", 170, 28, function()
         local state, p = screen.craftState, screen.plan
         if not (state and state.enabled and p) then return end
+        -- So its crafts come off Make when they're done (CraftsDone)
+        state.fromPlan = true
         PerformCraftState(state, p.recipe, function()
             if screen.plan == p and screen:IsVisible() then screen:Update() end
         end)
@@ -1316,13 +1662,7 @@ local function CreatePlanScreen(parent)
                 tooltip:AddLine(string.format("    %d. %s", i, step), r, g, b)
             end
         end
-        if state.reagents and #state.reagents > 0 then
-            tooltip:AddLine("Uses the plan's mix of material qualities:", 0.8, 0.8, 0.8)
-            for _, entry in ipairs(state.reagents) do
-                tooltip:AddDoubleLine("    " .. MaterialName(entry.reagent.itemID), entry.quantity .. " per craft",
-                    0.9, 0.9, 0.9, 1, 1, 1)
-            end
-        end
+        -- No materials list: the plan above already shows them
         if state.concentrate and state.points then
             local r, g, b = addon:Color("conc")
             tooltip:AddLine(string.format("With concentration: about %d in all.", state.points), r, g, b, true)
@@ -1391,6 +1731,11 @@ local function CreatePlanScreen(parent)
         screen.useHave:SetChecked(ui.planUseOnHand ~= false)
 
         local tierInfo, tierNote = addon:WithCharacter(p.charKey, FindTierInfo, p)
+        -- Using what you hold: a mix of the same tier that needs less buying
+        if ui.planUseOnHand ~= false and tierInfo then
+            tierInfo = addon:WithCharacter(p.charKey, addon.PreferHeldMix, addon, recipe, tierInfo,
+                tonumber(screen.qty:GetText()) or 0)
+        end
         screen.tierInfo = tierInfo
         screen.tierItemID = tierInfo and tierInfo.itemID or recipe.outputItemID
         screen.queued = addon:FindQueueEntry(p.charKey, recipe.recipeID, p.tier,
@@ -1409,13 +1754,14 @@ local function CreatePlanScreen(parent)
         if p.charKey ~= addon.charKey then table.insert(sub, "on " .. CharName(p.charKey)) end
         if p.tier and not tierInfo then table.insert(sub, "this tier isn't reachable right now") end
         screen.subtitle:SetText(table.concat(sub, ", "))
+        screen:UpdateMixes(tierInfo)
 
         local quantity = tonumber(screen.qty:GetText()) or 0
         if quantity <= 0 then
             screen.current = nil
             screen.list:SetItems({})
             screen.crafts:SetText("")
-            ClearSummary("Enter how many to make.")
+            ClearSummary(screen.allMade and "All made. Enter a number to make more." or "Enter how many to make.")
             return
         end
 
@@ -1427,6 +1773,8 @@ local function CreatePlanScreen(parent)
             plan.crafts == 1 and "" or "s", plan.expectedOutput)
 
         local made = math.max(plan.expectedOutput, 0.0001)
+        -- The mix table, lined up with this plan's cost
+        screen:UpdateMixes(tierInfo, plan.cost / made)
         screen.cost.value:SetText(Money(plan.cost) .. (plan.complete and "" or "+"))
         screen.cost.value:SetTextColor(addon:Color("text"))
         local costNote = Money(plan.cost / made) .. " each"
@@ -1459,25 +1807,34 @@ local function CreatePlanScreen(parent)
             screen.profit.note:SetText("")
         end
 
-        if plan.demand and plan.demand > 0 then
-            local days = quantity / plan.demand
-            local rate = plan.saleRate and (", " .. addon:Colorize(addon:FormatSaleRate(plan.saleRate) .. " of listings sell",
-                addon:SaleRateColor(plan.saleRate))) or ""
-            local itemID = (plan.tier and plan.tier.itemID) or plan.recipe.outputItemID
-            local demandColor = addon:DemandColor(plan.demand, itemID)
-            local demandText = addon:FormatDemand(plan.demand)
-            if demandColor == "warning" then demandText = addon:Colorize(demandText, demandColor) end
-            local text = string.format("Sells about %s a day (%s%s). Making %d is ",
-                demandText, plan.demandSource or "?", rate, quantity)
-            if days >= 1 then
-                text = text .. string.format("about %.1f days of sales, so it may be slow to sell.", days)
-            elseif days < 0.01 then
-                text = text .. "under 1% of a day's sales."
-            else
-                text = text .. string.format("%.0f%% of a day's sales.", days * 100)
+        -- How it sells, the same rating as the Crafts list (Goldsmith Data's
+        -- sell level without TSM), then how long this many lasts at the
+        -- daily sales. Orange only for a slow seller or more than
+        -- PLAN_DAYS_WARN days' worth: a couple of days of a good seller is fine.
+        local itemID = (tierInfo and tierInfo.itemID) or plan.recipe.outputItemID
+        local level = not addon:HasTSM() and addon:GetSellLevel(itemID)
+        if level or (plan.demand and plan.demand > 0) then
+            local parts, warn = {}, false
+            if level then
+                table.insert(parts, addon:Colorize(addon:SellLevelText(level), addon:SellLevelColor(level)) .. " (Goldsmith Data).")
+                warn = level ~= addon.SELL_LEVEL.sells
             end
-            screen.demandLine:SetText(text)
-            screen.demandLine:SetTextColor(addon:Color(days >= 1 and "warning" or "muted"))
+            if plan.demand and plan.demand > 0 then
+                local days = quantity / plan.demand
+                local worth
+                if days < 1 then
+                    worth = "less than a day's worth"
+                elseif days < 1.5 then
+                    worth = "about a day's worth"
+                else
+                    worth = string.format("about %.0f days' worth", days)
+                end
+                table.insert(parts, string.format("%s about %s a day (%s): %d is %s.",
+                    level and "You sell" or "Sells", addon:FormatDemand(plan.demand), plan.demandSource or "?", quantity, worth))
+                warn = warn or days > PLAN_DAYS_WARN
+            end
+            screen.demandLine:SetText(table.concat(parts, " "))
+            screen.demandLine:SetTextColor(addon:Color(warn and "warning" or "muted"))
         else
             screen.demandLine:SetText("Sold per day: no data")
             screen.demandLine:SetTextColor(addon:Color("dim"))
@@ -1548,6 +1905,7 @@ end
 
 local function SalvageRowTooltip(tooltip, item)
     tooltip:AddLine(MaterialName(item.itemID, item.name), 1, 1, 1)
+    addon:AddItemDescription(tooltip, item.itemID)
     if item.output then
         Line(tooltip, "Should come out", "about " .. Whole(item.amount))
         Line(tooltip, "AH price", item.unit and string.format("%s (%s)", Money(item.unit), addon:PriceAgeText(item.itemID))
@@ -1563,7 +1921,7 @@ local function SalvageRowTooltip(tooltip, item)
         Line(tooltip, "AH price", item.unit and string.format("%s (%s)", Money(item.unit), addon:PriceAgeText(item.itemID))
             or "no price", (not item.unit) and "warning" or nil)
     end
-    Why(tooltip, "Click for the item's page.", "profit")
+    addon:ClickHint(tooltip, "Click for the item's page")
 end
 
 -- A salvage recipe for an item from saved salvage runs, so the profession
@@ -1607,7 +1965,11 @@ local function CreateSalvageScreen(parent)
         if t then addon:OpenItem(t.name, t.itemID) end
     end)
     UI.SetTooltip(titleButton, function(tooltip)
-        addon:Explain(tooltip, "Click for the item's page", 1, 1, 1)
+        local t = screen.target
+        if not t then return end
+        tooltip:AddLine(screen.title:GetText() or t.name, 1, 1, 1)
+        addon:AddItemDescription(tooltip, t.itemID)
+        addon:ClickHint(tooltip, "Click for the item's page", true)
     end)
     screen.subtitle = UI.Text(screen, "small", "muted")
     screen.subtitle:SetPoint("LEFT", screen.title, "RIGHT", 10, 0)
@@ -2003,7 +2365,7 @@ local function CreateBudget(parent)
         end
         Why(tooltip, "Mixes of lower and higher quality materials are compared for each craft, to get the most gold from your concentration.", "gold")
         Why(tooltip, "Extra = profit on top of crafting the same thing without concentration. Each craft is capped at about a day of that item's sales.")
-        if bar.target then Why(tooltip, "Click to plan the best use.", "profit") end
+        if bar.target then addon:ClickHint(tooltip, "Click to plan the best use") end
     end, "ANCHOR_TOP")
     return bar
 end
@@ -2262,6 +2624,8 @@ local function Create(parent)
 
     view.plan = CreatePlanScreen(parent)
     view.salvage = CreateSalvageScreen(parent)
+    -- The planner's crafts finished or stopped (CraftDone.lua)
+    addon.PlanCraftsDone = function(recipeID, made) view.plan:CraftsDone(recipeID, made) end
 
     function view:CloseSalvage()
         local returnTab = view.salvage.target and view.salvage.target.returnTab

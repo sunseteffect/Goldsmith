@@ -12,7 +12,7 @@ Most players don't want to study the auction house. Goldsmith gives you a short 
 - **Salvage:** milling, prospecting and crushing as profit rows, from the yields you actually get. The planner shows whether salvaging beats buying.
 - **Characters:** a to-do list for each alt, with their professions, concentration and craft cooldowns. Cooldowns that are ready and worth making show up in Do this next.
 - **Items and History:** prices and price history, your stock across bags, banks and the warband bank, every sale, purchase and deposit with real profit after the AH cut, and your total gold over time with where it is.
-- **Hovers that explain themselves:** hover any number for what it means and how it's worked out. Once you know Goldsmith, Settings > Hover explanations > Hold Ctrl keeps hovers short; hold Ctrl to see the explanations again.
+- **Hovers that explain themselves:** hovers stay short, just the numbers. Hold Ctrl over one to see what each number means and how it's worked out.
 
 ## Requirements
 - English game client (other languages aren't supported yet)
