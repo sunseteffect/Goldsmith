@@ -1490,10 +1490,21 @@ function addon:GetItemDetails(name, itemID)
     if not recipe or d.material then
         d.paid, d.paidSource = addon:GetOwnCost(name)
     end
-    -- Not crafted yet: the cost the "Show cost as" setting picks
+    -- Not crafted yet: the cost the "Show cost as" setting picks. Some of
+    -- what you hold gathered: what you spent, gathered ones free (all free:
+    -- no break-even, see GetHeldCashCost)
     local worstMode = addon:Setting("costMode") == "worst" and d.worst
-    local basis = d.yours or d.paid or (worstMode and d.worst) or d.estimated
-    d.breakEvenFrom = (d.yours and "yours") or (d.paid and "paid") or (worstMode and "worst")
+    local paid = d.paid
+    if not d.yours and (not recipe or d.material) then
+        local cash, bought, boughtAt, free = addon:GetHeldCashCost(name)
+        if cash then
+            d.cash = { unit = cash, bought = bought, boughtAt = boughtAt, free = free }
+            paid = cash > 0 and cash or nil
+            d.free = cash <= 0
+        end
+    end
+    local basis = d.yours or paid or (worstMode and d.worst) or d.estimated
+    d.breakEvenFrom = (d.yours and "yours") or (d.cash and paid and "yours") or (paid and "paid") or (worstMode and "worst")
         or (d.estimated and "estimated")
     d.breakEven = basis and basis / (1 - AH_CUT)
 

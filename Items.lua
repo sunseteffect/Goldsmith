@@ -745,7 +745,8 @@ local function CreatePage(parent)
                 end
             end
         else
-            t[5]:Set("Break-even", "-", "dim", "no cost known yet")
+            t[5]:Set("Break-even", d.free and "free" or "-", "dim",
+                d.free and "yours were gathered or looted" or "no cost known yet")
             t[5].tooltip = nil
         end
 
@@ -765,8 +766,16 @@ local function CreatePage(parent)
                               gathered = "gathered (at the AH price)" }
             local how = {}
             for part in (d.paidSource or "paid"):gmatch("[^+]+") do table.insert(how, sources[part] or part) end
-            r[1]:Set("What you paid", d.paid and Money(d.paid) or "-", d.paid and "text" or "dim",
-                d.paid and ("average of what you " .. table.concat(how, " and ")) or "nothing bought yet")
+            if d.cash and d.free then
+                r[1]:Set("Yours cost you", "free", "profit", string.format("%d gathered or looted", d.cash.free))
+            elseif d.cash then
+                -- Some gathered: what you spent, gathered ones free
+                r[1]:Set("Yours cost you", Money(d.cash.unit), "text",
+                    string.format("%d bought at %s, %d free", d.cash.bought, Money(d.cash.boughtAt), d.cash.free))
+            else
+                r[1]:Set("What you paid", d.paid and Money(d.paid) or "-", d.paid and "text" or "dim",
+                    d.paid and ("average of what you " .. table.concat(how, " and ")) or "nothing bought yet")
+            end
             r[2]:Set("AH price now", d.price and Money(d.price) or "-", "text", d.priceText)
             r[3]:Set(nil)
         end

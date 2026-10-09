@@ -2036,8 +2036,11 @@ local function AddTooltipLines(tooltip, data)
     -- your own crafts ("avg cost 160.55g (newest 1 bought)" showed on 28
     -- crafted alloys, 2026-10-09)
     local madeFor, madeUnits, madePartial = addon:GetCraftedCost(data.id)
+    -- Some of what you hold gathered: said once, below ("yours cost you")
+    local cash, bought, boughtAt, free
+    if not madeFor then cash, bought, boughtAt, free = addon:GetHeldCashCost(name) end
     local avg, qty = addon:GetAverageCost(name)
-    if avg and not madeFor then
+    if avg and not madeFor and not cash then
         tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r you paid",
             string.format("%s each (last %d bought)", FormatGold(avg), qty), 1, 1, 1, 1, 1, 1)
     end
@@ -2079,9 +2082,25 @@ local function AddTooltipLines(tooltip, data)
     local unitCost, partial = madeFor, madePartial
     if not unitCost then
         unitCost, partial = addon:GetUnitCostBasis(name)
+        -- Some or all gathered or looted: what you spent, gathered ones
+        -- free, said the way crafted ones are ("yours cost you"). All free
+        -- (a payout bag's Nocturnal Lotus): no break-even (2026-10-09).
+        if cash then
+            partial = false
+            if cash <= 0 then
+                unitCost = nil
+                tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r yours cost you",
+                    string.format("free (%d gathered or looted)", free), 1, 1, 1, 0.3, 1, 0.3)
+            else
+                unitCost = cash
+                tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r yours cost you",
+                    string.format("%s each (%d bought at %s, %d free)", FormatGold(cash), bought, FormatGold(boughtAt), free),
+                    1, 1, 1, 1, 1, 1)
+            end
+        end
     end
     if unitCost and unitCost > 0 then
-        tooltip:AddDoubleLine(madeFor and "|cFF00FF00Goldsmith|r break-even on yours" or "|cFF00FF00Goldsmith|r break-even price",
+        tooltip:AddDoubleLine((madeFor or cash) and "|cFF00FF00Goldsmith|r break-even on yours" or "|cFF00FF00Goldsmith|r break-even price",
             FormatGold(unitCost / (1 - AH_CUT)) .. (partial and "+" or ""), 1, 1, 1, 1, 1, 1)
     end
 

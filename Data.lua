@@ -357,7 +357,7 @@ local function PurchasesInUse()
         for _, e in ipairs(list) do
             if e.itemID then ids[e.itemID] = true end
         end
-        for itemID in pairs(ids) do held = held + addon:GetHeld(itemID) end
+        for itemID in pairs(ids) do held = held + addon:HeldAnywhere(itemID) end
         local remaining = math.max(held, 1)
         for i = #list, 1, -1 do
             local e = list[i]

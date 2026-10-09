@@ -231,6 +231,15 @@ function addon:GatheredIndex()
     return idx
 end
 
+-- How many of an item you hold: every character's saved stock, but at
+-- least what this character holds now. The saved stock only covers
+-- materials your recipes use (a Nocturnal Lotus counted as none held, so
+-- only the newest, bought one, was looked at, 2026-10-09).
+function addon:HeldAnywhere(itemID)
+    local here = C_Item.GetItemCount(itemID, true, false, true, true) or 0
+    return math.max(addon.GetHeld and addon:GetHeld(itemID) or 0, here)
+end
+
 -- How you got what you hold of an item: the newest purchases and gathered
 -- lots, going back until they cover what you have on every character (or
 -- just the newest one when you hold none, e.g. right after a craft used
@@ -260,10 +269,7 @@ function addon:GetAcquiredCost(itemName)
     end
 
     local held = 0
-    for itemID in pairs(ids) do
-        held = held + (addon.GetHeld and addon:GetHeld(itemID)
-            or C_Item.GetItemCount(itemID, true, false, true, true) or 0)
-    end
+    for itemID in pairs(ids) do held = held + addon:HeldAnywhere(itemID) end
 
     local remaining, copper, paidQty, gatheredQty, gatheredIDs = math.max(held, 1), 0, 0, 0, {}
     for i = #list, 1, -1 do
@@ -280,6 +286,19 @@ function addon:GetAcquiredCost(itemName)
         if remaining <= 0 then break end
     end
     return paidQty > 0 and copper / paidQty or nil, paidQty, gatheredQty, gatheredIDs
+end
+
+-- What the ones you hold cost you in gold, gathered ones counting as free:
+-- for break-even ("sell at this and you've made back what you spent"),
+-- not for planning (that values gathered ones at the AH price, so a craft
+-- never looks good just because its materials were free). Only when some
+-- of what you hold was gathered. Returns cost per unit, units bought, what
+-- each bought one cost, units gathered; or nil (user, 2026-10-09).
+function addon:GetHeldCashCost(itemName)
+    local paid, paidQty, gatheredQty = addon:GetAcquiredCost(itemName)
+    if not gatheredQty or gatheredQty <= 0 then return nil end
+    if not paid or (paidQty or 0) <= 0 then return 0, 0, nil, gatheredQty end
+    return paid * paidQty / (paidQty + gatheredQty), paidQty, paid, gatheredQty
 end
 
 -- What the gathered ones you hold are worth now: today's AH price for each
@@ -308,7 +327,7 @@ function addon:GatheredInUse(keep)
         for _, e in ipairs(addon.ledger:index().purchases[name] or {}) do
             if e.itemID then ids[e.itemID] = true end
         end
-        for itemID in pairs(ids) do held = held + addon:GetHeld(itemID) end
+        for itemID in pairs(ids) do held = held + addon:HeldAnywhere(itemID) end
         -- Purchases newer than a lot cover what you hold first; counting
         -- them too would need the merged walk, and keeping a few more small
         -- lots is harmless
