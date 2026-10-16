@@ -271,18 +271,32 @@ end
 -- (checked in game 2026-09-26), so everything is counted at any time.
 -- A warband bank that suddenly reads empty is more likely not loaded yet
 -- than really empty, so the last count is kept in that case.
-local function SnapshotStock()
-    -- Not while the tour shows its sample data (Tour.lua): it isn't yours
-    if addon:UsingTourData() then return end
-    local c = addon.char
-    local stock, warband, warbandTotal = {}, {}, 0
-    -- How many of each are in the bank, for "where is it" in hovers (the
-    -- rest are in your bags; user, 2026-10-11)
-    local inBank = {}
-    local ids = GetStockItemIDs()
-    local gearTiers, warbandTiers, bound, boundWarband, boundBags = ScanGearTiers(ids)
-    local equipped = EquippedItems()
-    for itemID in pairs(ids) do
+--
+-- Thousands of items, three counts each: done in one go it ran past the
+-- game's script time limit while looting in a delve ("script ran too long",
+-- user 2026-10-15). So it counts STOCK_BUDGET_MS a frame, waits out combat,
+-- and saves the result only when the whole count is done.
+local STOCK_BUDGET_MS = 4
+local stockJob -- the count in progress
+
+-- One frame's worth of counting; true when every item is counted
+local function CountStock(job, budget)
+    local start = debugprofilestop()
+    if not job.ids then
+        job.set = GetStockItemIDs()
+        job.ids = addon:Keys(job.set)
+        if debugprofilestop() - start >= budget then return false end
+    end
+    if not job.gearTiers then
+        job.gearTiers, job.warbandTiers, job.bound, job.boundWarband, job.boundBags = ScanGearTiers(job.set)
+        job.equipped = EquippedItems()
+        if debugprofilestop() - start >= budget then return false end
+    end
+    local ids, equipped = job.ids, job.equipped
+    local bound, boundWarband, boundBags = job.bound, job.boundWarband, job.boundBags
+    while job.i <= #ids do
+        local itemID = ids[job.i]
+        job.i = job.i + 1
         local own = C_Item.GetItemCount(itemID, true, false, true, false) or 0
         local withWarband = C_Item.GetItemCount(itemID, true, false, true, true) or 0
         -- Bound gear in bags is left out of own below, so out of this too
@@ -292,21 +306,70 @@ local function SnapshotStock()
         -- Not for sale: what you wear, and bound gear
         own = own - (equipped[itemID] or 0) - (bound[itemID] or 0)
         inWarband = inWarband - (boundWarband[itemID] or 0)
-        if own > 0 then stock[itemID] = own end
+        if own > 0 then job.stock[itemID] = own end
         local bank = math.min(own, math.max(own - math.max(inBags, 0), 0))
-        if bank > 0 then inBank[itemID] = bank end
+        if bank > 0 then job.inBank[itemID] = bank end
         if inWarband > 0 then
-            warband[itemID] = inWarband
-            warbandTotal = warbandTotal + inWarband
+            job.warband[itemID] = inWarband
+            job.warbandTotal = job.warbandTotal + inWarband
         end
+        if job.i % 16 == 0 and debugprofilestop() - start >= budget then return false end
     end
-    c.stock, c.gearTiers, c.stockTime, c.stockBank = stock, gearTiers, time(), inBank
+    return true
+end
+
+local function NewStockJob()
+    -- How many of each are in the bank, for "where is it" in hovers (the
+    -- rest are in your bags; user, 2026-10-11)
+    return { i = 1, stock = {}, inBank = {}, warband = {}, warbandTotal = 0, onDone = {}, later = {} }
+end
+
+local function SaveStock(job)
+    local c = addon.char
+    c.stock, c.gearTiers, c.stockTime, c.stockBank = job.stock, job.gearTiers, time(), job.inBank
     -- Left over from when bags and bank were kept separately
     c.bagStock, c.bankStock, c.bankTime = nil, nil, nil
-    if warbandTotal > 0 or next(GoldsmithDB.warbandStock) == nil then
-        GoldsmithDB.warbandStock = warband
-        GoldsmithDB.warbandGearTiers = warbandTiers
+    if job.warbandTotal > 0 or next(GoldsmithDB.warbandStock) == nil then
+        GoldsmithDB.warbandStock = job.warband
+        GoldsmithDB.warbandGearTiers = job.warbandTiers
     end
+end
+
+-- Counts stock over a few frames, then calls onDone (if given). A count
+-- asked for while one runs starts again once it's done, so the newest
+-- bags are what's saved.
+local function SnapshotStock(onDone)
+    -- Not while the tour shows its sample data (Tour.lua): it isn't yours
+    if addon:UsingTourData() then return end
+    if stockJob then
+        stockJob.again = true
+        if onDone then table.insert(stockJob.later, onDone) end
+        return
+    end
+    local job = NewStockJob()
+    if onDone then table.insert(job.onDone, onDone) end
+    stockJob = job
+    local function Step()
+        -- Combat: wait, the count can be a moment late
+        if InCombatLockdown() then C_Timer.After(1, Step) return end
+        if not CountStock(job, STOCK_BUDGET_MS) then C_Timer.After(0, Step) return end
+        stockJob = nil
+        -- The tour may have started while this was counting
+        if not addon:UsingTourData() then SaveStock(job) end
+        for _, fn in ipairs(job.onDone) do fn() end
+        if job.again then
+            SnapshotStock(function() for _, fn in ipairs(job.later) do fn() end end)
+        end
+    end
+    Step()
+end
+
+-- The whole count at once, for /gsm data, which prints right after
+local function SnapshotStockNow()
+    if addon:UsingTourData() then return end
+    local job = NewStockJob()
+    CountStock(job, math.huge)
+    SaveStock(job)
 end
 
 -- Stock is only counted for items in saved recipes, so a recipe saved after
@@ -321,9 +384,10 @@ function addon:RecountStockSoon()
     if recountTimer then recountTimer:Cancel() end
     recountTimer = C_Timer.NewTimer(STOCK_RECOUNT_DELAY, function()
         recountTimer = nil
-        SnapshotStock()
-        addon:DataChanged()
-        if addon.Refresh then addon.Refresh() end
+        SnapshotStock(function()
+            addon:DataChanged()
+            if addon.Refresh then addon.Refresh() end
+        end)
     end)
 end
 
@@ -694,7 +758,7 @@ end
 function addon:ListData()
     FlushGoldTime()
     RecordGold()
-    SnapshotStock()
+    SnapshotStockNow()
     Print("Profit on sales (all professions):")
     for _, r in ipairs(addon.DATE_RANGES) do
         local s = addon:GetSummary("All", r.key)
@@ -801,8 +865,9 @@ function addon:InitializeCharacters()
         elseif event == "BANKFRAME_OPENED" then
             -- The bank's slots can be read now, so gear tiers there too
             C_Timer.After(1, function()
-                SnapshotStock()
-                if addon.Refresh then addon.Refresh() end
+                SnapshotStock(function()
+                    if addon.Refresh then addon.Refresh() end
+                end)
             end)
         end
         if GOLDMAKING_OPEN[event] then
@@ -826,8 +891,9 @@ function addon:InitializeCharacters()
                 stockPending = true
                 C_Timer.After(10, function()
                     stockPending = false
-                    SnapshotStock()
-                    if addon.Refresh then addon.Refresh() end
+                    SnapshotStock(function()
+                        if addon.Refresh then addon.Refresh() end
+                    end)
                 end)
             end
         elseif not pending then
@@ -838,8 +904,12 @@ function addon:InitializeCharacters()
             C_Timer.After(2, function()
                 pending = false
                 UpdateAll()
-                if login then SnapshotStock() end
                 if addon.Refresh then addon.Refresh() end
+                if login then
+                    SnapshotStock(function()
+                        if addon.Refresh then addon.Refresh() end
+                    end)
+                end
             end)
         end
     end)
