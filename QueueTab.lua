@@ -12,7 +12,7 @@ local UI = addon.UI
 -- profession filter doesn't apply: the queue is one list.
 
 local TOP_HEIGHT = 26
-local SUMMARY_HEIGHT = 128
+local SUMMARY_HEIGHT = 144 -- room for the cost's concentration note
 local AH_CUT = 0.05
 
 local Money, Signed = function(c) return addon:FormatMoney(c) end, function(c) return addon:FormatSignedMoney(c) end
@@ -22,6 +22,7 @@ local COLUMNS = {
     { key = "item", label = "Item" },
     { key = "make", label = "Make", width = 70, justify = "RIGHT" },
     { key = "crafts", label = "Crafts", width = 52, justify = "RIGHT" },
+    { key = "conc", label = "Conc", width = 64, justify = "RIGHT" },
     { key = "cost", label = "Cost", width = 84, justify = "RIGHT" },
     { key = "profit", label = "Profit", width = 84, justify = "RIGHT" },
     { key = "next", label = "Next", width = 150 },
@@ -29,10 +30,25 @@ local COLUMNS = {
 
 local view
 
+-- A queued craft's concentration: the full cost to start its crafts (what
+-- crafts are counted at, like the top of a plan) and the average after
+-- ingenuity (like the plan's cost line), or nil without concentration
+local function RowConcentration(row)
+    local ti, plan = row.tierInfo, row.plan
+    if not (row.entry.concentrate and ti and ti.concentrate and plan and plan.crafts > 0) then return nil end
+    local full = ti.scenario and ti.scenario.concentration or ti.concentration
+    if not full then return nil end
+    return full * plan.crafts, (ti.concentration or full) * plan.crafts
+end
+
+-- The concentration icon in place of the word "conc" (Core.lua)
+local function ConcText(points)
+    return (addon:ConcentrationIconText() or "") .. string.format("%d", math.floor(points + 0.5))
+end
+
 local function ItemText(row)
     local prof = row.recipe and row.recipe.profession and addon:ProfessionIconText(row.recipe.profession) or ""
-    local conc = row.entry.concentrate and addon:Colorize("  conc", "conc") or ""
-    return prof .. addon:QueueRowName(row) .. conc
+    return prof .. addon:QueueRowName(row)
 end
 
 -- A salvage batch's hover: the batch view (what goes in, what should come
@@ -91,6 +107,9 @@ local function FillRow(row, item)
     local made = item.entry.made or 0
     c.make:SetText(made > 0 and string.format("%d of %d", item.remaining, item.entry.quantity) or tostring(item.remaining))
     local plan = item.plan
+    local full = RowConcentration(item)
+    c.conc:SetText(full and ConcText(full) or "")
+    c.conc:SetTextColor(addon:Color("conc"))
     if plan then
         c.crafts:SetText(tostring(plan.crafts))
         c.cost:SetText(Money(plan.cost) .. (plan.complete and "" or "+"))
@@ -126,6 +145,12 @@ local function RowTooltip(tooltip, item)
     if plan then
         tooltip:AddDoubleLine("Crafts", string.format("%d, about %.1f made", plan.crafts, plan.expectedOutput),
             0.8, 0.8, 0.8, 1, 1, 1)
+        local full, expected = RowConcentration(item)
+        if full then
+            tooltip:AddDoubleLine("Concentration", string.format("%d to start, about %d after ingenuity",
+                math.floor(full + 0.5), math.floor(expected + 0.5)), 0.8, 0.8, 0.8, 0.91, 0.76, 0.35)
+            addon:Explain(tooltip, "Each craft needs its full cost to start. Ingenuity sometimes gives about half of it back.")
+        end
         tooltip:AddDoubleLine("Cost", Money(plan.cost), 0.8, 0.8, 0.8, 1, 1, 1)
         if plan.revenue then
             tooltip:AddDoubleLine("Sells for", Money(plan.revenue), 0.8, 0.8, 0.8, 1, 1, 1)
@@ -237,6 +262,11 @@ local function Create(parent)
         return f
     end
     view.cost, view.sells, view.profit = Figure(1), Figure(2), Figure(3)
+    -- Concentration under the cost, like a plan's
+    view.cost.note = UI.Text(summary, "small", "muted")
+    view.cost.note:SetPoint("TOPLEFT", view.cost.value, "BOTTOMLEFT", 0, -4)
+    view.cost.note:SetWidth(360)
+    view.cost.note:SetWordWrap(false)
     view.cost.label:SetText("COST")
     view.sells.label:SetText("SELLS FOR")
     view.profit.label:SetText("PROFIT")
@@ -378,6 +408,22 @@ local function Refresh(v)
 
     local empty = #q.rows == 0
     v.cost.value:SetText(empty and "-" or (Money(q.cost) .. (q.complete and "" or "+")))
+    -- Concentration by profession (each has its own), after ingenuity like
+    -- the plan's cost line; the Conc column has each craft's full cost
+    local byProf, order = {}, {}
+    for _, row in ipairs(q.rows) do
+        local _, expected = RowConcentration(row)
+        local prof = expected and row.recipe and row.recipe.profession
+        if prof then
+            if not byProf[prof] then table.insert(order, prof) end
+            byProf[prof] = (byProf[prof] or 0) + expected
+        end
+    end
+    local parts = {}
+    for _, prof in ipairs(order) do
+        table.insert(parts, addon:ProfessionIconText(prof) .. string.format("%d", math.floor(byProf[prof] + 0.5)))
+    end
+    v.cost.note:SetText(#parts > 0 and ("about " .. table.concat(parts, " + ") .. " concentration after ingenuity") or "")
     v.sells.value:SetText(empty and "-" or Money(q.revenue))
     v.profit.value:SetText(empty and "-" or Signed(q.profit))
     v.profit.value:SetTextColor(addon:Color(empty and "dim" or addon:MoneyColor(q.profit)))

@@ -36,23 +36,8 @@ local function TodoText(item)
         ItemText(item.itemID, item.recipe.outputName, item.row.tier, item.tierCount))
 end
 
--- The game's concentration icon, sized to the text, from any concentration
--- currency Goldsmith has seen (learned when a profession is opened); nil
--- until one is known. "conc +859.10g" read as 859 concentration at a
--- glance (user, 2026-10-16), so an icon instead of the word.
-local concIcon
-local function ConcIcon()
-    if concIcon then return concIcon end
-    for _, id in pairs(GoldsmithDB.concentrationCurrency or {}) do
-        if type(id) == "number" and id > 0 then
-            local ok, info = pcall(C_CurrencyInfo.GetCurrencyInfo, id)
-            if ok and info and info.iconFileID then
-                concIcon = "|T" .. info.iconFileID .. ":0|t "
-                return concIcon
-            end
-        end
-    end
-end
+-- The concentration icon in place of the word (Core.lua)
+local function ConcIcon() return addon:ConcentrationIconText() end
 
 -- Profit, with the concentration icon in front for concentration crafts
 -- and "cd" for cooldowns (on the right, so a long item name cut short

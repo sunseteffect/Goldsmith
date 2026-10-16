@@ -359,6 +359,24 @@ function addon:ProfessionIconText(prof)
     return icon and ("|T" .. icon .. ":14:14|t ") or ""
 end
 
+-- The game's concentration icon sized to the text, with a space after, from
+-- any concentration currency Goldsmith has seen (learned when a profession
+-- is opened); nil until one is known. Used in place of the word "conc":
+-- "conc +859.10g" read as 859 concentration (user, 2026-10-16).
+local concIcon
+function addon:ConcentrationIconText()
+    if concIcon then return concIcon end
+    for _, id in pairs(GoldsmithDB.concentrationCurrency or {}) do
+        if type(id) == "number" and id > 0 then
+            local ok, info = pcall(C_CurrencyInfo.GetCurrencyInfo, id)
+            if ok and info and info.iconFileID then
+                concIcon = "|T" .. info.iconFileID .. ":0|t "
+                return concIcon
+            end
+        end
+    end
+end
+
 -- Assign every entry for an item to a profession, now and in future.
 -- "Unassigned" takes it out of every profession.
 function addon:AssignItem(itemName, prof)
