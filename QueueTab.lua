@@ -22,7 +22,7 @@ local COLUMNS = {
     { key = "item", label = "Item" },
     { key = "make", label = "Make", width = 70, justify = "RIGHT" },
     { key = "crafts", label = "Crafts", width = 52, justify = "RIGHT" },
-    { key = "conc", label = "Conc", width = 64, justify = "RIGHT" },
+    { key = "conc", label = "Conc", width = 64 },
     { key = "cost", label = "Cost", width = 84, justify = "RIGHT" },
     { key = "profit", label = "Profit", width = 84, justify = "RIGHT" },
     { key = "next", label = "Next", width = 150, gap = 24 },
@@ -109,7 +109,8 @@ local function FillRow(row, item)
     local plan = item.plan
     local full = RowConcentration(item)
     c.conc:SetText(full and ConcText(full) or "")
-    c.conc:SetTextColor(addon:Color("conc"))
+    -- Orange past what the character has (Refresh)
+    c.conc:SetTextColor(addon:Color(item.concShort and "warning" or "conc"))
     if plan then
         c.crafts:SetText(tostring(plan.crafts))
         c.cost:SetText(Money(plan.cost) .. (plan.complete and "" or "+"))
@@ -145,11 +146,15 @@ local function RowTooltip(tooltip, item)
     if plan then
         tooltip:AddDoubleLine("Crafts", string.format("%d, about %.1f made", plan.crafts, plan.expectedOutput),
             0.8, 0.8, 0.8, 1, 1, 1)
-        local full, expected = RowConcentration(item)
+        local full = RowConcentration(item)
         if full then
-            tooltip:AddDoubleLine("Concentration", string.format("%d to start, about %d after ingenuity",
-                math.floor(full + 0.5), math.floor(expected + 0.5)), 0.8, 0.8, 0.8, 0.91, 0.76, 0.35)
-            addon:Explain(tooltip, "Each craft needs its full cost to start. Ingenuity sometimes gives about half of it back.")
+            tooltip:AddDoubleLine("Concentration", string.format("%d to start", math.floor(full + 0.5)),
+                0.8, 0.8, 0.8, 0.91, 0.76, 0.35)
+            if item.concShort then
+                tooltip:AddLine("More than this character has left after the crafts above it. The rest waits for concentration to come back (about 250 a day).",
+                    1, 0.6, 0.2, true)
+            end
+            addon:Explain(tooltip, "Each craft needs its full cost to start. Planned as if ingenuity never gives any back: when it does, the rest is yours for later.")
         end
         tooltip:AddDoubleLine("Cost", Money(plan.cost), 0.8, 0.8, 0.8, 1, 1, 1)
         if plan.revenue then
@@ -404,26 +409,39 @@ local function Refresh(v)
     v.who:SetShown(#addon:GetQueuedCharacters() > 1 or v.charKey ~= nil)
     v.clear:SetEnabled(#q.rows > 0)
     v.clear:SetAlpha(#q.rows > 0 and 1 or 0.5)
+    -- Concentration by profession (each has its own), at the full cost:
+    -- planned as if ingenuity never procs, like shopping lists. A proc
+    -- leaves some over for tomorrow; counting on one leaves you stuck
+    -- mid-queue (user, 2026-10-16: "1026 concentration looks wrong" with
+    -- 1000). Rows past what the character has are marked (row.concShort).
+    local byProf, order, have = {}, {}, {}
+    for _, row in ipairs(q.rows) do
+        local full = RowConcentration(row)
+        local prof = full and row.recipe and row.recipe.profession
+        row.concShort = nil
+        if prof then
+            if not byProf[prof] then
+                table.insert(order, prof)
+                have[prof] = (key == addon.charKey and addon:GetConcentration(prof))
+                    or addon:GetCharacterConcentration(key, prof)
+            end
+            byProf[prof] = (byProf[prof] or 0) + full
+            if have[prof] and byProf[prof] > have[prof] then row.concShort = true end
+        end
+    end
     v.list:SetItems(q.rows)
 
     local empty = #q.rows == 0
     v.cost.value:SetText(empty and "-" or (Money(q.cost) .. (q.complete and "" or "+")))
-    -- Concentration by profession (each has its own), after ingenuity like
-    -- the plan's cost line; the Conc column has each craft's full cost
-    local byProf, order = {}, {}
-    for _, row in ipairs(q.rows) do
-        local _, expected = RowConcentration(row)
-        local prof = expected and row.recipe and row.recipe.profession
-        if prof then
-            if not byProf[prof] then table.insert(order, prof) end
-            byProf[prof] = (byProf[prof] or 0) + expected
-        end
-    end
-    local parts = {}
+    local parts, short = {}, false
     for _, prof in ipairs(order) do
-        table.insert(parts, addon:ProfessionIconText(prof) .. string.format("%d", math.floor(byProf[prof] + 0.5)))
+        local over = have[prof] and byProf[prof] > have[prof]
+        short = short or over
+        table.insert(parts, addon:ProfessionIconText(prof) .. string.format("%d", math.floor(byProf[prof] + 0.5))
+            .. (over and string.format(" (you have %d)", math.floor(have[prof])) or ""))
     end
-    v.cost.note:SetText(#parts > 0 and ("about " .. table.concat(parts, " + ") .. " concentration after ingenuity") or "")
+    v.cost.note:SetText(#parts > 0 and ("needs " .. table.concat(parts, " + ") .. " concentration") or "")
+    v.cost.note:SetTextColor(addon:Color(short and "warning" or "muted"))
     v.sells.value:SetText(empty and "-" or Money(q.revenue))
     v.profit.value:SetText(empty and "-" or Signed(q.profit))
     v.profit.value:SetTextColor(addon:Color(empty and "dim" or addon:MoneyColor(q.profit)))
