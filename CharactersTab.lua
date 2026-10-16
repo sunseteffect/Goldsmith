@@ -166,7 +166,7 @@ local function CreateTodoLine(card, i)
         if item.concentration then
             tooltip:AddDoubleLine("Concentration", tostring(math.floor(item.concentration + 0.5)),
                 0.8, 0.8, 0.8, 0.91, 0.76, 0.35)
-            addon:Explain(tooltip, "What these crafts use of this character's concentration, after ingenuity's average refund.")
+            addon:Explain(tooltip, "What these crafts need of this character's concentration, each at its full cost. Ingenuity may give some back.")
         end
         if perPoint then
             -- Extra profit concentrating earns, per point spent; colored by

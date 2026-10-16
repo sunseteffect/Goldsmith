@@ -1218,11 +1218,13 @@ local function CraftStepState(node, state)
     end
     SwapNotes(state, swapped, row)
     if concentrate then
-        -- The full cost to start each craft; ingenuity refunds some after
+        -- The full cost to start each craft, for every craft: ingenuity's
+        -- refund is luck, not promised (planned 3 with 1000, only 2 started
+        -- at 340 each; user 2026-10-16)
         local current = addon:GetConcentration(recipe.profession) or 0
         local full = row.scenario.concentration or row.concentration or 0
         local expected = math.max(row.concentration or full, 1)
-        local affordable = current >= full and (math.floor((current - full) / expected) + 1) or 0
+        local affordable = full > 0 and math.floor(current / full) or math.huge
         if affordable == 0 then
             table.insert(state.blockers, string.format("Not enough concentration to make %s: %d to start, you have %d.",
                 node.name, full, current))
@@ -1324,14 +1326,15 @@ local function CraftState(p, tierInfo, plan)
     state.reagents = reagents
     local crafts = plan.crafts
 
-    -- Concentration: the full cost is needed to start each craft;
-    -- ingenuity refunds some afterwards (the expected cost)
+    -- Concentration: the full cost is needed to start each craft, and
+    -- crafts are counted at it (ingenuity's refund is luck); points spent
+    -- are the expected cost
     state.concentrate = tierInfo and tierInfo.concentrate == true
     if state.concentrate then
         local current = addon:GetConcentration(recipe.profession) or 0
         local full = tierInfo.scenario and tierInfo.scenario.concentration or tierInfo.concentration
         local expected = math.max(tierInfo.concentration or full, 1)
-        local affordable = current >= full and (math.floor((current - full) / expected) + 1) or 0
+        local affordable = full > 0 and math.floor(current / full) or math.huge
         if affordable == 0 then
             table.insert(state.blockers, string.format("Not enough concentration: %d to start, you have %d.", full, current))
         elseif affordable < crafts then
@@ -2048,15 +2051,15 @@ local function CreatePlanScreen(parent)
             true, tierInfo)
         -- With concentration, plan only the crafts it covers now, like the
         -- Craft button: 2 crafts were planned and shopped for with enough
-        -- for 1 (user, 2026-10-12). The box keeps your number.
+        -- for 1 (user, 2026-10-12). The box keeps your number. Counted at
+        -- the full cost: ingenuity's refund is luck (user, 2026-10-16)
         local concLimit
         if tierInfo and tierInfo.concentrate then
             local current = p.charKey == addon.charKey and addon:GetConcentration(recipe.profession)
                 or addon:GetCharacterConcentration(p.charKey, recipe.profession)
             local full = tierInfo.scenario and tierInfo.scenario.concentration or tierInfo.concentration
-            local expected = math.max(tierInfo.concentration or full or 1, 1)
             if current and full then
-                local affordable = current >= full and (math.floor((current - full) / expected) + 1) or 0
+                local affordable = full > 0 and math.floor(current / full) or math.huge
                 if affordable > 0 and plan.crafts > affordable then
                     concLimit = { crafts = affordable, current = current }
                     local q = screen:PlannedItems(affordable)
@@ -2069,8 +2072,7 @@ local function CreatePlanScreen(parent)
                     if repick and repick.scenario ~= tierInfo.scenario then
                         local again = addon:WithCharacter(p.charKey, addon.BuildPlan, addon, recipe, q, true, repick)
                         local full2 = repick.scenario and repick.scenario.concentration or repick.concentration
-                        local each2 = math.max(repick.concentration or full2 or 1, 1)
-                        local fits = full2 and current >= full2 and (math.floor((current - full2) / each2) + 1) or 0
+                        local fits = full2 and (full2 > 0 and math.floor(current / full2) or math.huge) or 0
                         if again.crafts <= fits then
                             tierInfo, capped = repick, again
                             screen.tierInfo = repick

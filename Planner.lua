@@ -341,12 +341,13 @@ local function ConcAvailable(ctx, key, profession)
     return ctx.conc[id], id
 end
 
--- How many crafts fit in `available` concentration: the first needs its
--- full cost, the rest the expected cost after ingenuity refunds
-local function CraftsThatFit(available, full, expected)
+-- How many crafts fit in `available` concentration, each at its full cost:
+-- ingenuity's refund is luck, so it isn't counted on (planned 3 with 1000,
+-- only 2 started at 340 each; user 2026-10-16)
+local function CraftsThatFit(available, full)
     if available == math.huge then return math.huge end
     if not full or available < full then return 0 end
-    return math.floor((available - full) / math.max(expected, 1)) + 1
+    return math.floor(available / math.max(full, 1))
 end
 
 -- A material crafted with concentration: plan only what the crafter's
@@ -364,9 +365,9 @@ local function LimitByConcentration(node, ctx, outputQty)
     local sure = SurePerCraft(best.recipe, outputQty)
     local wanted = WholeCrafts(node.toGet, sure)
     local full = row.scenario and row.scenario.concentration or row.concentration
-    local fit = CraftsThatFit(available, full, row.concentration)
+    local fit = CraftsThatFit(available, full)
     local crafts = math.min(wanted, fit)
-    if available ~= math.huge then ctx.conc[id] = available - crafts * row.concentration end
+    if available ~= math.huge then ctx.conc[id] = available - crafts * full end
     node.concCrafts = crafts
     if crafts >= wanted then return end
     local other = node.options.buy or node.options.vendor
@@ -534,7 +535,9 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
     -- (materials of the same profession on the same character share it)
     if tier and tier.concentrate and tier.concentration then
         local available, id = ConcAvailable(ctx, StatsKey(), recipe.profession)
-        if available ~= math.huge then ctx.conc[id] = available - tier.concentration * crafts end
+        -- At the full cost, like CraftsThatFit
+        local full = tier.scenario and tier.scenario.concentration or tier.concentration
+        if available ~= math.huge then ctx.conc[id] = available - full * crafts end
     end
 
     -- expectedOutput: what `crafts` whole crafts should make on average

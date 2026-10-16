@@ -966,8 +966,9 @@ end
 --    what's limiting). Stops when nothing earns more. Small searches, so
 --    no stutter.
 --
--- Starting a craft needs its full concentration cost; ingenuity refunds
--- some afterwards, so the points counted are the expected cost.
+-- Starting a craft needs its full concentration cost, and that's what each
+-- craft is counted at: ingenuity's refund is luck (planned 3 with 1000,
+-- only 2 started at 340 each; user 2026-10-16).
 -- Returns { { recipe, row, tierCount, crafts, points, gain, profit } }
 -- (most gain first), points used, total extra profit from concentrating,
 -- and what passed `accept` but was held back: you hold some unsold, or
@@ -1039,7 +1040,7 @@ function addon:PlanConcentration(profession, budget, accept)
                         found[capKey] = found[capKey] or {}
                         table.insert(found[capKey], {
                             recipe = recipe, row = e, tierCount = e.tierCount, capKey = capKey,
-                            full = e.scenario.concentration, points = e.concentration,
+                            full = e.scenario.concentration, points = math.max(e.scenario.concentration, 1),
                             gain = e.concentrationValue * e.concentration,
                         })
                     end
