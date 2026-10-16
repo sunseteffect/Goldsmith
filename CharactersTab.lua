@@ -37,11 +37,30 @@ local function TodoText(item)
         item.otherMix and addon:Colorize(", other mix", "muted") or "")
 end
 
--- Profit, with "conc" in front for concentration crafts and "cd" for
--- cooldowns (on the right, so a long item name cut short never hides it)
+-- The game's concentration icon, sized to the text, from any concentration
+-- currency Goldsmith has seen (learned when a profession is opened); nil
+-- until one is known. "conc +859.10g" read as 859 concentration at a
+-- glance (user, 2026-10-16), so an icon instead of the word.
+local concIcon
+local function ConcIcon()
+    if concIcon then return concIcon end
+    for _, id in pairs(GoldsmithDB.concentrationCurrency or {}) do
+        if type(id) == "number" and id > 0 then
+            local ok, info = pcall(C_CurrencyInfo.GetCurrencyInfo, id)
+            if ok and info and info.iconFileID then
+                concIcon = "|T" .. info.iconFileID .. ":0|t "
+                return concIcon
+            end
+        end
+    end
+end
+
+-- Profit, with the concentration icon in front for concentration crafts
+-- and "cd" for cooldowns (on the right, so a long item name cut short
+-- never hides it)
 local function TodoProfitText(item)
     local profit = addon:Colorize(Signed(item.profit), "profit")
-    if item.concentration then return addon:Colorize("conc ", "conc") .. profit end
+    if item.concentration then return (ConcIcon() or addon:Colorize("conc ", "conc")) .. profit end
     if item.cooldown then return addon:Colorize("cd ", "gold") .. profit end
     return profit
 end
@@ -342,7 +361,7 @@ local function FillCard(card, entry, todo, cooldowns)
                 p.skill and string.format("%d/%d", p.skill, p.maxSkill or 0) or ""))
             local current, max, minutesToFull = Concentration(key, name)
             if current and max and max > 0 then
-                line.conc:SetText(string.format("Conc %d/%d%s", current, max,
+                line.conc:SetText(string.format("%s%d/%d%s", ConcIcon() or "Conc ", current, max,
                     minutesToFull and "" or " full"))
             else
                 line.conc:SetText("")
