@@ -2129,7 +2129,19 @@ local function CreatePlanScreen(parent)
                 key ~= p.charKey and (" on " .. (c and c.name or key)) or " for materials"))
         end
         if #concParts > 0 then
-            costNote = costNote .. ", about " .. table.concat(concParts, " + ") .. " concentration"
+            costNote = costNote .. ", about " .. table.concat(concParts, " + ") .. " concentration after ingenuity"
+        end
+        -- The concentration these crafts need to start, at the top too:
+        -- under the cost alone it was easy to miss (user, 2026-10-16).
+        -- The full cost, which is what crafts are counted at; the cost
+        -- line's is the average after ingenuity gives some back.
+        if tierInfo and tierInfo.concentrate then
+            local full = tierInfo.scenario and tierInfo.scenario.concentration or tierInfo.concentration
+            if full then
+                local text = screen.subtitle:GetText() or ""
+                screen.subtitle:SetText((text:gsub("^with concentration", string.format("with %d concentration",
+                    math.floor(full * plan.crafts + 0.5)))))
+            end
         end
         if not plan.complete then
             costNote = costNote .. ". Some materials have no price."
