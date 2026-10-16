@@ -793,7 +793,21 @@ local function FindTierInfo(p)
             if t.scenario == p.scenario then return t end
         end
         for _, e in ipairs(rows[1] and rows[1].scenarios or {}) do
-            if e.scenario == p.scenario then return e end
+            if e.scenario == p.scenario then
+                -- A mix that isn't a row: with the recipe's other mixes and
+                -- its tier's sales, or the plan had no "Why this mix" bar
+                -- (to-do Sterling Alloy, user 2026-10-16)
+                local mine = {}
+                for k, v in pairs(e) do mine[k] = v end
+                mine.scenarios = rows[1].scenarios
+                for _, t in ipairs(rows) do
+                    if t.tier == e.tier then
+                        mine.demand, mine.demandSource, mine.saleRate = t.demand, t.demandSource, t.saleRate
+                        break
+                    end
+                end
+                return mine
+            end
         end
     end
     local plain, concentrated

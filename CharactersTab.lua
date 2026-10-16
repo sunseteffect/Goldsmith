@@ -31,9 +31,14 @@ local function ItemText(itemID, name, tier, tierCount)
     return icon .. (name or (itemID and addon:KnownItemName(itemID)) or "?")
 end
 
-local function TodoText(item)
-    return string.format("%dx %s", item.crafts,
-        ItemText(item.itemID, item.recipe.outputName, item.row.tier, item.tierCount))
+-- "queued" when it's already in that character's queue: the to-do stays
+-- until it's crafted, but says it's taken care of (user, 2026-10-16)
+local function TodoText(item, charKey)
+    local queued = charKey and item.recipe.recipeID
+        and addon:FindQueueEntry(charKey, item.recipe.recipeID, item.row.tier, item.concentration ~= nil)
+    return string.format("%dx %s%s", item.crafts,
+        ItemText(item.itemID, item.recipe.outputName, item.row.tier, item.tierCount),
+        queued and addon:Colorize("  queued", "muted") or "")
 end
 
 -- The concentration icon in place of the word (Core.lua)
@@ -300,7 +305,7 @@ local function CreateCard(parent)
             tooltip:AddLine(" ")
             tooltip:AddDoubleLine("To do", Signed(todo.total), 1, 1, 1, 0.37, 0.81, 0.48)
             for _, item in ipairs(todo.items) do
-                tooltip:AddDoubleLine(TodoText(item), TodoProfitText(item), 0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
+                tooltip:AddDoubleLine(TodoText(item, card.key), TodoProfitText(item), 0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
             end
         end
         if card.cooldowns and #card.cooldowns > 0 then
@@ -368,7 +373,7 @@ local function FillCard(card, entry, todo, cooldowns)
         local item = i <= shown and items[i]
         line.item = item or nil
         if item then
-            line.text:SetText(TodoText(item))
+            line.text:SetText(TodoText(item, card.key))
             line.text:SetTextColor(addon:Color("text"))
             line.profit:SetText(TodoProfitText(item))
             line:Show()
