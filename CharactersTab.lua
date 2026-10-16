@@ -158,7 +158,7 @@ local function CreateTodoLine(card, i)
             end)
         elseif self.item then
             local item = self.item
-            addon:OpenCraftPlan(item.recipe, item.row, card.key, item.quantity)
+            addon:OpenCraftPlan(item.recipe, item.row, card.key, nil, nil, item.crafts)
         end
     end)
     UI.SetTooltip(line, function(tooltip)

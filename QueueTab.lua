@@ -22,7 +22,7 @@ local COLUMNS = {
     { key = "item", label = "Item" },
     { key = "make", label = "Make", width = 70, justify = "RIGHT" },
     { key = "crafts", label = "Crafts", width = 52, justify = "RIGHT" },
-    { key = "conc", label = "Conc", width = 64 },
+    { key = "conc", label = "Conc", width = 64, gap = 16 },
     { key = "cost", label = "Cost", width = 84, justify = "RIGHT" },
     { key = "profit", label = "Profit", width = 84, justify = "RIGHT" },
     { key = "next", label = "Next", width = 150, gap = 24 },

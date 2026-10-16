@@ -840,8 +840,9 @@ end
 -- Opens the planner for a craft. info is a Crafts row, tier row or
 -- concentration plan row; charKey whose stats to use; quantity optional.
 -- returnTab: where Back goes (e.g. "queue"), else the Crafts list.
-function addon:OpenCraftPlan(recipe, info, charKey, quantity, returnTab)
+function addon:OpenCraftPlan(recipe, info, charKey, quantity, returnTab, crafts)
     pending = {
+        crafts = crafts,
         plan = {
             recipe = recipe, charKey = charKey or addon:GetCrafter(recipe.recipeID) or addon.charKey,
             tier = info and info.tier, concentrate = info and info.concentrate == true or false,
@@ -2010,13 +2011,17 @@ local function CreatePlanScreen(parent)
 
     -- quantity: items (a to-do or "make more" decides in items), turned
     -- into the crafts they take; else the crafts last planned, or 1
-    function screen:Open(p, quantity)
+    -- crafts (optional) wins over quantity: suggestions give their crafts,
+    -- since items made on average (multicraft) turned 2 crafts into 3
+    -- (user, 2026-10-16: 1026 concentration for a to-do of 2 weightstones)
+    function screen:Open(p, quantity, crafts)
         screen.plan = p
-        local crafts = quantity and quantity > 0
-            and addon:WithCharacter(p.charKey, addon.CraftsForItems, addon, p.recipe, quantity)
+        local given = crafts and crafts > 0 and math.floor(crafts)
+        crafts = given or (quantity and quantity > 0
+            and addon:WithCharacter(p.charKey, addon.CraftsForItems, addon, p.recipe, quantity))
         crafts = crafts or ui.planCrafts[p.recipe.recipeID] or 1
         screen.qty:SetText(tostring(crafts))
-        if quantity then ui.planCrafts[p.recipe.recipeID] = crafts end
+        if quantity or given then ui.planCrafts[p.recipe.recipeID] = crafts end
         screen.list:ScrollToTop()
     end
 
@@ -2777,8 +2782,7 @@ local function CreateBudget(parent)
         local best = bar.target
         if not best then return end
         local first = best.plan[1]
-        addon:OpenCraftPlan(first.recipe, first.row, best.key,
-            math.max(math.floor(first.crafts * (first.row.outputPerCraft or 1)), 1))
+        addon:OpenCraftPlan(first.recipe, first.row, best.key, nil, nil, first.crafts)
     end)
     UI.SetTooltip(bar, function(tooltip)
         local conc = bar.conc
@@ -3122,7 +3126,7 @@ local function Refresh(v, state)
     if pending then
         if pending.plan then
             v.salvage.target = nil
-            v.plan:Open(pending.plan, pending.quantity)
+            v.plan:Open(pending.plan, pending.quantity, pending.crafts)
         elseif pending.salvage then
             v.plan.plan = nil
             v.salvage:Open(pending.salvage, pending.quantity)

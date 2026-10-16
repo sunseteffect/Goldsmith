@@ -292,8 +292,7 @@ local function ConcentrationAction(conc)
             addon:ClickHint(tooltip, "Click to plan it: materials and shopping list.")
         end,
         onClick = function()
-            addon:OpenCraftPlan(first.recipe, first.row, best.key,
-                math.max(math.floor(first.crafts * (first.row.outputPerCraft or 1)), 1))
+            addon:OpenCraftPlan(first.recipe, first.row, best.key, nil, nil, first.crafts)
         end,
     }
 end
@@ -336,8 +335,7 @@ local function CooldownAction(prof)
             addon:ClickHint(tooltip, "Click to plan the first one. Your other characters' cooldowns are on the Characters tab.")
         end,
         onClick = function()
-            addon:OpenCraftPlan(first.recipe, first.row, first.charKey,
-                math.max(math.floor(first.crafts * (first.outputPerCraft or 1)), 1))
+            addon:OpenCraftPlan(first.recipe, first.row, first.charKey, nil, nil, first.crafts)
         end,
     }
 end
