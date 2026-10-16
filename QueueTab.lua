@@ -436,4 +436,13 @@ end
 
 addon:RegisterView("queue", { create = Create, refresh = Refresh, reset = Reset, legend = Legend })
 
+-- Walking up to an anvil fires no event, so while the next craft needs one
+-- nearby the tab is checked every second, like the plan and the panel
+C_Timer.NewTicker(1, function()
+    local screen = addon.GetTabScreen and addon:GetTabScreen("queue")
+    local v = screen and screen.view
+    local state = v and v.next and v.next.state
+    if state and state.nearby and screen.frame and screen.frame:IsVisible() then Refresh(v) end
+end)
+
 _G.Goldsmith = addon

@@ -1185,6 +1185,21 @@ end
 
 -- A craft step: make the material, using the qualities the plan picked
 -- for its own materials
+-- "Needs Anvil nearby" and the like, as blockers. Walking up to it fires no
+-- event, so state.nearby has it checked again every second. Material steps
+-- too: Craft 24 (copper ingots for weightstones) showed with no anvil
+-- nearby and failed (user, 2026-10-16).
+local function CheckStation(state, recipeID)
+    if not C_TradeSkillUI.GetRecipeRequirements then return end
+    local ok, requirements = pcall(C_TradeSkillUI.GetRecipeRequirements, recipeID)
+    for _, r in ipairs(ok and requirements or {}) do
+        if not r.met then
+            table.insert(state.blockers, "Needs " .. (r.name or "something") .. " nearby.")
+            state.nearby = true
+        end
+    end
+end
+
 local function CraftStepState(node, state)
     local recipe = node.best.recipe
     if not ProfessionOpen(recipe) then
@@ -1196,6 +1211,7 @@ local function CraftStepState(node, state)
         table.insert(state.blockers, string.format("This character doesn't know %s.", node.name))
         return state
     end
+    CheckStation(state, recipe.recipeID)
     local outputPerCraft = addon:GetCraftModel(recipe)
     local wanted = math.max(math.ceil(node.toGet / math.max(outputPerCraft, 0.01) - 0.0001), 1)
     -- A tier item (gold ingot): the tier row's mix, and its concentration
@@ -1305,16 +1321,7 @@ local function CraftState(p, tierInfo, plan)
         return StepState(steps, plan)
     end
 
-    if C_TradeSkillUI.GetRecipeRequirements then
-        local ok, requirements = pcall(C_TradeSkillUI.GetRecipeRequirements, recipe.recipeID)
-        for _, r in ipairs(ok and requirements or {}) do
-            if not r.met then
-                table.insert(state.blockers, "Needs " .. (r.name or "something") .. " nearby.")
-                -- Walking up to it fires no event: checked again every second
-                state.nearby = true
-            end
-        end
-    end
+    CheckStation(state, recipe.recipeID)
 
     local reagents, needs, swapped = addon:GetCraftReagents(recipe.recipeID, tierInfo and tierInfo.scenario,
         { crafts = plan.crafts, concentrate = tierInfo and tierInfo.concentrate == true, tier = tierInfo and tierInfo.tier })
