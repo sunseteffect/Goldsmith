@@ -203,8 +203,25 @@ function addon:RefreshTierData(recipeID)
         local key = (concentrate and "c" or "n")
         for i = 1, #qslots do key = key .. ":" .. (highUnits[i] or 0) end
         if seen[key] then return seen[key] end
-        local op = Operation(recipeID, BuildList(qslots, highUnits), concentrate, allocationGUID)
-        if not op or not tierOf[op.craftingQualityID] then return end
+        local list = BuildList(qslots, highUnits)
+        local op = Operation(recipeID, list, concentrate, allocationGUID)
+        local tier = op and tierOf[op.craftingQualityID]
+        -- Concentrating when it costs more than the character has right
+        -- now: the game reports no concentration result, so the tier above
+        -- went missing (Worldsoul Aegis: 289 skill, gold for 394 of 379
+        -- concentration; user, 2026-10-16). The plain result's cost is what
+        -- concentrating would take, so that's the tier above for that cost.
+        -- Planning still only uses what the character has (Planner.lua).
+        local reachedSkill
+        if concentrate then
+            local plain = Operation(recipeID, list, false, allocationGUID)
+            local plainTier = plain and tierOf[plain.craftingQualityID]
+            if plainTier and (not tier or tier <= plainTier) and (plain.concentrationCost or 0) > 0
+                and plainTier < #qualities then
+                op, tier, reachedSkill = plain, plainTier + 1, plain.upperSkillTreshold
+            end
+        end
+        if not op or not tier then return end
         local mix = {}
         for i, s in ipairs(qslots) do
             if (highUnits[i] or 0) > 0 then mix[s.low] = math.min(highUnits[i], s.quantity) end
@@ -212,11 +229,11 @@ function addon:RefreshTierData(recipeID)
         local scenario = {
             mix = mix,
             concentrate = concentrate,
-            tier = tierOf[op.craftingQualityID],
+            tier = tier,
             concentration = concentrate and (op.concentrationCost or 0) or 0,
             ingenuityRefund = op.ingenuityRefund or 0,
-            upper = op.upperSkillTreshold,
-            skill = Skill(op),
+            upper = not reachedSkill and op.upperSkillTreshold or nil,
+            skill = reachedSkill or Skill(op),
         }
         table.insert(scenarios, scenario)
         seen[key] = scenario
@@ -763,6 +780,7 @@ local function BuildTierRows(recipe)
         if price then
             e.profit = price * (1 - AH_CUT) - cost
             e.margin = cost > 0 and (e.profit / cost * 100) or nil
+            addon:DoubtPrice(e, itemID, recipe.outputName)
         end
         table.insert(evaluated, e)
     end

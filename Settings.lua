@@ -20,6 +20,9 @@ local UI = addon.UI
 --   excluded    - { [charKey] = true } for characters left out of stock,
 --                 concentration and the Overview
 --   showMinimap - the minimap button (Minimap.lua)
+--   craftCost   - "Your materials / Profit" in the game's profession and
+--                 crafting orders windows (OrderCost.lua), like
+--                 Auctionator's own switch (user, 2026-10-16)
 -- Concentration in Crafts isn't here: the Crafts tab's switch remembers it.
 -- "Show cost as" (estimated or worst case) was removed 2026-10-10: costs
 -- are always the estimate; the worst case is in each craft's hover.
@@ -34,6 +37,7 @@ local DEFAULTS = {
     tooltips = "full",
     chat = "all",
     showMinimap = true,
+    craftCost = true,
 }
 
 function addon:Setting(key)
@@ -617,6 +621,11 @@ local HELP = {
         "The Goldsmith button on the edge of the minimap: click to show or hide Goldsmith, right-click for these settings, drag to move it.",
         "Other ways to open Goldsmith: /gsm, a key (Options > Keybindings > AddOns > Goldsmith), or the addons button by the minimap.",
     },
+    craftCost = {
+        "Cost in the profession window",
+        "Goldsmith's Your materials and Profit lines in the game's profession and crafting orders windows, under the materials. Hover them for the breakdown.",
+        "Auctionator shows its own To Craft and Profit there; Goldsmith's go below it. Auctionator's can be turned off in its settings, under Crafting Info.",
+    },
     keybind = {
         "Key to open Goldsmith",
         "Set key opens the game's Keybindings. Goldsmith is under AddOns, near the bottom: click the box next to Show or hide Goldsmith and press the key you want.",
@@ -713,7 +722,7 @@ end
 
 local COLUMNS = {
     { title = "Crafting and prices", rows = { "priceSource", "minROI", "minLine", "dealPercent", "heldDays", "ignored", "keepDays" } },
-    { title = "Display", rows = { "tooltips", "chat", "characters", "showMinimap", "keybind" } },
+    { title = "Display", rows = { "tooltips", "chat", "characters", "showMinimap", "craftCost", "keybind" } },
 }
 
 function addon:CreateSettingsPanel(parent)
@@ -813,6 +822,16 @@ function addon:CreateSettingsPanel(parent)
     rows.showMinimap.control:SetPoint("TOPRIGHT", 0, 0)
     UI.SetTooltip(rows.showMinimap.control, function(tooltip) AddHelp(tooltip, "showMinimap") end, "ANCHOR_LEFT")
     function rows.showMinimap:Update() self.control:SetChecked(addon:Setting("showMinimap")) end
+
+    rows.craftCost = Row(panel, "craftCost", "Cost in the profession window", "Your materials and Profit under a recipe's materials.")
+    rows.craftCost.control = UI.Checkbox(rows.craftCost, "Show", function(checked)
+        addon:SetSetting("craftCost", checked)
+        if addon.UpdateCraftCostLines then addon:UpdateCraftCostLines() end
+        panel:Update()
+    end)
+    rows.craftCost.control:SetPoint("TOPRIGHT", 0, 0)
+    UI.SetTooltip(rows.craftCost.control, function(tooltip) AddHelp(tooltip, "craftCost") end, "ANCHOR_LEFT")
+    function rows.craftCost:Update() self.control:SetChecked(addon:Setting("craftCost")) end
 
     rows.keybind = Row(panel, "keybind", "Key to open Goldsmith", "")
     rows.keybind.control = UI.Button(rows.keybind, "Set key", 170, 24, function() addon:OpenKeybindings() end)

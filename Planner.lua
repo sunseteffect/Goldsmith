@@ -644,16 +644,26 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
         end
     end
 
+    local priceSource
     if tier then
-        plan.price = tier.price
+        plan.price, plan.unconfirmed, plan.doubtPrice = tier.price, tier.unconfirmed, tier.doubtPrice
     else
-        plan.price = addon:GetMarketPrice(recipe.outputItemID)
+        plan.price, priceSource = addon:GetMarketPriceInfo(recipe.outputItemID)
     end
     plan.tier = tier
     if plan.price then
         plan.revenue = plan.price * (1 - AH_CUT) * plan.expectedOutput
         plan.profit = plan.revenue - plan.cost
         plan.margin = plan.cost > 0 and (plan.profit / plan.cost * 100) or nil
+        -- Same check as the Crafts list (DoubtPrice, Pricing.lua)
+        if not tier then
+            local check = { price = plan.price, priceSource = priceSource, margin = plan.margin }
+            addon:DoubtPrice(check, recipe.outputItemID, recipe.outputName)
+            plan.unconfirmed, plan.doubtPrice = check.unconfirmed, check.doubtPrice
+            if check.doubtPrice then
+                plan.price, plan.revenue, plan.profit, plan.margin = nil, nil, nil, nil
+            end
+        end
     end
     plan.demand, plan.demandSource = addon:GetDemand((tier and tier.itemID) or recipe.outputItemID, recipe.outputName)
     plan.saleRate = addon:GetSaleRate((tier and tier.itemID) or recipe.outputItemID)

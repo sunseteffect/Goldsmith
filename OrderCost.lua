@@ -21,7 +21,8 @@ local UI = addon.UI
 -- shows nothing.
 
 local LOGO = "Interface\\AddOns\\Goldsmith\\Media\\Logo"
-local LOGO_SIZE = 18
+-- Beside the two cost lines: about their height together
+local LOGO_BESIDE, LOGO_GAP = 30, 8
 local WIDTH = 330
 local AH_CUT = 0.05
 
@@ -176,19 +177,20 @@ local CRAFT = {
 -- One holder per page
 local function Create(page, form)
     local holder = CreateFrame("Frame", nil, form)
-    holder:SetSize(WIDTH, 40 + LOGO_SIZE + 4)
-    -- The logo on its own line, so both text lines start at the same place
-    -- (it sat in front of the first one, user, 2026-10-11)
+    holder:SetSize(WIDTH, 40)
+    -- The logo beside both lines, as tall as the pair, so both start at
+    -- the same place (in front of the first one only, they didn't, user,
+    -- 2026-10-11) and it isn't alone on a line of its own (2026-10-16)
     local logo = holder:CreateTexture(nil, "ARTWORK")
     logo:SetTexture(LOGO)
-    logo:SetSize(LOGO_SIZE, LOGO_SIZE)
+    logo:SetSize(LOGO_BESIDE, LOGO_BESIDE)
     logo:SetPoint("TOPLEFT", 0, 0)
     holder.line1 = UI.Text(holder, "small", "text")
-    holder.line1:SetPoint("TOPLEFT", logo, "BOTTOMLEFT", 0, -4)
-    holder.line1:SetWidth(WIDTH)
+    holder.line1:SetPoint("TOPLEFT", logo, "TOPRIGHT", LOGO_GAP, 0)
+    holder.line1:SetWidth(WIDTH - LOGO_BESIDE - LOGO_GAP)
     holder.line2 = UI.Text(holder, "small", "text")
     holder.line2:SetPoint("TOPLEFT", holder.line1, "BOTTOMLEFT", 0, -4)
-    holder.line2:SetWidth(WIDTH)
+    holder.line2:SetWidth(WIDTH - LOGO_BESIDE - LOGO_GAP)
     holder:EnableMouse(true)
     UI.SetTooltip(holder, function(tooltip)
         local p = page.preview
@@ -204,13 +206,60 @@ local function Create(page, form)
     page.holder = holder
 end
 
--- Below the lowest of the form's material lists that's showing
+local function SetLineWidth(holder, width)
+    for _, line in ipairs({ holder.line1, holder.line2 }) do
+        line:SetWidth(width - LOGO_BESIDE - LOGO_GAP)
+        line:SetWordWrap(true)
+    end
+end
+
+-- Auctionator's "To Craft / Profit" lines on this form, when showing
+local function AuctionatorLines(form)
+    for _, name in ipairs({ "AuctionatorCraftingInfoProfessionsFrame", "AuctionatorCraftingInfoProfessionsOrderFrame" }) do
+        local f = _G[name]
+        if f and f:GetParent() == form and f:IsShown() then return f end
+    end
+end
+
+-- Where the lines go (called after the text is set; sized to it, so they
+-- never wrap). Under the materials, the spot the user prefers, below
+-- Auctionator's "To Craft / Profit" when it's there (they overlapped on
+-- the orders page). Enchants' target slot takes that room: there they sat
+-- on the Use Best Quality Reagents checkbox (user, 2026-10-16), so when
+-- they don't fit above it they go on the checkbox's row, ending at the
+-- Crafting Details panel's right edge, lined up with both.
+local DETAILS_INSET = 16
+local GAP = 8
+
 local function Place(holder, form)
-    local below = form.Reagents
-    if form.OptionalReagents and form.OptionalReagents:IsShown() then below = form.OptionalReagents end
-    if not below then return false end
+    local reagents = form.Reagents
+    if not reagents then return false end
     holder:ClearAllPoints()
-    holder:SetPoint("TOPLEFT", below, "BOTTOMLEFT", 0, -10)
+    local w = math.ceil(math.max(holder.line1:GetUnboundedStringWidth(), holder.line2:GetUnboundedStringWidth())) + 2
+    local width = w + LOGO_BESIDE + LOGO_GAP
+    SetLineWidth(holder, width)
+    holder:SetSize(width, LOGO_BESIDE)
+
+    -- The lowest of the materials, optional materials, enchant target and
+    -- Auctionator's lines
+    local below = reagents
+    local others = { form.OptionalReagents, AuctionatorLines(form) }
+    for _, f in ipairs(form.extraSlotFrames or {}) do table.insert(others, f) end
+    for _, f in pairs(others) do
+        if f and f:IsShown() and f:GetBottom() and below:GetBottom() and f:GetBottom() < below:GetBottom() then
+            below = f
+        end
+    end
+
+    local box, details = form.AllocateBestQualityCheckbox, form.Details
+    local top = below:GetBottom() and below:GetBottom() - GAP
+    local tooLow = box and box:IsShown() and box:GetTop() and top and top - LOGO_BESIDE < box:GetTop()
+    if tooLow and details and details:IsShown() and details:GetRight() and box:GetLeft() then
+        holder:SetPoint("BOTTOMRIGHT", box, "BOTTOMLEFT", details:GetRight() - DETAILS_INSET - box:GetLeft(), 0)
+        return true
+    end
+    local x = (reagents:GetLeft() and below:GetLeft()) and (reagents:GetLeft() - below:GetLeft()) or 0
+    holder:SetPoint("TOPLEFT", below, "BOTTOMLEFT", x, -GAP)
     return true
 end
 
@@ -219,7 +268,8 @@ local function Update(page)
     local def = page.def
     local view = def.view()
     local form = view and def.form(view)
-    if not (view and form and view:IsShown() and form:IsShown()) then
+    -- Settings > Cost in the profession window
+    if not (view and form and view:IsShown() and form:IsShown()) or not addon:Setting("craftCost") then
         if page.holder then page.holder:Hide() end
         return
     end
@@ -228,7 +278,7 @@ local function Update(page)
     local tx = form.GetTransaction and form:GetTransaction()
     local ok, p = pcall(def.preview, view, tx, form)
     page.preview = ok and tx and p or nil
-    if not (page.preview and Place(holder, form)) then
+    if not page.preview then
         holder:Hide()
         return
     end
@@ -243,6 +293,10 @@ local function Update(page)
     local first, second = def.lines(page.preview)
     holder.line1:SetText(first)
     holder.line2:SetText(second)
+    if not Place(holder, form) then
+        holder:Hide()
+        return
+    end
     holder:Show()
     if GameTooltip:IsOwned(holder) and UI.RedrawTooltip then UI.RedrawTooltip(holder) end
 end
@@ -256,6 +310,11 @@ end
 -- The windows are part of Blizzard_Professions, loaded the first time a
 -- profession or the crafting orders open
 local pages = { { def = ORDER }, { def = CRAFT } }
+
+-- After the setting changes, with the window open
+function addon:UpdateCraftCostLines()
+    for _, page in ipairs(pages) do UpdateSoon(page) end
+end
 
 local function Hook(page)
     local view = page.def.view()

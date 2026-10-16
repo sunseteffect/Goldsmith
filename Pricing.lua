@@ -710,6 +710,49 @@ function addon:GetDemand(itemID, itemName)
     end
 end
 
+-- A price nothing can check. Gear and profession tools aren't commodities,
+-- so Goldsmith Data has no regional price or sales for them, and without
+-- TSM the only price is the realm's lowest listing: one Thalassian
+-- Competitor's Emblem at 10M g showed +9.5M g profit on an unlearned
+-- recipe (user, 2026-10-16). TSM, Goldsmith Data or your own sales of the
+-- item count as a check. The warning goes by what backs the price, not
+-- by ROI alone: a 150% gear craft on one listing is as unconfirmed as a
+-- 5,000% one, it just costs less to be wrong about.
+--   info.unconfirmed: counted, but the player should look at the AH first
+--   (a "?" before the price, a warning in the hover and the plan).
+--   Over UNCHECKED_MAX_ROI it isn't counted either: price, profit and
+--   margin become nil (so nothing sorts it to the top) and info.doubtPrice
+--   keeps the listing for the hover.
+-- Suggestions already skip these (no sales data, Insights.lua).
+local UNCHECKED_MAX_ROI = 1000
+
+function addon:PriceConfirmed(itemID, name, source)
+    if TourPrices() then return true end
+    source = source or ""
+    if source:find("^TSM") or source == "Blizzard" or source == "Vendor" or source == "Contents" then return true end
+    if itemID and GetTSMValue("DBMarket", itemID) then return true end
+    local data = GoldsmithPriceData
+    if itemID and data and data.items and data.items[itemID] then return true end
+    return name and GetOwnSoldPerDay(name) and true or false
+end
+
+function addon:DoubtPrice(info, itemID, name)
+    if not info.price or addon:PriceConfirmed(itemID, name, info.priceSource) then return end
+    info.unconfirmed = true
+    if info.margin and info.margin > UNCHECKED_MAX_ROI then
+        info.doubtPrice = info.price
+        info.price, info.profit, info.margin = nil, nil, nil
+    end
+end
+
+-- The hover and plan wording for both cases
+function addon:UnconfirmedPriceText(info)
+    if info.doubtPrice then
+        return "Not counted: a listing this far above the cost, with no sales data to back it, is almost never a real price."
+    end
+    return "Price not confirmed: only your realm's listings back it, with no sales data. Look at the AH before you buy materials or learn the recipe."
+end
+
 function addon:FormatDemand(perDay)
     if not perDay then return "-" end
     if perDay >= 10000 then return string.format("%.0fk", perDay / 1000) end
@@ -2327,7 +2370,7 @@ function addon:GetRecipeProfit(recipe, itemID)
         profit = price * (1 - AH_CUT) - cost
         margin = cost > 0 and (profit / cost * 100) or nil
     end
-    return {
+    local info = {
         cost = cost,
         missing = missing,
         partial = #missing > 0,
@@ -2344,6 +2387,8 @@ function addon:GetRecipeProfit(recipe, itemID)
         profit = profit,
         margin = margin,
     }
+    addon:DoubtPrice(info, priceItemID, recipe.outputName)
+    return info
 end
 
 -- What one unit of an item cost you, for working out profit on a sale:

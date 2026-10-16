@@ -19,6 +19,8 @@ local UI = addon.UI
 
 local AH_CUT = 0.05
 local STALE_PRICE_DAYS = 3
+-- Before a price only your realm's listings back (DoubtPrice, Pricing.lua)
+local UNCONFIRMED_ICON = "|TInterface\\DialogFrame\\UI-Dialog-Icon-AlertNew:0|t "
 local TOP_HEIGHT = 26
 local FOOTER_HEIGHT = 44
 -- 172 (was 158): the notes under Cost, Sells for and Profit wrap onto a
@@ -212,10 +214,16 @@ local function FillCraftRow(row, item)
     if info.price then
         -- ~ marks a price Goldsmith adjusted (an undercut or shelf listing
         -- replaced by the usual price); the hover says why
-        cells.price:SetText((addon:PriceAdjusted(info.priceNote) and "~" or "") .. Money(info.price))
+        -- A warning icon marks a price only your realm's listings back (DoubtPrice)
+        cells.price:SetText((info.unconfirmed and UNCONFIRMED_ICON or addon:PriceAdjusted(info.priceNote) and "~" or "")
+            .. Money(info.price))
         if info.priceAge and info.priceAge >= STALE_PRICE_DAYS then
             cells.price:SetTextColor(addon:Color("warning"))
         end
+    elseif info.doubtPrice then
+        -- A lone listing far above cost that nothing can check (DoubtPrice)
+        cells.price:SetText(UNCONFIRMED_ICON .. Money(info.doubtPrice))
+        cells.price:SetTextColor(addon:Color("dim"))
     else
         cells.price:SetText("-")
         cells.price:SetTextColor(addon:Color("dim"))
@@ -259,6 +267,12 @@ local function FillCraftRow(row, item)
     if level then
         cells.demand:SetText(addon:SellLevelText(level))
         cells.demand:SetTextColor(addon:Color(addon:SellLevelColor(level)))
+    elseif not info.demand and (info.unconfirmed or info.doubtPrice) then
+        -- Goes with the price's warning icon: "-" read as "doesn't sell". Gray, not
+        -- orange: Slow is a known risk, this is unknown (the icon warns)
+        -- (user, 2026-10-16)
+        cells.demand:SetText("No data")
+        cells.demand:SetTextColor(addon:Color("muted"))
     else
         cells.demand:SetText(addon:FormatDemand(info.demand))
         local demandColor = addon:DemandColor(info.demand, item.itemID)
@@ -361,6 +375,33 @@ local function SalvageTooltip(tooltip, item)
     addon:ShiftClickHint(tooltip, string.format("Shift-click for %s's page", s.inputName))
 end
 
+-- When the best quality is out of reach for the crafter: the skill it
+-- needs, the most they reach (any mix, with concentration), and what it
+-- sells for. Its row is simply missing otherwise, which looked like a bug
+-- on unlearned Midnight enchants (gold needs 480; user, 2026-10-16).
+-- Concentration only closes part of the gap, so more of it doesn't help.
+local function TopTierOutOfReach(tooltip, item)
+    local c = GoldsmithDB.characters[item.charKey]
+    local td = c and c.tierData and c.tierData[item.recipe.recipeID]
+    if not (td and td.qualities and td.scenarios) then return end
+    local top = #td.qualities
+    local bestTier, bestSkill, needed = 0, 0, nil
+    for _, s in ipairs(td.scenarios) do
+        if s.tier > bestTier then bestTier, bestSkill = s.tier, 0 end
+        if s.tier == bestTier and (s.skill or 0) > bestSkill then
+            bestSkill, needed = s.skill or 0, s.upper
+        end
+    end
+    if bestTier >= top or item.tier ~= bestTier or not needed then return end
+    local name = top == 2 and "Gold" or "The top quality"
+    tooltip:AddLine(" ")
+    Note(tooltip, string.format("%s needs %d skill: %s reach %d at best, with concentration and better materials. More concentration won't close it, more skill will.",
+        name, needed, item.charKey == addon.charKey and "you" or CharName(item.charKey), bestSkill), "warning")
+    local out = td.outputs and td.outputs[top]
+    local price = out and out.itemID and addon:GetMarketPrice(out.itemID)
+    if price then Line(tooltip, name .. " sells for", Money(price)) end
+end
+
 local function CraftTooltip(tooltip, item)
     if item.salvage then return SalvageTooltip(tooltip, item) end
     local info, recipe = item.info, item.recipe
@@ -427,13 +468,20 @@ local function CraftTooltip(tooltip, item)
         Line(tooltip, "Price data", addon:PriceSourceText(item.itemID, info.priceSource, info.priceAge, info.priceNote),
             (stale or addon:PriceAdjusted(info.priceNote)) and "warning" or "muted")
         addon:AddPriceNote(tooltip, info.priceNote)
+        if info.unconfirmed then Note(tooltip, addon:UnconfirmedPriceText(info), "warning") end
         Why(tooltip, "What it sells for now: the lowest listing, or the usual price when the lowest is far below it (a stray cheap listing) or far above what it sells for (a shelf price). A ~ before the price in the list means it was adjusted. Price data says where it came from and how old it is.")
         Line(tooltip, "Profit each", string.format("%s%s", Signed(info.profit),
             info.margin and (" (" .. Roi(info.margin) .. " ROI)") or ""), addon:MoneyColor(info.profit))
         Why(tooltip, "AH price after the 5% cut, minus the cost. ROI is that profit as a share of the cost: 100% doubles your gold.")
+    elseif info.doubtPrice then
+        Line(tooltip, "AH listing", Money(info.doubtPrice), "dim")
+        Note(tooltip, addon:UnconfirmedPriceText(info) .. " Goldsmith Data covers materials and consumables, not gear or tools.", "warning")
     else
         Note(tooltip, "No AH price yet. Scan the AH with Auctionator.")
     end
+    -- After the price, not under "How": next to "all silver" it read as
+    -- part of the mix (user, 2026-10-16)
+    if item.tier then TopTierOutOfReach(tooltip, item) end
     -- Without TSM: how well it sells (Goldsmith Data)
     local sellLevel = not addon:HasTSM() and addon:GetSellLevel(item.itemID)
     if sellLevel then
@@ -2184,7 +2232,7 @@ local function CreatePlanScreen(parent)
         screen.cost.note:SetTextColor(addon:Color(plan.complete and "muted" or "warning"))
 
         if plan.price then
-            screen.sells.value:SetText(Money(plan.revenue))
+            screen.sells.value:SetText((plan.unconfirmed and UNCONFIRMED_ICON or "") .. Money(plan.revenue))
             screen.sells.value:SetTextColor(addon:Color("text"))
             screen.sells.note:SetText(string.format("%s each after the AH cut, AH price %s",
                 Money(plan.price * (1 - AH_CUT)),
@@ -2195,7 +2243,9 @@ local function CreatePlanScreen(parent)
         else
             screen.sells.value:SetText("-")
             screen.sells.value:SetTextColor(addon:Color("dim"))
-            screen.sells.note:SetText("No AH price yet. Scan with Auctionator.")
+            screen.sells.note:SetText(plan.doubtPrice
+                and string.format("Listed at %s, not counted: nothing backs it", Money(plan.doubtPrice))
+                or "No AH price yet. Scan with Auctionator.")
             screen.profit.value:SetText("-")
             screen.profit.value:SetTextColor(addon:Color("dim"))
             screen.profit.note:SetText("")
@@ -2239,6 +2289,11 @@ local function CreatePlanScreen(parent)
             end
             screen.demandLine:SetText(table.concat(parts, " "))
             screen.demandLine:SetTextColor(addon:Color(warn and "warning" or "muted"))
+        elseif plan.unconfirmed then
+            -- No sales data and only realm listings for the price: say so
+            -- where you'd buy the materials (user, 2026-10-16)
+            screen.demandLine:SetText(UNCONFIRMED_ICON .. "Price not confirmed: no sales data, only your realm's listings. Check the AH before you buy.")
+            screen.demandLine:SetTextColor(addon:Color("warning"))
         else
             screen.demandLine:SetText("Sold per day: no data")
             screen.demandLine:SetTextColor(addon:Color("dim"))
