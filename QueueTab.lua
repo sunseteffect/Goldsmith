@@ -25,7 +25,7 @@ local COLUMNS = {
     { key = "conc", label = "Conc", width = 64, justify = "RIGHT" },
     { key = "cost", label = "Cost", width = 84, justify = "RIGHT" },
     { key = "profit", label = "Profit", width = 84, justify = "RIGHT" },
-    { key = "next", label = "Next", width = 150 },
+    { key = "next", label = "Next", width = 150, gap = 24 },
 }
 
 local view
