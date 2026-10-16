@@ -692,6 +692,8 @@ function addon:CreateWindow()
 
     frame:SetScript("OnShow", function()
         Refresh()
+        -- Bag changes out in the world only mark stock stale (Characters.lua)
+        if addon.CountStockIfStale then addon:CountStockIfStale() end
         -- New players: offer the tour once (Tour.lua)
         if addon.OfferTour then C_Timer.After(0.5, function() addon:OfferTour() end) end
     end)

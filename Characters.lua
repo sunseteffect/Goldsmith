@@ -560,6 +560,25 @@ local function OnGoldmakingClose(source)
     end
 end
 
+-- Stock is only counted while something uses it: Goldsmith's window, a
+-- profession, the AH, mail, a vendor or the bank. Questing or in a dungeon
+-- bags change all the time and nothing needs the count ("i am only crafting
+-- in the city", user 2026-10-15), so a bag change there only marks it stale
+-- and opening one of those counts it.
+local stockStale = true -- nothing counted since login
+
+local function StockInUse()
+    return IsGoldmaking() or (addon.window ~= nil and addon.window:IsShown())
+end
+
+function addon:CountStockIfStale()
+    if not stockStale then return end
+    stockStale = false
+    SnapshotStock(function()
+        if addon.Refresh then addon.Refresh() end
+    end)
+end
+
 -- Seconds spent making gold on a day ("YYYY-MM-DD"), all characters
 function addon:GetGoldmakingSeconds(day)
     local total = 0
@@ -864,14 +883,11 @@ function addon:InitializeCharacters()
             QueryAuctions()
         elseif event == "BANKFRAME_OPENED" then
             -- The bank's slots can be read now, so gear tiers there too
-            C_Timer.After(1, function()
-                SnapshotStock(function()
-                    if addon.Refresh then addon.Refresh() end
-                end)
-            end)
+            stockStale = true
         end
         if GOLDMAKING_OPEN[event] then
             OnGoldmakingOpen(GOLDMAKING_OPEN[event])
+            C_Timer.After(1, function() addon:CountStockIfStale() end)
             return
         elseif GOLDMAKING_CLOSE[event] then
             OnGoldmakingClose(GOLDMAKING_CLOSE[event])
@@ -880,36 +896,30 @@ function addon:InitializeCharacters()
 
         if event == "PLAYER_LOGOUT" then
             -- No stock snapshot here: bags read as empty while logging out.
-            -- Login and bag changes keep stock up to date.
+            -- Opening the window or a profession, AH, mail, vendor or bank
+            -- counts it (CountStockIfStale).
             FlushGoldTime()
             UpdateAll(true)
         elseif event == "PLAYER_MONEY" then
             RecordGold()
         elseif event == "BAG_UPDATE_DELAYED" then
             -- Bags change in bursts while crafting or looting
-            if not stockPending then
+            stockStale = true
+            if StockInUse() and not stockPending then
                 stockPending = true
                 C_Timer.After(10, function()
                     stockPending = false
-                    SnapshotStock(function()
-                        if addon.Refresh then addon.Refresh() end
-                    end)
+                    if StockInUse() then addon:CountStockIfStale() end
                 end)
             end
         elseif not pending then
             -- Profession and currency data can arrive a moment after these
             -- events, and they can fire in bursts
             pending = true
-            local login = event == "PLAYER_ENTERING_WORLD"
             C_Timer.After(2, function()
                 pending = false
                 UpdateAll()
                 if addon.Refresh then addon.Refresh() end
-                if login then
-                    SnapshotStock(function()
-                        if addon.Refresh then addon.Refresh() end
-                    end)
-                end
             end)
         end
     end)
