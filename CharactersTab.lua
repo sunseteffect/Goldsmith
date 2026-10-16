@@ -32,8 +32,9 @@ local function ItemText(itemID, name, tier, tierCount)
 end
 
 local function TodoText(item)
-    return string.format("%dx %s", item.crafts,
-        ItemText(item.itemID, item.recipe.outputName, item.row.tier, item.tierCount))
+    return string.format("%dx %s%s", item.crafts,
+        ItemText(item.itemID, item.recipe.outputName, item.row.tier, item.tierCount),
+        item.otherMix and addon:Colorize(", other mix", "muted") or "")
 end
 
 -- Profit, with "conc" in front for concentration crafts and "cd" for
@@ -157,6 +158,13 @@ local function CreateTodoLine(card, i)
         if not item then return end
         tooltip:AddLine(ItemText(item.itemID, item.recipe.outputName, item.row.tier, item.tierCount), 1, 1, 1)
         addon:AddItemDescription(tooltip, item.itemID or item.recipe.outputItemID)
+        if item.otherMix then
+            tooltip:AddLine("A second mix of material qualities: the cheaper one is limited by the materials you hold.",
+                0.6, 0.6, 0.6, true)
+        end
+        if item.concentration and item.row.description then
+            tooltip:AddDoubleLine("Mix", item.row.description, 0.8, 0.8, 0.8, 1, 1, 1)
+        end
         tooltip:AddDoubleLine("Crafts", tostring(item.crafts), 0.8, 0.8, 0.8, 1, 1, 1)
         tooltip:AddDoubleLine("Makes about", tostring(item.quantity), 0.8, 0.8, 0.8, 1, 1, 1)
         addon:Explain(tooltip, "The crafts times what each makes, with multicraft's extra items on average.")

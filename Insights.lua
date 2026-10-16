@@ -1146,6 +1146,18 @@ function addon:GetCharacterTodo(prof, conc)
 
     for _, t in pairs(todo) do
         table.sort(t.items, function(a, b) return a.profit > b.profit end)
+        -- A concentration plan can split one item between two mixes of
+        -- material qualities (the cheaper one runs out of the gold
+        -- materials you hold): the later line says so, or it looks like a
+        -- repeat ("why is there two sterling alloy", user 2026-10-16)
+        local seen = {}
+        for _, item in ipairs(t.items) do
+            if item.concentration then
+                local id = tostring(item.recipe.recipeID) .. ":" .. tostring(item.itemID)
+                item.otherMix = seen[id] or nil
+                seen[id] = true
+            end
+        end
     end
     return todo
 end
