@@ -1110,15 +1110,37 @@ function addon:GetCharacterTodo(prof, conc)
         todo[charKey].total = todo[charKey].total + item.profit
     end
 
+    -- A concentration plan can split one item between two mixes of
+    -- material qualities (the cheaper one runs out of the gold materials
+    -- you hold). The queue holds one entry per item and quality and picks
+    -- the mix as you craft, so the two are one line here: two lines looked
+    -- like a repeat and only one could be queued (user, 2026-10-16).
+    -- item.mixes lists the split for the hover.
     for _, r in ipairs(conc.rows) do
+        local byItem = {}
         for _, p in ipairs(r.plan or {}) do
             local itemID = p.row.itemID or p.recipe.outputItemID
             local quantity = math.max(math.floor(p.crafts * (p.row.outputPerCraft or 1)), 1)
             if itemID then planned[itemID] = (planned[itemID] or 0) + quantity end
-            Add(r.key, {
-                recipe = p.recipe, row = p.row, itemID = itemID, tierCount = p.tierCount,
-                crafts = p.crafts, quantity = quantity, profit = p.profit, concentration = p.points,
-            })
+            local id = tostring(p.recipe.recipeID) .. ":" .. tostring(itemID) .. ":" .. tostring(p.row.tier)
+            local mix = { crafts = p.crafts, description = p.row.description, points = p.points }
+            local item = byItem[id]
+            if item then
+                item.crafts = item.crafts + p.crafts
+                item.quantity = item.quantity + quantity
+                item.profit = item.profit + p.profit
+                item.concentration = item.concentration + p.points
+                table.insert(item.mixes, mix)
+                todo[r.key].total = todo[r.key].total + p.profit
+            else
+                item = {
+                    recipe = p.recipe, row = p.row, itemID = itemID, tierCount = p.tierCount,
+                    crafts = p.crafts, quantity = quantity, profit = p.profit, concentration = p.points,
+                    mixes = { mix },
+                }
+                byItem[id] = item
+                Add(r.key, item)
+            end
         end
     end
 
@@ -1146,18 +1168,6 @@ function addon:GetCharacterTodo(prof, conc)
 
     for _, t in pairs(todo) do
         table.sort(t.items, function(a, b) return a.profit > b.profit end)
-        -- A concentration plan can split one item between two mixes of
-        -- material qualities (the cheaper one runs out of the gold
-        -- materials you hold): the later line says so, or it looks like a
-        -- repeat ("why is there two sterling alloy", user 2026-10-16)
-        local seen = {}
-        for _, item in ipairs(t.items) do
-            if item.concentration then
-                local id = tostring(item.recipe.recipeID) .. ":" .. tostring(item.itemID)
-                item.otherMix = seen[id] or nil
-                seen[id] = true
-            end
-        end
     end
     return todo
 end
