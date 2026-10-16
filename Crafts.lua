@@ -659,7 +659,11 @@ local function PlanTooltip(tooltip, node)
     local function Option(option, label, detail)
         if not option then return end
         local tags = {}
-        if o.cheapest == option then table.insert(tags, "cheapest") end
+        if o.cheapest == option then
+            -- Picked for the materials you hold, not price (Planner.lua)
+            local held = o.craftHeld and option == o.craft and o.buy and o.buy.unit < option.unit
+            table.insert(tags, held and "you have the materials" or "cheapest")
+        end
         if o.override and node.best == option then table.insert(tags, "your choice") end
         Line(tooltip, "  " .. label, Money(option.unit) .. (#tags > 0 and ("  (" .. table.concat(tags, ", ") .. ")") or ""),
             o.cheapest == option and "profit" or nil)
@@ -738,7 +742,9 @@ local function PlanMenu(node)
         root:CreateTitle(node.name)
         local cheapestLabel = "Cheapest way"
         if o.cheapest then
-            cheapestLabel = string.format("Cheapest way (%s, %s)", o.cheapest.method, Money(o.cheapest.unit))
+            local held = o.craftHeld and o.cheapest == o.craft and o.buy and o.buy.unit < o.cheapest.unit
+            cheapestLabel = string.format(held and "Best way (%s, %s: you have the materials)" or "Cheapest way (%s, %s)",
+                o.cheapest.method, Money(o.cheapest.unit))
         end
         root:CreateRadio(cheapestLabel, function() return o.override == nil end, function()
             addon:SetMethodOverride(node.itemID, nil)

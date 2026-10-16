@@ -34,6 +34,26 @@ local function GetOnHand(itemID)
     return C_Item.GetItemCount(itemID, true, false, true, true) or 0
 end
 
+-- Crafting from materials you already hold beats buying unless buying is
+-- this much cheaper: a queue said "0 to buy" (ingots from your ore), then
+-- a price update made buying 0.3% cheaper and it asked for 29 ingots with
+-- 234 ore in the bags (user, 2026-10-16). Saves a trip to the AH, and a
+-- plan doesn't flip mid-queue over pennies.
+local HELD_CRAFT_MARGIN = 0.10
+
+-- Whether you hold enough of every material for at least one craft (any
+-- quality of each)
+local function HoldsMaterials(recipe)
+    local reagents = recipe and recipe.reagents
+    if not reagents or #reagents == 0 then return false end
+    for _, r in ipairs(reagents) do
+        local have = 0
+        for _, id in ipairs(r.itemIDs or {}) do have = have + GetOnHand(id) end
+        if have < (r.quantity or 1) then return false end
+    end
+    return true
+end
+
 -- Recipe that makes an item, if one is saved
 local function FindRecipeForItem(itemID, name)
     for _, recipe in pairs(GoldsmithDB.recipes) do
@@ -234,10 +254,14 @@ GetOptions = function(itemID, name, depth, memo, visiting)
     -- the cheapest way, not by a few silver
     -- Crafting with concentration compares with its concentration charged
     -- (compareUnit); salvage with its margin
+    -- Crafting from what you hold gets HELD_CRAFT_MARGIN off
+    local craftHeld = options.craft and HoldsMaterials(options.craft.recipe)
+    options.craftHeld = craftHeld or nil
     local cheapestUnit
     for _, key in ipairs({ "buy", "vendor", "craft", "mill" }) do
         local option = options[key]
         local unit = option and (key == "mill" and option.unit * (1 + SALVAGE_MARGIN) or option.compareUnit or option.unit)
+        if unit and key == "craft" and craftHeld then unit = unit * (1 - HELD_CRAFT_MARGIN) end
         if option and (not cheapestUnit or unit < cheapestUnit) then
             options.cheapest, cheapestUnit = option, unit
         end
