@@ -2173,9 +2173,12 @@ local function CreatePlanScreen(parent)
             end
             -- Your own sales say how many you posted, not what the region
             -- buys: gold gems sell, though you sold 0.1 a day (user,
-            -- 2026-10-16). Left out when Goldsmith Data says it sells.
+            -- 2026-10-16). When Goldsmith Data says it sells, your rate is
+            -- shown as a fact, with no days' worth and no warning.
             local ownOnly = level == addon.SELL_LEVEL.sells and plan.demandSource == "your sales"
-            if plan.demand and plan.demand > 0 and not ownOnly then
+            if ownOnly and plan.demand and plan.demand > 0 then
+                table.insert(parts, string.format("You've sold about %s a day.", addon:FormatDemand(plan.demand)))
+            elseif plan.demand and plan.demand > 0 then
                 local made = plan.expectedOutput or quantity
                 local days = made / plan.demand
                 local worth
