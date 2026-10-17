@@ -23,6 +23,9 @@ local UI = addon.UI
 --   craftCost   - "Your materials / Profit" in the game's profession and
 --                 crafting orders windows (OrderCost.lua), like
 --                 Auctionator's own switch (user, 2026-10-16)
+--   peekKey     - the modifier held to see through the window (Window.lua):
+--                 "alt" or "off" (the key binding only). Not Shift or Ctrl:
+--                 shift-clicks and Ctrl-to-explain would peek (user, 2026-10-17)
 -- Concentration in Crafts isn't here: the Crafts tab's switch remembers it.
 -- "Show cost as" (estimated or worst case) was removed 2026-10-10: costs
 -- are always the estimate; the worst case is in each craft's hover.
@@ -38,6 +41,7 @@ local DEFAULTS = {
     chat = "all",
     showMinimap = true,
     craftCost = true,
+    peekKey = "alt",
 }
 
 function addon:Setting(key)
@@ -494,6 +498,38 @@ end
 
 -- Opens the game's Keybindings page. Goldsmith closes so it isn't in the
 -- way; the new key brings it back.
+-- A binding's key as the game writes it ("CTRL-G"), or nil if unbound
+function addon:BindingKeyText(name)
+    local key = GetBindingKey and GetBindingKey(name)
+    return key and (GetBindingText and GetBindingText(key) or key) or nil
+end
+
+-- The Goldsmith section of the Keybindings page: opened and scrolled to
+-- the top, so nobody scrolls past every other section to find it (user,
+-- 2026-10-17). Reads the game's own list, so it's all in pcalls; false if
+-- the page isn't built the way it was when written.
+local function ShowGoldsmithSection()
+    local list = SettingsPanel and SettingsPanel.Container and SettingsPanel.Container.SettingsList
+    local box = list and list.ScrollBox
+    local provider = box and box.GetDataProvider and box:GetDataProvider()
+    if not (provider and provider.FindElementDataByPredicate) then return false end
+    local section = provider:FindElementDataByPredicate(function(e)
+        local data = e and e.data
+        return type(data) == "table" and (data.name == "Goldsmith" or data.name == BINDING_HEADER_GOLDSMITH)
+    end)
+    if not section then return false end
+    local top = ScrollBoxConstants and ScrollBoxConstants.AlignBegin
+    box:ScrollToElementData(section, top)
+    if not section.data.expanded then
+        local frame = box:FindFrame(section)
+        local button = frame and (frame.Button or frame)
+        if not (button and button.Click) then return false end
+        button:Click()
+        box:ScrollToElementData(section, top)
+    end
+    return true
+end
+
 function addon:OpenKeybindings()
     local ok = Settings and Settings.OpenToCategory and Settings.KEYBINDINGS_CATEGORY_ID
         and pcall(Settings.OpenToCategory, Settings.KEYBINDINGS_CATEGORY_ID)
@@ -502,7 +538,13 @@ function addon:OpenKeybindings()
         return
     end
     if addon.window then addon.window:Hide() end
-    print("|cFF00FF00[Goldsmith]|r Scroll down to Goldsmith and pick a key for \"Show or hide the window\".")
+    -- The page fills its list once shown
+    C_Timer.After(0.1, function()
+        local done, shown = pcall(ShowGoldsmithSection)
+        if not (done and shown) then
+            print("|cFF00FF00[Goldsmith]|r Scroll down to Goldsmith, near the bottom, and pick your keys.")
+        end
+    end)
 end
 
 -- Panel
@@ -537,6 +579,10 @@ local CHOICES = {
     chat = {
         { value = "all", label = "On (recommended)" },
         { value = "off", label = "Off" },
+    },
+    peekKey = {
+        { value = "alt", label = "Hold Alt" },
+        { value = "off", label = "Key binding only" },
     },
 }
 for _, value in ipairs({ 0, 5, 10, 15, 20, 30, 50 }) do
@@ -637,9 +683,14 @@ local HELP = {
         "Goldsmith's Your materials and Profit lines in the game's profession and crafting orders windows, under the materials. Hover them for the breakdown.",
         "Auctionator shows its own To Craft and Profit there; Goldsmith's go below it. Auctionator's can be turned off in its settings, under Crafting Info.",
     },
+    peekKey = {
+        "See through Goldsmith",
+        "While you hold this key, Goldsmith fades almost away and clicks go through it, so you can click the auctioneer or a mailbox behind it without moving the window. Let go and it's back.",
+        "Alt is the only choice here: Shift and Ctrl already do things in Goldsmith (shift-click an item, Ctrl to explain a hover). For any other key, pick Key binding only and set it in Options > Keybindings > Goldsmith: Hold to see through. The game can't bind Alt, Shift or Ctrl alone there.",
+    },
     keybind = {
         "Key to open Goldsmith",
-        "Set key opens the game's Keybindings. Goldsmith has its own section, near the bottom: click the box next to Show or hide the window and press the key you want.",
+        "Set key opens the game's Keybindings at Goldsmith's section: click the box next to Show or hide the window and press the key you want.",
         "Goldsmith closes while you do it; press your new key to bring it back.",
         "Two more keys are there: Craft next in the queue, and Open hovered item (hover an item in your bags, the AH or a chat link and press it for the item's page).",
     },
@@ -734,7 +785,7 @@ end
 
 local COLUMNS = {
     { title = "Crafting and prices", rows = { "priceSource", "minROI", "minLine", "dealPercent", "heldDays", "ignored", "keepDays" } },
-    { title = "Display", rows = { "tooltips", "chat", "characters", "showMinimap", "craftCost", "keybind" } },
+    { title = "Display", rows = { "tooltips", "chat", "characters", "showMinimap", "craftCost", "peekKey", "keybind" } },
 }
 
 function addon:CreateSettingsPanel(parent)
@@ -780,6 +831,7 @@ function addon:CreateSettingsPanel(parent)
     function rows.keepDays:Update() self.control:SetLabel(LabelFor(CHOICES.keepDays, addon:Setting("keepDays"))) end
     rows.tooltips = ChoiceRow(panel, "tooltips", "Item tooltips", "Goldsmith's lines in the game's item tooltips.")
     rows.chat = ChoiceRow(panel, "chat", "Chat messages", "What Goldsmith says in chat as things happen.")
+    rows.peekKey = ChoiceRow(panel, "peekKey", "See through Goldsmith", "Hold it to click the auctioneer or a mailbox behind the window.")
 
     rows.characters = Row(panel, "characters", "Exclude characters", "Characters left out of stock, concentration, Crafts and Do this next.")
     rows.characters.control = Dropdown(rows.characters, "characters", function(root)
@@ -927,12 +979,15 @@ local HELP_SECTIONS = {
     -- One line per tab, its name in the text color (Theme.lua loads first)
     { "The tabs", table.concat({
         addon:Colorize("Overview", "text") .. ": what to do next on the character you're on, which of your other characters has the most waiting, and how you're doing across all of them. \"followed\" by Do this next adds up what the suggestions you crafted have made; Set a goal on the Total gold chart gives you a gold goal.",
+        addon:Colorize("Characters", "text") .. ": a to-do list for each character, its craft cooldowns, and which characters count.",
         addon:Colorize("Crafts", "text") .. ": what you can make, with its cost, profit and how well it sells. Show picks Recommended, All crafts or Not learned yet (recipes worth going to learn), and can hide gear. Click a craft to plan it: type how many crafts, and it shows what they make and what to buy. With concentration it plans only what yours covers now; Why this mix shows the material qualities compared, and clicking one uses it instead.",
         addon:Colorize("Queue", "text") .. ": crafts lined up to make, with one shopping list and a button that does the next step.",
         addon:Colorize("Items", "text") .. ": any item's page, and In my bags for everything you hold.",
         addon:Colorize("History", "text") .. ": every purchase, sale, craft and deposit; right-click an entry to fix it.",
-        addon:Colorize("Characters", "text") .. ": a to-do list for each character, its craft cooldowns, and which characters count.",
+        addon:Colorize("Stats", "text") .. ": lifetime stats and your Goldsmith title; Share in chat to brag.",
       }, "\n") },
+    { "Getting to the AH and the mailbox",
+      "Hold Alt and Goldsmith fades almost away: clicks go through it, so you can click the auctioneer or the mailbox behind it without moving the window. Let go and it's back. Pick another key in Settings > See through Goldsmith. The game's Interact key works too: turn on Options > Gameplay > Controls > Enable Interact Key, bind Interact with Target in Keybindings, and press it beside the auctioneer or a mailbox." },
     { "In the game's windows",
       "Under the reagents in a profession window, Goldsmith shows what your materials cost and the profit, the same as on Crafts; hover it for the breakdown. On a crafting order, only the materials you supply count, with the commission and rewards (a payout bag at what's usually inside). Above Goldsmith's Craft button, a note reminds you when a crafting buff such as Everburning Ignition or Shattered Essence is off." },
     { "Hovers and clicks",

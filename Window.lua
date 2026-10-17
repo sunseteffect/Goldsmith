@@ -23,13 +23,15 @@ addon.CONTENT_HEIGHT = HEIGHT - 114 - LEGEND_HEIGHT
 local HEADER_HEIGHT = 48
 local TAB_HEIGHT = 32
 
+-- By purpose (user, 2026-10-17): what to do (this character, then every
+-- character), doing it, records, then Stats for fun
 local TABS = {
     { key = "overview", label = "Overview" },
+    { key = "characters", label = "Characters" },
     { key = "crafts", label = "Crafts" },
     { key = "queue", label = "Queue" },
     { key = "items", label = "Items" },
     { key = "history", label = "History" },
-    { key = "characters", label = "Characters" },
     { key = "stats", label = "Stats" },
 }
 
@@ -274,6 +276,52 @@ function addon:CreateWindow()
         end
     end)
 
+    -- Peek: while Alt is held, the window fades nearly away and clicks go
+    -- through it to the world, to click the auctioneer or the mailbox
+    -- behind it without dragging the window aside (user, 2026-10-17).
+    -- Every part that takes the mouse is switched off and put back on
+    -- release. Read each frame while the window shows, like Ctrl for hovers.
+    local PEEK_ALPHA = 0.15
+    local peeking, muted = false, {}
+    local function SetPeek(on)
+        if on == peeking then return end
+        peeking = on
+        if on then
+            local owner = GameTooltip:IsShown() and GameTooltip:GetOwner()
+            if owner and IsInside(owner, frame) then GameTooltip:Hide() end
+            local function Mute(f)
+                -- Protected frames can't change in combat (Goldsmith has
+                -- none, but other addons' frames could sit inside it)
+                if f:IsMouseEnabled() and not (InCombatLockdown() and f:IsProtected()) then
+                    f:EnableMouse(false)
+                    muted[#muted + 1] = f
+                end
+                for _, child in ipairs({ f:GetChildren() }) do Mute(child) end
+            end
+            Mute(frame)
+            frame:SetAlpha(PEEK_ALPHA)
+        else
+            for _, f in ipairs(muted) do
+                if not (InCombatLockdown() and f:IsProtected()) then f:EnableMouse(true) end
+            end
+            muted = {}
+            frame:SetAlpha(1)
+        end
+    end
+    -- The modifier is a setting (Settings > See through Goldsmith); any
+    -- other key is the binding Hold to see through (Bindings.xml)
+    local MODIFIERS = { alt = IsAltKeyDown }
+    local peekBound = false
+    function addon:PeekBinding(down) peekBound = down and true or false end
+    local peek = CreateFrame("Frame", nil, frame)
+    peek:SetScript("OnUpdate", function()
+        -- Shift or Ctrl, saved while they were choices for a day, are Alt
+        local setting = addon:Setting("peekKey")
+        local held = setting ~= "off" and (MODIFIERS[setting] or IsAltKeyDown) or nil
+        SetPeek(peekBound or (held ~= nil and held()))
+    end)
+    frame:HookScript("OnHide", function() SetPeek(false) end)
+
     -- Every key goes on to the game except an Escape Goldsmith used, and
     -- that is let go again on the next frame, so Goldsmith never holds on to
     -- the keyboard (it would swallow movement keys in combat, where it can't
@@ -409,8 +457,12 @@ function addon:CreateWindow()
     end)
     expansionButton:SetPoint("LEFT", rangeButton, "RIGHT", 8, 0)
 
-    local closeButton = UI.IconButton(header, 34, "X", "Close (Esc)", function() frame:Hide() end,
+    local closeButton = UI.IconButton(header, 34, "X", nil, function() frame:Hide() end,
         { font = "close", hoverColor = "loss" })
+    UI.SetTooltip(closeButton, function(tooltip)
+        local key = addon:BindingKeyText("GOLDSMITH_TOGGLE")
+        tooltip:AddLine(key and ("Close (Esc or " .. key .. ")") or "Close (Esc)", 1, 1, 1)
+    end, "ANCHOR_BOTTOM")
     closeButton:SetPoint("RIGHT", -8, 0)
 
     -- Help mode (HelpMode.lua): the window's only "?", so explanations are
@@ -533,6 +585,49 @@ function addon:CreateWindow()
     legend:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -20, 8)
     legend:SetJustifyH("LEFT")
     legend:SetWordWrap(false)
+    -- Keys worth remembering, at the right end of the same line (user,
+    -- 2026-10-17: a reminder of the peek and close keys): only what fits
+    -- beside the click legend, most useful first
+    local keysText = UI.Text(frame, "small", "muted", "RIGHT")
+    keysText:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -20, 8)
+    keysText:SetWordWrap(false)
+    -- The whole line, clicks and keys, for help mode's outline
+    local legendArea = CreateFrame("Frame", nil, frame)
+    legendArea:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 18, 5)
+    legendArea:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -18, 5)
+    legendArea:SetHeight(LEGEND_HEIGHT)
+    local function KeyPart(key, text)
+        return addon:Colorize(key .. ":", "text") .. " " .. addon:Colorize(text, "muted")
+    end
+    local function KeyReminders(tab)
+        local parts = {}
+        local bound = addon:BindingKeyText("GOLDSMITH_PEEK")
+        local peekKey = addon:Setting("peekKey") ~= "off" and "Hold Alt" or (bound and ("Hold " .. bound))
+        if peekKey then table.insert(parts, KeyPart(peekKey, "see through")) end
+        local open = addon:BindingKeyText("GOLDSMITH_OPEN_ITEM")
+        if open and tab == "items" then table.insert(parts, KeyPart(open .. " on any item", "open it here")) end
+        local toggle = addon:BindingKeyText("GOLDSMITH_TOGGLE")
+        if toggle then table.insert(parts, KeyPart(toggle, "close")) end
+        return parts
+    end
+    local function FillLegend(text, tab)
+        legend:SetText(text)
+        local room = frame:GetWidth() - 40 - legend:GetUnboundedStringWidth() - 24
+        local shown = {}
+        local sep = addon:Colorize("  ·  ", "dim")
+        for _, part in ipairs(KeyReminders(tab)) do
+            table.insert(shown, part)
+            keysText:SetText(table.concat(shown, sep))
+            if keysText:GetUnboundedStringWidth() > room then
+                table.remove(shown)
+                break
+            end
+        end
+        keysText:SetText(table.concat(shown, sep))
+        legend:ClearAllPoints()
+        legend:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 20, 8)
+        legend:SetPoint("BOTTOMRIGHT", keysText, "BOTTOMLEFT", -12, 0)
+    end
 
     local created = {} -- key -> { frame, view, def }
     -- For the tour (Tour.lua): a tab's screen, once it has been opened
@@ -543,7 +638,7 @@ function addon:CreateWindow()
         filters = { professionButton, expansionButton },
         price = priceText,
         settings = settingsButton,
-        legend = legend,
+        legend = legendArea,
         tabs = tabBar.buttons,
         tabArea = tabArea,
         filterChip = filterChip,
@@ -585,8 +680,8 @@ function addon:CreateWindow()
         -- The click legend changes with the screen too (a plan, an item's
         -- page), so it's redrawn at the same moments
         local screen = created[ui.tab]
-        legend:SetText(screen and screen.def.legend
-            and addon:ClickLegendText(screen.def.legend(screen.view)) or "")
+        FillLegend(screen and screen.def.legend
+            and addon:ClickLegendText(screen.def.legend(screen.view)) or "", ui.tab)
         local filters = ActiveFilters()
         filterChip:SetShown(#filters > 0)
         if #filters > 0 then

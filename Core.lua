@@ -16,6 +16,7 @@ BINDING_HEADER_GOLDSMITH = "Goldsmith"
 BINDING_NAME_GOLDSMITH_TOGGLE = "Show or hide the window"
 BINDING_NAME_GOLDSMITH_CRAFT_NEXT = "Craft next in the queue"
 BINDING_NAME_GOLDSMITH_OPEN_ITEM = "Open hovered item"
+BINDING_NAME_GOLDSMITH_PEEK = "Hold to see through"
 
 function Goldsmith_OnAddonCompartmentClick()
     addon:ToggleWindow()

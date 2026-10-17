@@ -10,4 +10,8 @@
     <Binding name="GOLDSMITH_OPEN_ITEM" category="Goldsmith">
         Goldsmith:OpenHoveredItem()
     </Binding>
+    <!-- Held: runs on press and on release (keystate "down" / "up") -->
+    <Binding name="GOLDSMITH_PEEK" category="Goldsmith" runOnUp="true">
+        Goldsmith:PeekBinding(keystate == "down")
+    </Binding>
 </Bindings>

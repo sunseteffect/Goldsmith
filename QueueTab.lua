@@ -480,7 +480,16 @@ local function Refresh(v)
     local busy = addon.QueueBusy()
     local state = v.next and v.next.state
     local enabled = q.mine and not busy and state ~= nil and state.enabled == true
-    v.craft:SetLabel(addon:QueueButtonLabel(v.next, q))
+    -- Its key in the button, "Craft 1 (F5)", when it can craft and the
+    -- step still fits (user, 2026-10-17). Not on a plan's Craft button:
+    -- the key crafts the queue, not the plan.
+    local label = addon:QueueButtonLabel(v.next, q)
+    local key = enabled and addon:BindingKeyText("GOLDSMITH_CRAFT_NEXT")
+    if key then
+        v.craft.label:SetText(label .. " (" .. key .. ")")
+        if v.craft.label:GetUnboundedStringWidth() > v.craft:GetWidth() - 16 then key = nil end
+    end
+    v.craft:SetLabel(key and (label .. " (" .. key .. ")") or label)
     v.craft:SetEnabled(enabled)
     v.craft:SetAlpha(enabled and 1 or 0.5)
 end

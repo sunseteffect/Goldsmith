@@ -69,8 +69,8 @@ local function HeaderParts(list)
     Add(list, "Filtered",
         "Something is narrowing what this tab shows. Click it (after help) to clear it.",
         Part("filterChip"))
-    Add(list, "What clicks do",
-        "What clicking does on the screen you're on: click, right-click, Shift-click. Hold Ctrl over any hover to see what its numbers mean.",
+    Add(list, "Clicks and keys",
+        "On the left, what clicking does on the screen you're on: click, right-click, Shift-click. Hold Ctrl over any hover to see what its numbers mean. On the right, your Goldsmith keys: hold Alt to see through the window, and any keys you've set in Options > Keybindings > Goldsmith.",
         Part("legend"))
 end
 
@@ -265,7 +265,7 @@ TAB_PARTS.stats = function(list)
         view.share)
     Add(list, "Lifetime stats",
         "Everything Goldsmith has recorded, on every character and profession, for all time. The filters at the top don't change it. Hover any line for details.",
-        view.left[1], view.right[1])
+        view.left[1], view.scroll)
 end
 
 local function Collect()

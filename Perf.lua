@@ -17,7 +17,7 @@ local PERF_RUNS = 10
 local FRAME_MS = 16
 -- A step that hasn't finished by then is recorded as stuck
 local STEP_TIMEOUT = 60
-local TABS = { "overview", "crafts", "queue", "items", "history", "characters", "stats" }
+local TABS = { "overview", "characters", "crafts", "queue", "items", "history", "stats" }
 
 local function Count(t)
     local n = 0
