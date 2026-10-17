@@ -143,8 +143,9 @@ local function CreateTodoLine(card, i)
     line:SetScript("OnClick", function(self, button)
         if button == "RightButton" then
             -- A to-do's own menu: Not this (hide it for a day, as on the
-            -- Overview). Only that: Exclude is the card's checkbox (user,
-            -- 2026-10-10)
+            -- Overview), or Ignore for good, as on Crafts, without looking it
+            -- up there (user, 2026-10-16). Exclude is the card's checkbox
+            -- (user, 2026-10-10)
             local item = self.item
             if not (item and MenuUtil and MenuUtil.CreateContextMenu) then
                 ShowCardMenu(card)
@@ -154,6 +155,9 @@ local function CreateTodoLine(card, i)
                 root:CreateTitle(item.recipe.outputName)
                 root:CreateButton("Not this: hide it for a day", function()
                     addon:SetSnoozed(item.recipe.outputItemID, item.recipe.outputName, true)
+                end)
+                root:CreateButton("Ignore this item", function()
+                    addon:SetIgnored(item.recipe.outputItemID, item.recipe.outputName, true)
                 end)
             end)
         elseif self.item then
@@ -236,7 +240,7 @@ local function CreateTodoLine(card, i)
                 0.6, 0.6, 0.6, true)
         end
         addon:ClickHint(tooltip, "Click to plan it: materials and shopping list.")
-        addon:RightClickHint(tooltip, "Right-click: Not this (hide it for a day)")
+        addon:RightClickHint(tooltip, "Right-click: hide it for a day, or ignore it")
     end)
     return line
 end
@@ -494,7 +498,7 @@ local function Reset(view) view.offset = 0 end
 local function Legend()
     return {
         { "click", "a to-do: its plan" },
-        { "right", "a to-do: not this (hide for a day)" },
+        { "right", "a to-do: hide for a day or ignore" },
         { "right", "a card: exclude or remove" },
         { "hover", ": details" },
     }

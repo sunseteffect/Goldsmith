@@ -434,26 +434,31 @@ end
 -- A short status for a queued entry and its color: what Craft next would
 -- do for it, or why it can't
 function addon:QueueRowStatus(row, q)
-    if not row.recipe then return "recipe not loaded", "warning" end
-    if not q.mine then return "on " .. CharName(q.charKey), "muted" end
+    if not row.recipe then return "Recipe not loaded", "warning" end
+    if not q.mine then return "On " .. CharName(q.charKey), "muted" end
     local s = row.state
     if not s then return "", "muted" end
     if s.enabled and s.open then return s.label, "muted" end
     if s.enabled then return s.label, "profit" end
     local blocker = s.blockers[1] or ""
+    -- Short on concentration beats a missing station: walking to the
+    -- table wouldn't let it craft (user, 2026-10-16)
+    for _, b in ipairs(s.blockers) do
+        if b:find("concentration") then blocker = b break end
+    end
     local station = blocker:match("^Needs (.+) nearby")
     if station then
-        return "needs " .. station, "warning"
+        return "Needs " .. station, "warning"
     elseif blocker:find("^Missing") or blocker:find("^Not enough") and not blocker:find("concentration") then
-        return "needs materials", "warning"
+        return "Needs materials", "warning"
     elseif blocker:find("concentration") then
-        return "needs concentration", "warning"
+        return "Needs concentration", "warning"
     elseif blocker:find("^Open") then
-        return blocker:match("^(Open %S+)") or "open profession", "muted"
+        return blocker:match("^(Open %S+)") or "Open profession", "muted"
     elseif blocker:find("bank") then
-        return "in the bank", "warning"
+        return "In the bank", "warning"
     end
-    return "can't craft yet", "warning"
+    return "Can't craft yet", "warning"
 end
 
 -- What the Craft next button says for the entry it's on: the step, or why
@@ -620,7 +625,7 @@ local function CreatePanel()
             for _, line in ipairs(row.state.blockers) do tooltip:AddLine(line, 1, 0.6, 0.2, true) end
         end
         tooltip:AddLine(" ")
-        tooltip:AddLine(KeyText() and ("Key: " .. KeyText()) or "Set a key: Options > Keybindings > AddOns > Goldsmith.",
+        tooltip:AddLine(KeyText() and ("Key: " .. KeyText()) or "Set a key: Options > Keybindings > Goldsmith.",
             0.6, 0.6, 0.6, true)
         addon:Explain(tooltip, "Right-click for the Queue tab.", 0.6, 0.6, 0.6)
     end, "ANCHOR_BOTTOM")
@@ -671,7 +676,7 @@ local function UpdatePanel()
     panel.button:SetLabel(addon:QueueButtonLabel(row, q))
     panel.button:SetEnabled(enabled)
     panel.button:SetAlpha(enabled and 1 or 0.5)
-    panel.hint:SetText(KeyText() and ("or press " .. KeyText()) or "set a key in Keybindings > AddOns")
+    panel.hint:SetText(KeyText() and ("or press " .. KeyText()) or "set a key in Keybindings > Goldsmith")
     panel:Show()
 
     -- Show the next craft in the profession window, once per change (never

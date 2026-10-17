@@ -830,7 +830,9 @@ end
 -- Profit by profession
 --
 -- Which professions make the most, to know where to put your time: a
--- ranked strip, each with a bar for its share of the best one. Was a row
+-- ranked strip. Its bars (share of the best one) were dropped: they
+-- needed explaining and only repeated the ranked numbers (user,
+-- 2026-10-16). Was a row
 -- of cards that filtered the window on click; the user never filtered
 -- with them, only read the ranking, and they took a lot of room (user,
 -- 2026-10-15). The header's profession menu still filters.
@@ -846,14 +848,6 @@ local function CreateProfessionCell(parent, i)
     cell.name:SetWordWrap(false)
     cell.profit = UI.Text(cell, "body")
     cell.profit:SetPoint("TOPLEFT", cell.name, "BOTTOMLEFT", 0, -4)
-    cell.track = cell:CreateTexture(nil, "BACKGROUND")
-    cell.track:SetColorTexture(addon:Color("barEmpty"))
-    cell.track:SetPoint("BOTTOMLEFT", 0, 2)
-    cell.track:SetSize(width, 4)
-    cell.fill = cell:CreateTexture(nil, "ARTWORK")
-    cell.fill:SetColorTexture(addon:Color("gold"))
-    cell.fill:SetPoint("LEFT", cell.track, "LEFT")
-    cell.fill:SetHeight(4)
     cell:EnableMouse(true)
     UI.SetTooltip(cell, function(tooltip)
         if not cell.item then return end
@@ -1316,9 +1310,8 @@ local function Refresh(view, state)
     for _, item in ipairs(addon:GetProfessionBreakdown(range)) do
         if item.sales ~= 0 or item.profit ~= 0 then table.insert(ranked, item) end
     end
-    local topProfit, totalProfit = 0, 0
+    local totalProfit = 0
     for _, item in ipairs(ranked) do
-        topProfit = math.max(topProfit, item.profit)
         if item.profit > 0 then totalProfit = totalProfit + item.profit end
     end
     view.professionsNote:SetText(addon:GetDateRange(range).label .. ", all characters")
@@ -1329,9 +1322,6 @@ local function Refresh(view, state)
             cell.name:SetText(addon:ProfessionIconText(item.profession) .. item.profession)
             cell.profit:SetText(Signed(item.profit))
             cell.profit:SetTextColor(addon:Color(addon:MoneyColor(item.profit)))
-            local share = topProfit > 0 and math.max(item.profit, 0) / topProfit or 0
-            cell.fill:SetWidth(math.max(cell.track:GetWidth() * share, 1))
-            cell.fill:SetShown(share > 0)
             cell.share = totalProfit > 0 and item.profit > 0 and item.profit / totalProfit or nil
             cell:Show()
         else

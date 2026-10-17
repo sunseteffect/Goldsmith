@@ -10,11 +10,12 @@ local function Print(msg, ...)
 end
 
 -- Ways to open the window besides /gsm: a key (Bindings.xml; these name it
--- in Options > Keybindings > AddOns) and the addon compartment next to the
+-- in Options > Keybindings > Goldsmith) and the addon compartment next to the
 -- minimap (## AddonCompartmentFunc in the TOC)
 BINDING_HEADER_GOLDSMITH = "Goldsmith"
-BINDING_NAME_GOLDSMITH_TOGGLE = "Show or hide Goldsmith"
+BINDING_NAME_GOLDSMITH_TOGGLE = "Show or hide the window"
 BINDING_NAME_GOLDSMITH_CRAFT_NEXT = "Craft next in the queue"
+BINDING_NAME_GOLDSMITH_OPEN_ITEM = "Open hovered item"
 
 function Goldsmith_OnAddonCompartmentClick()
     addon:ToggleWindow()

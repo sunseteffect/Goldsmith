@@ -1326,6 +1326,59 @@ local STAT_KEYS = {
     Ingenuity = "ingenuity",
 }
 
+-- Finishing reagents: what each one in a recipe's finishing slots does to
+-- your stats, read the same way (the game answers for ones you don't have:
+-- Bazaar Bites on Arcano Cutlets read as multicraft 100%, Savory Anomaly as
+-- resourcefulness 8.8% to 21.0%, 2026-10-17). Slots still locked by skill
+-- are left out. Kept in recipeStats[recipeID].finishing:
+--   { { itemID, dataSlotIndex, quantity, multicraft, resourcefulness,
+--       ingenuity, skill } }
+-- Which one to use is worked out from prices (ChooseFinishing, below).
+local function SlotLocked(slot, recipeID)
+    local mcrSlotID = slot.slotInfo and slot.slotInfo.mcrSlotID
+    local info = C_TradeSkillUI.GetRecipeInfo(recipeID)
+    if not (C_TradeSkillUI.GetReagentSlotStatus and mcrSlotID and info and info.skillLineAbilityID) then
+        return false
+    end
+    local ok, locked = pcall(C_TradeSkillUI.GetReagentSlotStatus, mcrSlotID, recipeID, info.skillLineAbilityID)
+    return ok and locked == true
+end
+
+local function ReadFinishingOptions(recipeID)
+    local finishingType = Enum.CraftingReagentType and Enum.CraftingReagentType.Finishing
+    if not finishingType then return nil end
+    local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+    if not (ok and schematic) then return nil end
+    local options
+    for _, slot in ipairs(schematic.reagentSlotSchematics or {}) do
+        if slot.reagentType == finishingType and slot.reagents and not SlotLocked(slot, recipeID) then
+            local quantity = math.max(slot.quantityRequired or 1, 1)
+            for _, reagent in ipairs(slot.reagents) do
+                if reagent.itemID then
+                    local list = { { reagent = { itemID = reagent.itemID }, quantity = quantity,
+                        dataSlotIndex = slot.dataSlotIndex } }
+                    local okOp, op = pcall(C_TradeSkillUI.GetCraftingOperationInfo, recipeID, list, nil, false)
+                    if okOp and op then
+                        local o = { itemID = reagent.itemID, dataSlotIndex = slot.dataSlotIndex, quantity = quantity,
+                            multicraft = 0, resourcefulness = 0, ingenuity = 0,
+                            skill = (op.baseSkill or 0) + (op.bonusSkill or 0) }
+                        for _, stat in ipairs(op.bonusStats or {}) do
+                            local key = STAT_KEYS[stat.bonusStatName]
+                            if key and stat.ratingPct then o[key] = stat.ratingPct end
+                        end
+                        if not C_Item.GetItemNameByID(reagent.itemID) then
+                            C_Item.RequestLoadItemDataByID(reagent.itemID)
+                        end
+                        options = options or {}
+                        table.insert(options, o)
+                    end
+                end
+            end
+        end
+    end
+    return options
+end
+
 function addon:RefreshRecipeStats(recipeID)
     if not C_TradeSkillUI.GetCraftingOperationInfo then return end
     local ok, op = pcall(C_TradeSkillUI.GetCraftingOperationInfo, recipeID, {}, nil, false)
@@ -1345,6 +1398,7 @@ function addon:RefreshRecipeStats(recipeID)
             stats[key] = stat.ratingPct
         end
     end
+    stats.finishing = ReadFinishingOptions(recipeID)
     addon.char.recipeStats[recipeID] = stats
 
     -- Each expansion's version of a profession has its own concentration,
@@ -1415,7 +1469,14 @@ end
 -- sizes. Without stats for the recipe, or with noProcs (the worst case:
 -- no multicraft or resourcefulness), the recipe's base numbers.
 -- Returns outputPerCraft, slots ({ slot, quantity }), and the stats used.
-function addon:GetCraftModel(recipe, noProcs)
+-- With a finishing reagent worth using (ChooseFinishing): its stats, and
+-- the reagent as one more slot ({ slot, quantity, finishing = option }),
+-- so costs, plans and shopping lists all count it; then a fourth value,
+-- the choice (options and picks, for the planner). Never with noProcs (the
+-- worst case doesn't pay for a reagent) or noFinishing (what the window holds).
+local ChooseFinishing -- below, with material costs
+
+function addon:GetCraftModel(recipe, noProcs, noFinishing)
     local stats = not noProcs and recipe.recipeID and addon:StatsChar().recipeStats[recipe.recipeID]
     local base = recipe.outputQty
     local slots = {}
@@ -1426,13 +1487,21 @@ function addon:GetCraftModel(recipe, noProcs)
         return base, slots, nil
     end
 
+    local finishing = not noFinishing and stats.finishing and ChooseFinishing(recipe, stats)
+    local multicraft = finishing and finishing.multicraft or stats.multicraft
+    local resourcefulness = finishing and finishing.resourcefulness or stats.resourcefulness
     local mcExtra, resSave = GetCalibration(recipe.profession)
-    local outputPerCraft = base * (1 + stats.multicraft / 100 * mcExtra)
-    local useFactor = 1 - stats.resourcefulness / 100 * resSave
+    -- With finishing reagents tried, their own learned multicraft (ChooseFinishing)
+    local outputPerCraft = base * (1 + (finishing and finishing.extraRatio or multicraft / 100 * mcExtra))
+    local useFactor = 1 - resourcefulness / 100 * resSave
     for _, slot in ipairs(recipe.reagents) do
         table.insert(slots, { slot = slot, quantity = slot.quantity * useFactor })
     end
-    return outputPerCraft, slots, stats
+    -- Resourcefulness doesn't save finishing reagents
+    for _, pick in ipairs(finishing and finishing.picks or {}) do
+        table.insert(slots, { slot = pick.slot, quantity = pick.slot.quantity, finishing = pick.option })
+    end
+    return outputPerCraft, slots, stats, finishing
 end
 
 -- Crafting results
@@ -1554,6 +1623,32 @@ local function LogCraftResult(recipeID, resultData)
     end
 end
 
+-- A finishing reagent that raises multicraft, if the craft used one: its
+-- crafts are learned on their own, in calibration[profession].finishing
+-- [itemID] = { crafts, extraRatio (sum of extra items / normal output) }.
+-- Every craft counts, procs or not, so the average is what a craft with it
+-- makes. Bazaar Bites read as multicraft 100% but give 3 to 9 extra, not
+-- the usual amount (a CurseForge comment: about 5.17 per bite over 400;
+-- user, 2026-10-17). Returns true when the craft was counted here.
+local function FinishingCrafted(c, recipeID, recipe, reagents, extra)
+    local stats = addon.char.recipeStats[recipeID]
+    if not (stats and stats.finishing and reagents and recipe.outputQty > 0) then return false end
+    for _, entry in ipairs(reagents) do
+        local itemID = entry.reagent and entry.reagent.itemID or entry.itemID
+        for _, o in ipairs(stats.finishing) do
+            if o.itemID == itemID and o.multicraft > (stats.multicraft or 0) + 1 then
+                c.finishing = c.finishing or {}
+                local f = c.finishing[itemID] or { crafts = 0, extraRatio = 0 }
+                c.finishing[itemID] = f
+                f.crafts = f.crafts + 1
+                f.extraRatio = f.extraRatio + ((type(extra) == "number" and extra > 0) and extra or 0) / recipe.outputQty
+                return true
+            end
+        end
+    end
+    return false
+end
+
 local function OnCraftResult(resultData)
     if not currentCraftRecipeID or not resultData or not resultData.itemID then return end
     LogCraftResult(currentCraftRecipeID, resultData)
@@ -1590,9 +1685,13 @@ local function OnCraftResult(resultData)
         addon.char.calibration[recipe.profession] = c
     end
 
-    -- Multicraft: extra items beyond the recipe's normal output
+    -- Multicraft: extra items beyond the recipe's normal output. With a
+    -- finishing reagent that raises multicraft (Bazaar Bites: 100%), every
+    -- craft is counted for that reagent, procs or not, and kept out of the
+    -- ordinary numbers (FinishingCrafted)
     local extra = resultData.multicraft
-    if type(extra) == "number" and extra > 0 and recipe.outputQty > 0 then
+    local boosted = FinishingCrafted(c, currentCraftRecipeID, recipe, currentCraftReagents, extra)
+    if not boosted and type(extra) == "number" and extra > 0 and recipe.outputQty > 0 then
         c.mcProcs = c.mcProcs + 1
         c.mcExtraRatio = c.mcExtraRatio + extra / recipe.outputQty
     end
@@ -1910,7 +2009,8 @@ function addon:GetCraftPreview(tx, outputItemID)
     local base = (recipe and recipe.outputQty) or 1
     local perCraft, useFactor = base, 1
     if recipe and recipe.reagents and #recipe.reagents > 0 then
-        local made, slots = addon:GetCraftModel(recipe)
+        -- What the window has in it, not Goldsmith's finishing reagent pick
+        local made, slots = addon:GetCraftModel(recipe, false, true)
         local first = slots[1]
         perCraft = made or base
         if first and (first.slot.quantity or 0) > 0 then useFactor = first.quantity / first.slot.quantity end
@@ -2002,6 +2102,17 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTe
             end
         elseif ids[1] then
             used[ids[1]] = (used[ids[1]] or 0) + slot.quantity
+        end
+    end
+    -- Finishing and optional reagents: whatever else went in the craft.
+    -- They weren't counted: a Glitter Skewers craft with a 533g Bazaar
+    -- Bite was saved at 14g each and called a profit (user, 2026-10-17)
+    for _, entry in ipairs(usedReagents or {}) do
+        local id = (type(entry.reagent) == "table" and entry.reagent.itemID) or entry.itemID
+        if id and not slotOf[id] and (entry.quantity or 0) > 0 then
+            used[id] = (used[id] or 0) + entry.quantity
+            names[id] = C_Item.GetItemNameByID(id)
+            slotOf[id] = { id }
         end
     end
 
@@ -2324,6 +2435,125 @@ end
 function addon:GetSlotUnitCost(slot)
     local cost, source = GetSlotCost(slot)
     return cost, source
+end
+
+-- Finishing reagents: per slot, the one whose extra profit per craft beats
+-- its cost by the most, or none (user, 2026-10-17: cooking's Bazaar Bites,
+-- Earthy Garnish and Savory Anomaly). Its value per craft:
+--   extra items from its multicraft x the item's price after the AH cut
+--   + materials its resourcefulness saves x what they cost
+--   - the reagent
+-- Skill and ingenuity aren't valued yet (quality and concentration plans
+-- don't try reagents), so one that only adds those is never picked.
+-- Valued at the item's price (for quality crafts, the recipe's item), with
+-- the profession's calibrated proc sizes: a Bazaar Bites multicraft is
+-- valued as an ordinary one until crafts teach otherwise.
+-- Your pick on the plan (ui2.finishing[recipeID] = itemID, or false for
+-- none) wins. Returns { multicraft, resourcefulness, ingenuity (with the
+-- picks), picks = { { slot, option } }, options = { { option, slot, unit,
+-- value, picked } } }; cached until data changes.
+local finishingSlots = {}
+local finishingCache = addon:NewCache()
+
+-- A finishing reagent as a material slot, the same table each time (slot
+-- costs are cached by table)
+local function FinishingSlot(o)
+    local key = o.itemID .. "x" .. o.quantity
+    if finishingSlots[key] then return finishingSlots[key] end
+    local name = C_Item.GetItemNameByID(o.itemID)
+    if not name then
+        C_Item.RequestLoadItemDataByID(o.itemID)
+        return nil
+    end
+    finishingSlots[key] = { names = { name }, itemIDs = { o.itemID }, quantity = o.quantity, finishing = true }
+    return finishingSlots[key]
+end
+
+ChooseFinishing = function(recipe, stats)
+    local store = finishingCache:Get()
+    local cached = store[stats]
+    if cached ~= nil then return cached or nil end
+
+    local mcExtra, resSave, calibration = GetCalibration(recipe.profession)
+    -- Extra items per craft (times normal output) from multicraft: without a
+    -- reagent, and with one, blended with its own crafts once there are
+    -- some (FinishingCrafted), the way proc sizes are learned
+    local baseRatio = stats.multicraft / 100 * mcExtra
+    local function OptionRatio(o)
+        local prior = o.multicraft / 100 * mcExtra
+        local learned = calibration and calibration.finishing and calibration.finishing[o.itemID]
+        if learned and learned.crafts > 0 and o.multicraft > stats.multicraft + 1 then
+            return (prior * PRIOR_WEIGHT + learned.extraRatio) / (PRIOR_WEIGHT + learned.crafts), learned.crafts
+        end
+        return prior
+    end
+    local price = recipe.outputItemID and addon:GetMarketPrice(recipe.outputItemID)
+    local materials = 0
+    for _, slot in ipairs(recipe.reagents or {}) do
+        local cost = GetSlotCost(slot)
+        if cost then materials = materials + cost * slot.quantity end
+    end
+    local yours = GoldsmithDB.ui2 and GoldsmithDB.ui2.finishing and GoldsmithDB.ui2.finishing[recipe.recipeID]
+    local result = { multicraft = stats.multicraft, resourcefulness = stats.resourcefulness,
+        ingenuity = stats.ingenuity, picks = {}, options = {}, yours = yours,
+        recipeID = recipe.recipeID, base = stats, priced = price ~= nil, extraRatio = baseRatio }
+    local bySlot, order = {}, {}
+    for _, o in ipairs(stats.finishing) do
+        if not bySlot[o.dataSlotIndex] then
+            bySlot[o.dataSlotIndex] = {}
+            table.insert(order, o.dataSlotIndex)
+        end
+        local slot = FinishingSlot(o)
+        local unit = slot and GetSlotCost(slot)
+        local ratio, learnedCrafts = OptionRatio(o)
+        local extraItems = (recipe.outputQty or 1) * (ratio - baseRatio)
+        local value
+        if unit and price then
+            local saved = (o.resourcefulness - stats.resourcefulness) / 100 * resSave * materials
+            value = extraItems * price * (1 - AH_CUT) + saved - unit * o.quantity
+        end
+        local entry = { option = o, slot = slot, unit = unit, value = value, ratio = ratio,
+            extraItems = extraItems, learnedCrafts = learnedCrafts }
+        table.insert(bySlot[o.dataSlotIndex], entry)
+        table.insert(result.options, entry)
+    end
+    for _, index in ipairs(order) do
+        local pick
+        for _, entry in ipairs(bySlot[index]) do
+            if yours == entry.option.itemID and entry.slot then
+                pick = entry
+                break
+            elseif yours == nil and entry.value and entry.value > 0 and (not pick or entry.value > pick.value) then
+                pick = entry
+            end
+        end
+        if pick then
+            pick.picked = true
+            local o = pick.option
+            result.multicraft = result.multicraft + o.multicraft - stats.multicraft
+            result.resourcefulness = result.resourcefulness + o.resourcefulness - stats.resourcefulness
+            result.ingenuity = result.ingenuity + o.ingenuity - stats.ingenuity
+            result.extraRatio = result.extraRatio + pick.ratio - baseRatio
+            table.insert(result.picks, { slot = pick.slot, option = o })
+        end
+    end
+    store[stats] = result
+    return result
+end
+
+-- The finishing reagent choice for a recipe, with the crafter's stats (run
+-- in WithCharacter for someone else's), or nil when it has none
+function addon:GetFinishingChoice(recipe)
+    local stats = recipe and recipe.recipeID and addon:StatsChar().recipeStats[recipe.recipeID]
+    return stats and stats.finishing and ChooseFinishing(recipe, stats) or nil
+end
+
+-- Your pick of finishing reagent for a recipe: an item ID, false for none,
+-- or nil to let Goldsmith choose
+function addon:SetFinishingPick(recipeID, pick)
+    GoldsmithDB.ui2.finishing = GoldsmithDB.ui2.finishing or {}
+    GoldsmithDB.ui2.finishing[recipeID] = pick
+    addon:DataChanged()
 end
 
 -- Cost of the materials for one crafted item, using the craft model (your
@@ -3109,6 +3339,7 @@ function addon:DumpCraftingStats()
     end
     Print("Saved. /reload so the details are written to disk.")
 end
+
 
 function addon:InitializePricing()
     GoldsmithDB.recipes = GoldsmithDB.recipes or {}

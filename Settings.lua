@@ -397,6 +397,9 @@ end
 -- suggestions turned out (GetFollowedSummary), beside a title. Both tabs'
 -- suggestions count (MarkSuggested), so it's the same number on each.
 -- Call label:Update(hide) on refresh.
+local FOLLOWED_ON_TARGET = "|TInterface\\RaidFrame\\ReadyCheck-Ready:0|t"
+local FOLLOWED_SHORT = "|TInterface\\RaidFrame\\ReadyCheck-NotReady:0|t"
+
 function addon:FollowedLabel(parent)
     local Signed = function(c) return addon:FormatSignedMoney(c) end
     local label = CreateFrame("Frame", nil, parent)
@@ -410,41 +413,49 @@ function addon:FollowedLabel(parent)
         tooltip:AddLine("Suggestions you followed, last 7 days", 1, 1, 1)
         -- With Ctrl, like the other explanations (user, 2026-10-11)
         addon:Explain(tooltip, "Crafts of what Goldsmith suggested, made within a day and up to the number suggested (from Goldsmith or the game's window), and what they sold for.")
-        tooltip:AddDoubleLine("Crafted", tostring(f.crafted), 0.8, 0.8, 0.8, 1, 1, 1)
-        tooltip:AddDoubleLine("Sold", tostring(f.sold), 0.8, 0.8, 0.8, 1, 1, 1)
-        tooltip:AddDoubleLine("Not sold yet", tostring(f.unsold), 0.8, 0.8, 0.8, 1, 1, 1)
+        -- Compact: one line per item, a mark for how it did, and a second
+        -- line only when it fell short. Two or three lines each, with the
+        -- totals repeated, was "an eye sore" (user, 2026-10-16).
         local r, g, b = addon:Color(addon:MoneyColor(f.profit))
         tooltip:AddDoubleLine("Profit on what sold", Signed(f.profit), 0.8, 0.8, 0.8, r, g, b)
+        tooltip:AddDoubleLine("Sold", string.format("%d of %d crafted", f.sold, f.crafted), 0.8, 0.8, 0.8, 1, 1, 1)
         -- How the suggestions did: what sold against what was expected when
         -- it was crafted (user, 2026-10-11). "On target" (2026-10-13, was
         -- "paid off") also reads right for a craft expected to lose a little
         -- that lost less or made a little
         if f.checked > 0 then
-            local hr, hg, hb = addon:Color(f.heldUp == f.checked and "profit" or "text")
             tooltip:AddDoubleLine("On target", string.format("%d of %d items", f.heldUp, f.checked),
-                0.8, 0.8, 0.8, hr, hg, hb)
+                0.8, 0.8, 0.8, 1, 1, 1)
         end
         tooltip:AddLine(" ")
+        local muted = addon:Colorize("%d/%d %s", "muted")
         for i = 1, math.min(#f.items, 8) do
             local s = f.items[i]
-            local ir, ig, ib = addon:Color(addon:MoneyColor(s.profit))
-            tooltip:AddDoubleLine(string.format("%s  %d of %d %s", s.name, s.sold, s.made, s.opened and "opened" or "sold"),
-                Signed(s.profit),
-                0.9, 0.9, 0.9, ir, ig, ib)
-            if s.expected and s.sold > 0 then
-                local er, eg, eb = addon:Color(s.heldUp and "profit" or "warning")
-                tooltip:AddDoubleLine("    expected " .. Signed(s.expected), s.heldUp and "on target" or "fell short",
-                    0.6, 0.6, 0.6, er, eg, eb)
+            local mark = ""
+            if s.expected and s.sold > 0 then mark = (s.heldUp and FOLLOWED_ON_TARGET or FOLLOWED_SHORT) .. " " end
+            local right, ir, ig, ib
+            if s.sold > 0 then
+                -- White unless a loss: green on every line was too much
+                -- (user, 2026-10-16); the mark says how it did, and the
+                -- total at the top stays green
+                right = mark .. Signed(s.profit)
+                ir, ig, ib = addon:Color(s.profit < 0 and addon:MoneyColor(s.profit) or "text")
+            else
+                right = "-"
+                ir, ig, ib = addon:Color("dim")
             end
-            if s.sold < s.made and s.days >= 1 then
-                tooltip:AddLine(string.format("    %d not %s after %d day%s", s.made - s.sold, s.opened and "opened" or "sold", s.days,
-                    s.days == 1 and "" or "s"), 0.6, 0.6, 0.6)
+            tooltip:AddDoubleLine(s.name .. "  " .. string.format(muted, s.sold, s.made, s.opened and "opened" or "sold"),
+                right, 0.9, 0.9, 0.9, ir, ig, ib)
+            if s.expected and s.sold > 0 and not s.heldUp then
+                local er, eg, eb = addon:Color("warning")
+                tooltip:AddLine("    fell short: expected " .. Signed(s.expected), er, eg, eb)
             end
         end
         -- One label to a line, easier to read (user, 2026-10-11)
+        addon:Explain(tooltip, "21/37 sold: of the 37 you made, 21 have sold. Profit is on those.")
+        addon:Explain(tooltip, FOLLOWED_ON_TARGET .. " On target: its sales made at least 80% of the expected profit (or, when a loss was expected, lost no more than that).")
+        addon:Explain(tooltip, FOLLOWED_SHORT .. " Fell short: its sales made less than that.")
         addon:Explain(tooltip, "Expected: the AH price when you crafted it, after the AH cut, minus the craft cost.")
-        addon:Explain(tooltip, "On target: its sales made at least 80% of the expected profit (or, when a loss was expected, lost no more than that).")
-        addon:Explain(tooltip, "Fell short: its sales made less than that.")
         addon:Explain(tooltip, "Counted for crafts from Oct 11, 2026 on.")
     end, "ANCHOR_BOTTOM")
     function label:Update(hide)
@@ -487,11 +498,11 @@ function addon:OpenKeybindings()
     local ok = Settings and Settings.OpenToCategory and Settings.KEYBINDINGS_CATEGORY_ID
         and pcall(Settings.OpenToCategory, Settings.KEYBINDINGS_CATEGORY_ID)
     if not ok then
-        print("|cFF00FF00[Goldsmith]|r Set a key in Options > Keybindings > AddOns > Goldsmith.")
+        print("|cFF00FF00[Goldsmith]|r Set a key in Options > Keybindings > Goldsmith.")
         return
     end
     if addon.window then addon.window:Hide() end
-    print("|cFF00FF00[Goldsmith]|r Scroll down to AddOns > Goldsmith and pick a key for \"Show or hide Goldsmith\".")
+    print("|cFF00FF00[Goldsmith]|r Scroll down to Goldsmith and pick a key for \"Show or hide the window\".")
 end
 
 -- Panel
@@ -619,7 +630,7 @@ local HELP = {
     showMinimap = {
         "Minimap button",
         "The Goldsmith button on the edge of the minimap: click to show or hide Goldsmith, right-click for these settings, drag to move it.",
-        "Other ways to open Goldsmith: /gsm, a key (Options > Keybindings > AddOns > Goldsmith), or the addons button by the minimap.",
+        "Other ways to open Goldsmith: /gsm, a key (Options > Keybindings > Goldsmith), or the addons button by the minimap.",
     },
     craftCost = {
         "Cost in the profession window",
@@ -628,8 +639,9 @@ local HELP = {
     },
     keybind = {
         "Key to open Goldsmith",
-        "Set key opens the game's Keybindings. Goldsmith is under AddOns, near the bottom: click the box next to Show or hide Goldsmith and press the key you want.",
+        "Set key opens the game's Keybindings. Goldsmith has its own section, near the bottom: click the box next to Show or hide the window and press the key you want.",
         "Goldsmith closes while you do it; press your new key to bring it back.",
+        "Two more keys are there: Craft next in the queue, and Open hovered item (hover an item in your bags, the AH or a chat link and press it for the item's page).",
     },
 }
 

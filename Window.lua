@@ -97,7 +97,8 @@ end
 
 -- Auctionator updates after full scans and after any AH search, so the
 -- text says which was last: "Auctionator full scan at 11:51", or "AH search
--- at 11:13, full scan 2 days ago". Also true if the full scan was today.
+-- at 11:13" over "Full scan 2 days ago" (its own line rather than a ragged
+-- wrap, user 2026-10-16). Also true if the full scan was today.
 local function AuctionatorText(scan)
     local full = GoldsmithDB.lastFullScan
     local fresh = full and date("%Y-%m-%d", full) == date("%Y-%m-%d")
@@ -105,7 +106,7 @@ local function AuctionatorText(scan)
         return "Prices: Auctionator full scan " .. When(full), fresh
     end
     return "Prices: AH search " .. When(scan)
-        .. (full and (", full scan " .. When(full)) or ", no full scan yet"), fresh
+        .. (full and ("\nFull scan " .. When(full)) or "\nNo full scan yet"), fresh
 end
 
 local function PriceSourceText()
@@ -597,26 +598,35 @@ function addon:CreateWindow()
     -- state.loading:Begin(part) before the work for a part (a frame) and
     -- :Done(part) once it's filled in; views without ownLoading are
     -- covered whole. The "Loading" covers (UI.Loading) only show once the
-    -- work has had to wait for a frame, so a quick refresh never flickers.
+    -- work has run LOADING_DELAY: showing them as soon as it waited a frame
+    -- made 2-3 frame refreshes flash a cover too quick to read, which looked
+    -- glitchy (user, 2026-10-16). They fade in and out (Widgets.lua).
+    local LOADING_DELAY = 0.25
     local function HideLoading(part)
-        if part.goldsmithLoading then part.goldsmithLoading:Hide() end
+        if part.goldsmithLoading then part.goldsmithLoading:FadeOut() end
     end
     local function NewLoading(previous)
         -- Still loading from the refresh this replaces: keep showing it
         local loading = { pending = {}, slow = previous ~= nil and previous.slow }
         function loading:Begin(part)
             self.pending[part] = true
-            if self.slow then UI.Loading(part):Show() end
+            if self.slow then UI.Loading(part):FadeIn() end
         end
         function loading:Done(part)
             self.pending[part] = nil
             HideLoading(part)
         end
         function loading:ShowAll()
-            self.slow = true
-            for part in pairs(self.pending) do UI.Loading(part):Show() end
+            if self.slow or self.waiting then return end
+            self.waiting = true
+            C_Timer.After(LOADING_DELAY, function()
+                if self.finished then return end
+                self.slow = true
+                for part in pairs(self.pending) do UI.Loading(part):FadeIn() end
+            end)
         end
         function loading:HideAll()
+            self.finished = true
             for part in pairs(self.pending) do HideLoading(part) end
             self.pending = {}
         end
@@ -654,6 +664,8 @@ function addon:CreateWindow()
         -- Worked out over as many frames as it takes (addon:RunWork); a
         -- newer refresh stops this one
         local previous = loading
+        -- Replaced: its delayed covers mustn't show after this point
+        if previous then previous.finished = true end
         local this = NewLoading(previous)
         loading = this
         local state = {

@@ -20,12 +20,13 @@ local CharName = function(key) return addon.QueueCharName(key) end
 
 local COLUMNS = {
     { key = "item", label = "Item" },
-    { key = "make", label = "Make", width = 70, justify = "RIGHT" },
+    { key = "make", label = "Make", width = 56, justify = "RIGHT" },
     { key = "crafts", label = "Crafts", width = 52, justify = "RIGHT" },
-    { key = "conc", label = "Conc", width = 64, gap = 16 },
+    { key = "conc", label = "Conc", width = 52, gap = 16 },
     { key = "cost", label = "Cost", width = 84, justify = "RIGHT" },
     { key = "profit", label = "Profit", width = 84, justify = "RIGHT" },
-    { key = "next", label = "Next", width = 150, gap = 24 },
+    -- Wide enough for "needs Scribe's Drafting Table" (user, 2026-10-16)
+    { key = "next", label = "Next", width = 230, gap = 24 },
 }
 
 local view
@@ -347,7 +348,7 @@ local function Create(parent)
     view.craft:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderGold")) end)
     UI.SetTooltip(view.craft, function(tooltip)
         tooltip:AddLine("Craft next", 1, 1, 1)
-        addon:Explain(tooltip, "One step per click: mill, make materials, then the craft, down the queue. Crafts for the profession that's open go first. The same button sits next to the profession window, and you can set a key for it (Options > Keybindings > AddOns > Goldsmith).",
+        addon:Explain(tooltip, "One step per click: mill, make materials, then the craft, down the queue. Crafts for the profession that's open go first. The same button sits next to the profession window, and you can set a key for it (Options > Keybindings > Goldsmith).",
             0.8, 0.8, 0.8, true)
         local row = view.next
         if row and row.state then

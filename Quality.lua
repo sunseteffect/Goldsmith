@@ -682,6 +682,14 @@ function addon:GetCraftReagents(recipeID, scenario, held)
             needs[only] = (needs[only] or 0) + slot.quantityRequired
         end
     end
+    -- The finishing reagent the plan counts (GetCraftModel), so the craft
+    -- gets what was paid for
+    local choice = addon:GetFinishingChoice(GoldsmithDB.recipes[recipeID])
+    for _, pick in ipairs(choice and choice.picks or {}) do
+        local o = pick.option
+        table.insert(list, { reagent = { itemID = o.itemID }, quantity = o.quantity, dataSlotIndex = o.dataSlotIndex })
+        needs[o.itemID] = (needs[o.itemID] or 0) + o.quantity
+    end
     return list, needs, swapped
 end
 

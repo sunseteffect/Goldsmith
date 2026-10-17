@@ -1,9 +1,13 @@
 <Bindings>
-    <!-- Options > Keybindings > AddOns > Goldsmith. The game loads this file itself. -->
-    <Binding name="GOLDSMITH_TOGGLE" header="GOLDSMITH" category="ADDONS">
+    <!-- Options > Keybindings > Goldsmith: its own section, named by the
+         category (user, 2026-10-16). The game loads this file itself. -->
+    <Binding name="GOLDSMITH_TOGGLE" category="Goldsmith">
         Goldsmith:ToggleWindow()
     </Binding>
-    <Binding name="GOLDSMITH_CRAFT_NEXT" category="ADDONS">
+    <Binding name="GOLDSMITH_CRAFT_NEXT" category="Goldsmith">
         Goldsmith:CraftNext()
+    </Binding>
+    <Binding name="GOLDSMITH_OPEN_ITEM" category="Goldsmith">
+        Goldsmith:OpenHoveredItem()
     </Binding>
 </Bindings>

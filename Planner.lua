@@ -566,7 +566,9 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
 
     -- expectedOutput: what `crafts` whole crafts should make on average
     local plan = { recipe = recipe, quantity = quantity, crafts = crafts, nodes = {}, cost = 0, complete = true,
-                   expectedOutput = crafts * outputQty }
+                   expectedOutput = crafts * outputQty,
+                   -- Finishing reagents tried, and the pick (for the planner)
+                   finishing = addon:GetFinishingChoice(recipe) }
     for _, s in ipairs(slots) do
         local parts = TopSlotParts(s.slot, tier, ctx.memo, recipe)
         -- Gold you hold beyond what this slot's own gold part needs can
@@ -589,6 +591,9 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
             local gold = choice.itemID ~= highID and spareGold or nil
             local node = BuildNode(choice.itemID, choice.name, PartNeed(s, part.units, crafts), 1, ctx, choice, gold)
             node.use = PartUse(s, part.units, crafts)
+            -- A finishing reagent (GetCraftModel): the row says so, and its
+            -- menu picks another or none
+            node.finishing, node.finishingChoice = s.finishing, s.finishing and plan.finishing
             table.insert(plan.nodes, node)
             if node.best then
                 plan.cost = plan.cost + node.best.unit * node.use

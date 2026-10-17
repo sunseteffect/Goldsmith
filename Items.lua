@@ -56,6 +56,43 @@ function addon:OpenItem(name, itemID)
     addon:ShowTab("items")
 end
 
+-- The item a game tooltip shows (bags, the AH, a chat link), for the
+-- "Open the hovered item" key (user, 2026-10-16). Kept from the item
+-- tooltip's own data and dropped when the tooltip clears, so a tooltip
+-- that moved on to a spell or a unit doesn't open the last item.
+local tooltipItem = {}
+
+local function TrackTooltip(tooltip)
+    if tooltip.HookScript then
+        tooltip:HookScript("OnTooltipCleared", function(self) tooltipItem[self] = nil end)
+        tooltip:HookScript("OnHide", function(self) tooltipItem[self] = nil end)
+    end
+end
+TrackTooltip(GameTooltip)
+TrackTooltip(ItemRefTooltip)
+
+if TooltipDataProcessor and Enum.TooltipDataType then
+    TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip, data)
+        if tooltip ~= GameTooltip and tooltip ~= ItemRefTooltip then return end
+        local id = data and data.id
+        -- Midnight: never keep a value the game hides from addons
+        if issecretvalue and issecretvalue(id) then return end
+        if type(id) == "number" then tooltipItem[tooltip] = id end
+    end)
+end
+
+-- The hover first; an open chat link's tooltip when nothing is hovered
+function addon:OpenHoveredItem()
+    for _, tooltip in ipairs({ GameTooltip, ItemRefTooltip }) do
+        local id = tooltip and tooltip:IsShown() and tooltipItem[tooltip]
+        if id then
+            addon:OpenItem(nil, id)
+            return
+        end
+    end
+    addon:Notify("info", "Hover an item first, in your bags, the AH or a chat link.")
+end
+
 -- Opens the Items landing page. opts.inBags shows what you hold;
 -- opts.cheap shows cheap materials.
 function addon:OpenItems(opts)
@@ -153,8 +190,13 @@ local function CreateBoard(parent, def)
         row.name = UI.Text(row, "body")
         row.name:SetPoint("LEFT", 26, 0)
         row.name:SetPoint("RIGHT", row.value, "LEFT", -10, 0)
-        row:SetScript("OnClick", function(self) addon:OpenItem(self.item.name, self.item.itemID) end)
+        -- The row can lose its item under the mouse when the board refills
+        -- (a hover redraw then found nothing)
+        row:SetScript("OnClick", function(self)
+            if self.item then addon:OpenItem(self.item.name, self.item.itemID) end
+        end)
         UI.SetTooltip(row, function(tooltip, self)
+            if not self.item then return end
             tooltip:AddLine(ItemText(self.item.name, self.item.itemID), 1, 1, 1)
             addon:AddItemDescription(tooltip, self.item.itemID)
             def.tooltip(tooltip, self.item)
@@ -309,6 +351,7 @@ local function CheapTooltip(tooltip, item)
         addon:Explain(tooltip, "A herb you mill into pigments.", 0.6, 0.6, 0.6, true)
     end
     addon:ClickHint(tooltip, "Click to open its page: price history and more.")
+    addon:ShiftClickHint(tooltip, "Shift-click to search the AH for it (or link it in chat)")
 end
 
 -- Sold per day and sale rate for list rows, looked up once per refresh
@@ -442,6 +485,7 @@ local function StockTooltip(tooltip, item)
     tooltip:AddLine(item.crafted and "Valued at what your latest crafts cost you."
         or "Valued at what you paid, or the AH price when there's no cost.", 0.6, 0.6, 0.6, true)
     addon:ClickHint(tooltip, "Click to open its page.")
+    addon:ShiftClickHint(tooltip, "Shift-click to search the AH for it (or link it in chat)")
 end
 
 -- Item page
@@ -499,17 +543,24 @@ local function CreatePage(parent)
     page.sub = UI.Text(page, "small", "muted")
     page.sub:SetPoint("TOPLEFT", page.name, "BOTTOMLEFT", 0, -4)
     page.sub:SetPoint("RIGHT", page, "RIGHT", -140, 0)
-    -- Hovering the icon or name: what the item does, as everywhere else
-    local titleHover = CreateFrame("Frame", nil, page)
+    -- Hovering the icon or name: what the item does, as everywhere else.
+    -- Shift-click searches the AH for it (or links it in chat), like the
+    -- planner's title (user, 2026-10-16)
+    local titleHover = CreateFrame("Button", nil, page)
     titleHover:SetPoint("TOPLEFT", page.icon, "TOPLEFT")
     titleHover:SetPoint("BOTTOMLEFT", page.icon, "BOTTOMLEFT")
     titleHover:SetPoint("RIGHT", page.name, "RIGHT", 0, 0)
     titleHover:EnableMouse(true)
+    titleHover:SetScript("OnClick", function()
+        local d = page.details
+        if d and IsShiftKeyDown() then addon:ShiftClickItem(d.itemID, d.name) end
+    end)
     UI.SetTooltip(titleHover, function(tooltip)
         local d = page.details
         if not d then return end
         tooltip:AddLine(page.name:GetText() or d.name or "", 1, 1, 1)
         addon:AddItemDescription(tooltip, d.itemID)
+        addon:ShiftClickHint(tooltip, "Shift-click to search the AH for it (or link it in chat)", true)
     end)
     page.titleHover = titleHover
     page.craft = UI.Button(page, "Craft this", 120, 28, function()
@@ -1003,9 +1054,14 @@ local function Create(parent)
                 tooltip:AddLine(ItemText(item.name, item.itemID), 1, 1, 1)
                 addon:AddItemDescription(tooltip, item.itemID)
                 addon:ClickHint(tooltip, "Click to open its page.", true)
+                addon:ShiftClickHint(tooltip, "Shift-click to search the AH for it (or link it in chat)", true)
             end
         end,
-        onClick = function(item) addon:OpenItem(item.name, item.itemID) end,
+        -- Shift-click searches the AH for it, as on the item's page
+        onClick = function(item)
+            if IsShiftKeyDown() and addon:ShiftClickItem(item.itemID, item.name) then return end
+            addon:OpenItem(item.name, item.itemID)
+        end,
         onSort = function(key)
             SetSort(view.listMode, key)
             view.list:ScrollToTop()

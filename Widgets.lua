@@ -45,6 +45,7 @@ end
 -- nothing half-loaded gets clicked. One per frame: UI.Loading(frame)
 -- makes it the first time and returns the same one after.
 local DOT_SECONDS = 0.35
+local FADE_SECONDS = 0.15
 function UI.Loading(parent)
     if parent.goldsmithLoading then return parent.goldsmithLoading end
     local cover = CreateFrame("Frame", nil, parent, "BackdropTemplate")
@@ -58,19 +59,46 @@ function UI.Loading(parent)
     -- Anchored left of centre so the dots grow without moving the word
     text:SetPoint("LEFT", cover, "CENTER", -28, 0)
     local dots, elapsed = 1, 0
+    local fading -- "in", "out" or nil
     local function Draw() text:SetText("Loading" .. string.rep(".", dots)) end
     cover:SetScript("OnShow", function()
         dots, elapsed = 1, 0
         Draw()
     end)
-    cover:SetScript("OnUpdate", function(_, delta)
+    cover:SetScript("OnUpdate", function(self, delta)
         elapsed = elapsed + delta
         if elapsed >= DOT_SECONDS then
             elapsed = 0
             dots = dots % 3 + 1
             Draw()
         end
+        if fading == "in" then
+            local a = math.min(self:GetAlpha() + delta / FADE_SECONDS, 1)
+            self:SetAlpha(a)
+            if a >= 1 then fading = nil end
+        elseif fading == "out" then
+            local a = self:GetAlpha() - delta / FADE_SECONDS
+            if a <= 0 then
+                fading = nil
+                self:Hide()
+            else
+                self:SetAlpha(a)
+            end
+        end
     end)
+    -- Fades in and out rather than popping: a cover that blinked on and
+    -- off looked glitchy (user, 2026-10-16)
+    function cover:FadeIn()
+        if not self:IsShown() then self:SetAlpha(0) self:Show() end
+        self:EnableMouse(true)
+        fading = "in"
+    end
+    function cover:FadeOut()
+        if not self:IsShown() then return end
+        -- Clicks go through to the finished screen while it fades
+        self:EnableMouse(false)
+        fading = "out"
+    end
     Draw()
     cover:Hide()
     parent.goldsmithLoading = cover

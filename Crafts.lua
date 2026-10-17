@@ -600,7 +600,67 @@ local function CraftConcValue(node)
     return row.concentrationValue, perItem, nil
 end
 
+-- Finishing reagents (Pricing.lua ChooseFinishing): the one a plan uses is
+-- a material row; with none worth it, a row says so, so the choice can
+-- still be seen and changed (user, 2026-10-17)
+local function FinishingName(entry)
+    return entry.slot and entry.slot.names[1] or C_Item.GetItemNameByID(entry.option.itemID) or "a finishing reagent"
+end
+
+-- What one does: "multicraft 2.7% to 100.0%"
+local function FinishingEffect(choice, o)
+    local parts = {}
+    for _, key in ipairs({ "multicraft", "resourcefulness", "ingenuity" }) do
+        local from, to = choice.base[key] or 0, o[key] or 0
+        if math.abs(to - from) > 0.05 then
+            table.insert(parts, string.format("%s %.1f%% to %.1f%%", key, from, to))
+        end
+    end
+    return #parts > 0 and table.concat(parts, ", ") or "no change to multicraft or resourcefulness"
+end
+
+local function BestFinishing(choice)
+    local best
+    for _, e in ipairs(choice.options) do
+        if e.value and e.value > 0 and (not best or e.value > best.value) then best = e end
+    end
+    return best
+end
+
+local function FinishingMenu(choice)
+    if not (choice and MenuUtil and MenuUtil.CreateContextMenu) then return end
+    local function Pick(value)
+        addon:SetFinishingPick(choice.recipeID, value)
+        addon.Refresh()
+    end
+    MenuUtil.CreateContextMenu(UIParent, function(_, root)
+        root:CreateTitle("Finishing reagent")
+        local best = BestFinishing(choice)
+        root:CreateRadio(string.format("Goldsmith's pick (%s)", best and FinishingName(best) or "none, not worth it"),
+            function() return choice.yours == nil end, function() Pick(nil) end)
+        root:CreateRadio("None", function() return choice.yours == false end, function() Pick(false) end)
+        for _, e in ipairs(choice.options) do
+            local itemID = e.option.itemID
+            root:CreateRadio(string.format("%s (%s per craft)", FinishingName(e), e.value and Signed(e.value) or "no price"),
+                function() return choice.yours == itemID end, function() Pick(itemID) end)
+        end
+    end)
+end
+
+local function FillFinishingRow(row, node)
+    local cells, choice = row.cells, node.finishingChoice
+    cells.item:SetText("Finishing reagent: " .. addon:Colorize(choice.yours == false and "none (your pick)"
+        or "none, not worth it here", "muted"))
+    for _, key in ipairs({ "need", "have", "each", "total" }) do
+        cells[key]:SetText("-")
+        cells[key]:SetTextColor(addon:Color("dim"))
+    end
+    cells.source:SetText("None")
+    cells.source:SetTextColor(addon:Color("muted"))
+end
+
 local function FillPlanRow(row, node)
+    if node.finishingRow then return FillFinishingRow(row, node) end
     local cells = row.cells
     local indent = string.rep("    ", node.depth - 1) .. (node.depth > 1 and "> " or "")
     local quality = node.qualityTier and (addon:TierIconText(node.qualityTier, node.tierCount or 2) .. " ") or ""
@@ -633,6 +693,10 @@ local function FillPlanRow(row, node)
         extra = addon:Colorize("  · ", "dim") .. addon:Colorize(string.format("%s has %s concentration, a craft needs %d",
             node.concNote.name, node.concNote.available and tostring(node.concNote.available) or "too little",
             node.concNote.perCraft), "warning")
+    end
+    if node.finishing and node.finishingChoice then
+        extra = extra .. addon:Colorize("  · ", "dim") .. addon:Colorize(node.finishingChoice.yours
+            and "finishing, your pick" or "finishing", "gold")
     end
     cells.item:SetText(indent .. quality .. node.name .. extra)
     cells.need:SetText(Whole(node.need))
@@ -670,7 +734,37 @@ local function FillPlanRow(row, node)
 end
 
 -- Every way to get the material, the cheapest marked, and why
+-- Every finishing reagent tried and what each earns per craft
+local function FinishingTooltip(tooltip, choice)
+    tooltip:AddLine(" ")
+    tooltip:AddLine("Finishing reagents, per craft", 1, 1, 1)
+    for _, e in ipairs(choice.options) do
+        local r, g, b = addon:Color(e.value and addon:MoneyColor(e.value) or "dim")
+        tooltip:AddDoubleLine(FinishingName(e) .. (e.picked and " (used)" or ""),
+            e.value and Signed(e.value) or "no price", 0.8, 0.8, 0.8, r, g, b)
+        addon:Explain(tooltip, "    " .. FinishingEffect(choice, e.option)
+            .. (e.unit and (", costs " .. Money(e.unit * e.option.quantity)) or ""))
+        -- Learned from your crafts with it (Pricing.lua FinishingCrafted):
+        -- on the line itself, not only with Ctrl
+        if e.learnedCrafts then
+            tooltip:AddLine(string.format("    about %.1f more items a craft, from %d of your crafts with it",
+                e.extraItems, e.learnedCrafts), 0.6, 0.6, 0.6)
+        end
+    end
+    if not choice.priced then
+        Note(tooltip, "No AH price for what this makes, so none is used: its extra items can't be valued.", "warning")
+    end
+    Why(tooltip, "Per craft: the extra items its multicraft makes and the materials its resourcefulness saves, minus what it costs. Its multicrafts are counted as ordinary ones until your crafts show otherwise.")
+    if choice.yours ~= nil then Note(tooltip, "Your pick. Right-click to change it.") end
+end
+
 local function PlanTooltip(tooltip, node)
+    if node.finishingRow then
+        tooltip:AddLine("Finishing reagent: none", 1, 1, 1)
+        FinishingTooltip(tooltip, node.finishingChoice)
+        addon:ClickHint(tooltip, "Click to choose a finishing reagent", true)
+        return
+    end
     local o = node.options
     tooltip:AddLine(node.name, 1, 1, 1)
     addon:AddItemDescription(tooltip, node.itemID)
@@ -775,6 +869,13 @@ local function PlanTooltip(tooltip, node)
     if o.override and o.cheapest and node.best ~= o.cheapest then
         Note(tooltip, string.format("Your choice (%s) costs %s more here", node.best.verb or node.best.method,
             Money((node.best.unit - o.cheapest.unit) * node.need)), "warning")
+    end
+    if node.finishing and node.finishingChoice then
+        FinishingTooltip(tooltip, node.finishingChoice)
+        addon:ClickHint(tooltip, "Click for its item page")
+        addon:RightClickHint(tooltip, "Right-click to use another finishing reagent, or none")
+        addon:ShiftClickHint(tooltip, "Shift-click to search the AH for it (or link it in chat)")
+        return
     end
     addon:ClickHint(tooltip, "Click for its item page")
     addon:RightClickHint(tooltip, "Right-click to choose how to get it")
@@ -894,7 +995,13 @@ end
 -- Opens the planner for a craft. info is a Crafts row, tier row or
 -- concentration plan row; charKey whose stats to use; quantity optional.
 -- returnTab: where Back goes (e.g. "queue"), else the Crafts list.
+-- selectedRecipeID: the recipe Goldsmith last picked in the profession
+-- window (see the end of SyncProfessionWindow); opening a plan picks it
+-- again even if it's the same one.
+local selectedRecipeID
+
 function addon:OpenCraftPlan(recipe, info, charKey, quantity, returnTab, crafts)
+    selectedRecipeID = nil
     pending = {
         crafts = crafts,
         plan = {
@@ -997,13 +1104,23 @@ local function SyncProfessionWindow(recipeID, state)
     local shown = form.GetRecipeInfo and form:GetRecipeInfo()
     if shown and shown.recipeID == recipeID then
         pcall(Apply)
-    else
+    elseif recipeID ~= selectedRecipeID then
         -- Picking the recipe sets up a fresh form; fill it in once that's
         -- done, so the window's own defaults don't replace the plan's
+        selectedRecipeID = recipeID
         pcall(page.SelectRecipe, page, info)
         C_Timer.After(0.1, function() pcall(Apply) end)
     end
+    -- Else the player moved to another recipe after Goldsmith picked this
+    -- one: leave the window alone. Picking it again on every change of
+    -- materials or count expanded the categories they'd collapsed (a
+    -- friend's report, 2026-10-16)
 end
+
+-- Picked again after the profession closes and opens
+local selectedFrame = CreateFrame("Frame")
+selectedFrame:RegisterEvent("TRADE_SKILL_CLOSE")
+selectedFrame:SetScript("OnEvent", function() selectedRecipeID = nil end)
 
 -- After "Open <profession>": opening takes a moment, so check a few times
 -- and update the plan once it's open (which shows the plan in the window,
@@ -1600,7 +1717,9 @@ local function CreatePlanScreen(parent)
         fill = FillPlanRow,
         tooltip = PlanTooltip,
         onClick = function(node, button)
-            if button == "RightButton" then
+            if node.finishingRow or (button == "RightButton" and node.finishing and node.finishingChoice) then
+                FinishingMenu(node.finishingChoice)
+            elseif button == "RightButton" then
                 PlanMenu(node)
             elseif IsShiftKeyDown() and addon:ShiftClickItem(node.itemID, node.name) then
                 -- Into the AH search or chat
@@ -2166,6 +2285,12 @@ local function CreatePlanScreen(parent)
         end
         screen.current = plan
         local nodes = addon:FlattenPlan(plan)
+        -- Finishing reagents tried but none used: a row says so
+        local finishing = plan.finishing
+        if finishing and #finishing.options > 0 and #finishing.picks == 0 then
+            table.insert(nodes, { finishingRow = true, finishingChoice = finishing, depth = 1,
+                name = "Finishing reagent", need = 0, have = 0, toGet = 0 })
+        end
         screen.list:SetItems(nodes)
         screen.crafts:SetFormattedText("about %.1f made", plan.expectedOutput)
         if concLimit and concLimit.crafts > 0 then
