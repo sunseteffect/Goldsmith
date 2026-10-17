@@ -38,7 +38,7 @@ Repeat step 2 on each alt with professions.
 - `/gsm setup`: show the getting started checklist again
 - `/gsm report`: copy a bug report to paste into a GitHub issue
 
-You can also set keys for opening Goldsmith and for Craft next in the game's Key Bindings, under AddOns.
+You can also set keys for opening Goldsmith and for Craft next in the game's Key Bindings, in their own Goldsmith section.
 
 ## Good to know
 - Goldsmith never crafts, buys or posts on its own. Every craft is one press of a button or key.
@@ -46,7 +46,7 @@ You can also set keys for opening Goldsmith and for Craft next in the game's Key
 
 ## Support and feedback
 - Found a bug or have an idea? [Leave a comment on CurseForge](https://www.curseforge.com/wow/addons/goldsmith-crafting-profit-planner/comments), or [open an issue on GitHub](https://github.com/sunseteffect/Goldsmith/issues) if you use it. In game, Settings > Support and feedback has both links and a Copy bug report button that gathers the details for you.
-- Goldsmith is free. If it makes you gold and you'd like to say thanks, you can [buy me a coffee on Ko-fi](https://ko-fi.com/sunseteffect).
+- Goldsmith is free. If it makes you gold and you'd like to say thanks, you can [buy the goldsmith a mana potion on Ko-fi](https://ko-fi.com/sunseteffect).
 
 ## License
 All rights reserved. You're welcome to use Goldsmith, read the code, report bugs and suggest changes; copying or republishing it needs permission. See [LICENSE](LICENSE).
