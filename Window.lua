@@ -4,7 +4,7 @@ local UI = addon.UI
 -- The window
 --
 -- A header (title, profession, date and expansion filters, where prices
--- come from, close), six tabs with Settings at their right end, and the
+-- come from, close), seven tabs with Settings at their right end, and the
 -- tab's screen below. Each screen
 -- is a view registered with addon:RegisterView; the window creates it the
 -- first time its tab is opened and refreshes it when shown or when data
@@ -30,6 +30,7 @@ local TABS = {
     { key = "items", label = "Items" },
     { key = "history", label = "History" },
     { key = "characters", label = "Characters" },
+    { key = "stats", label = "Stats" },
 }
 
 -- Views: key -> { create = function(parent) -> view, refresh = function(view, state),
@@ -568,7 +569,7 @@ function addon:CreateWindow()
     -- isn't filtered by it), then the tab's own (view.filters). Dates and
     -- expansions aren't counted: they're always set to something and the
     -- header shows them.
-    local UNFILTERED_BY_PROFESSION = { queue = true }
+    local UNFILTERED_BY_PROFESSION = { queue = true, stats = true }
     ActiveFilters = function()
         local list = {}
         if ui.profession ~= "All" and not UNFILTERED_BY_PROFESSION[ui.tab] then

@@ -1585,7 +1585,7 @@ local function GetOrderTerms(recipeID)
     local rewards = GetOrderRewards(order)
     return {
         commission = math.max((order.tipAmount or 0) - (order.consortiumCut or 0), 0),
-        tip = order.tipAmount, cut = order.consortiumCut,
+        tip = order.tipAmount, cut = order.consortiumCut, orderType = order.orderType,
         provided = provided,
         rewards = rewards,
         reagents = PlainCopy(order.reagents, 4),
@@ -1617,10 +1617,13 @@ local function LogCraftResult(recipeID, resultData)
     local entry = CopyForLog(resultData)
     entry.time = time()
     entry.recipeID = recipeID
+    entry.char = addon.charKey
     table.insert(GoldsmithDB.craftLog, entry)
     while #GoldsmithDB.craftLog > CRAFT_LOG_SIZE do
         table.remove(GoldsmithDB.craftLog, 1)
     end
+    -- Added to the lifetime stats now, before it can drop off (Lifetime.lua)
+    if addon.LifetimeCatchUp then addon:LifetimeCatchUp() end
 end
 
 -- A finishing reagent that raises multicraft, if the craft used one: its
@@ -1753,6 +1756,7 @@ local function AddOrderCraft(lot)
     while #GoldsmithDB.orderCrafts > ORDER_CRAFT_LIMIT do
         table.remove(GoldsmithDB.orderCrafts, 1)
     end
+    if addon.LifetimeCatchUp then addon:LifetimeCatchUp() end
 end
 
 -- Moves a craft recorded before orders were recognised to the order crafts
@@ -2176,6 +2180,8 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTe
             -- What the order paid (copper), when the game reported it
             lot.commission = orderTerms.commission
             lot.tip, lot.cut = orderTerms.tip, orderTerms.cut
+            -- Patron (NPC) or a player's order (Lifetime.lua counts them apart)
+            lot.orderType = orderTerms.orderType
             local rewardsValue = ValueRewards(orderTerms.rewards)
             lot.rewards = #orderTerms.rewards > 0 and orderTerms.rewards or nil
             lot.rewardsValue = rewardsValue > 0 and rewardsValue or nil

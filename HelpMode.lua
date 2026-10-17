@@ -254,6 +254,20 @@ TAB_PARTS.characters = function(list)
         view.followed)
 end
 
+TAB_PARTS.stats = function(list)
+    local view = Screen("stats")
+    if not view then return end
+    Add(list, "Goldsmith title",
+        "Earned by lifetime profit, from Apprentice up. Hover it for every title and what it takes.",
+        view.tiles[1])
+    Add(list, "Share in chat",
+        "Writes your title and best numbers in the chat box. Press Enter to send it to friends or your guild.",
+        view.share)
+    Add(list, "Lifetime stats",
+        "Everything Goldsmith has recorded, on every character and profession, for all time. The filters at the top don't change it. Hover any line for details.",
+        view.left[1], view.right[1])
+end
+
 local function Collect()
     local list = {}
     HeaderParts(list)

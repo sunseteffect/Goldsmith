@@ -414,7 +414,14 @@ function addon:TrimHistory()
     local before = HistoryCutoff(addon:Setting("keepDays"))
     if not before then return 0 end
     local keep = PurchasesInUse()
-    local removed = addon.ledger:trim(before, function(e) return keep[e] end)
+    -- What goes is added to the lifetime stats first (Lifetime.lua), so
+    -- their totals don't drop
+    local going = {}
+    local removed = addon.ledger:trim(before, function(e)
+        if not keep[e] then going[#going + 1] = e end
+        return keep[e]
+    end)
+    if addon.LifetimeTrimmed then addon:LifetimeTrimmed(going) end
     -- Gathered materials too, except lots still covering what you hold
     local gatheredRemoved = addon:TrimGathered(before, addon:GatheredInUse({}))
 

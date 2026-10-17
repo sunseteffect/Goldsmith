@@ -517,6 +517,7 @@ StaticPopupDialogs["GOLDSMITH_RESET"] = {
     button2 = NO,
     OnAccept = function()
         addon.ledger:clear()
+        if addon.LifetimeLedgerCleared then addon:LifetimeLedgerCleared() end
         Print("All transactions deleted.")
         if addon.Refresh then addon.Refresh() end
     end,
