@@ -1684,15 +1684,24 @@ local function CreatePlanScreen(parent)
     makeLabel:SetText("Crafts")
     screen.qty = UI.NumberBox(screen, 70, function(crafts)
         if screen.plan and crafts and crafts > 0 then ui.planCrafts[screen.plan.recipe.recipeID] = crafts end
+        screen.askedCrafts = nil
         screen.allMade = nil
         screen:Update()
     end)
     screen.qty:SetPoint("LEFT", makeLabel, "RIGHT", 10, 0)
 
-    -- Items for the crafts in the box (what they're sure to make)
+    -- When concentration covers fewer crafts than asked for, the box shows
+    -- what will be crafted and askedCrafts keeps the number asked for: the
+    -- box said 2 while the plan made 1 (user, 2026-10-18; it used to keep
+    -- your number). Typing a number clears it.
+    function screen:AskedCrafts()
+        return screen.askedCrafts or tonumber(screen.qty:GetText()) or 0
+    end
+
+    -- Items for the crafts asked for (what they're sure to make)
     function screen:PlannedItems(crafts)
         local p = screen.plan
-        crafts = crafts or tonumber(screen.qty:GetText()) or 0
+        crafts = crafts or screen:AskedCrafts()
         if not p or crafts <= 0 then return 0 end
         return addon:WithCharacter(p.charKey, addon.ItemsForCrafts, addon, p.recipe, crafts)
     end
@@ -1703,7 +1712,8 @@ local function CreatePlanScreen(parent)
     -- instead of offering to craft it all again.
     function screen:CraftsDone(recipeID, made, crafts)
         if not (screen.plan and screen.plan.recipe.recipeID == recipeID) or (crafts or 0) <= 0 then return end
-        local left = math.max((tonumber(screen.qty:GetText()) or 0) - crafts, 0)
+        local left = math.max(screen:AskedCrafts() - crafts, 0)
+        screen.askedCrafts = nil
         screen.qty:SetText(tostring(left))
         if left > 0 then ui.planCrafts[recipeID] = left end
         screen.allMade = left == 0 or nil
@@ -1905,7 +1915,7 @@ local function CreatePlanScreen(parent)
             if allLow then table.insert(baselines, allLow) end
             if allHigh then table.insert(baselines, allHigh) end
             if tierInfo.concentrate then
-                table.sort(candidates, function(a, b) return a.concentrationValue > b.concentrationValue end)
+                table.sort(candidates, function(a, b) return addon:BetterConcentration(a, b) end)
             else
                 table.sort(candidates, function(a, b) return a.cost < b.cost end)
             end
@@ -1948,11 +1958,17 @@ local function CreatePlanScreen(parent)
             if e.scenario == tierInfo.scenario then pickedRank = i end
         end
         mixes.why:SetText(string.format(conc
-            and "The top %d of %d mixes that reach this tier, ranked by extra gold per concentration point.%s"
+            and "The top %d of %d mixes that reach this tier, by gold per concentration point, then profit.%s"
             or "The top %d of %d mixes that reach this tier, cheapest first.%s", top, #candidates,
             ((tierInfo.built and " Picked: a mix in between that uses materials you have.")
             or ((tierInfo.yourPick and pickedRank) and string.format(" Using #%d, your pick.", pickedRank))
-            or ((tierInfo.heldPick and pickedRank) and string.format(" Picked #%d: it uses materials you have.", pickedRank))
+            or ((tierInfo.heldPick and pickedRank and pickedRank > 1) and string.format(" Picked #%d: it uses materials you have.", pickedRank))
+            or ((tierInfo.fitPick and pickedRank) and string.format(" Picked #%d: your concentration starts every craft with it.", pickedRank))
+            -- A to-do's mix (PlanConcentration): chosen for what the whole
+            -- day's concentration earns, which can be a lower-ranked mix
+            -- (2 gold Missives beat 1 silver with 494; user, 2026-10-18)
+            or ((conc and pickedRank and pickedRank > 1)
+                and string.format(" Picked #%d: earns the most from your concentration.", pickedRank))
             or "") .. " Click a mix to use it."))
         mixes.header.mix:SetText(string.format("TOP %d MIXES", top))
         mixes.header.conc:SetShown(conc)
@@ -1964,7 +1980,8 @@ local function CreatePlanScreen(parent)
             and string.format("%s per point", Money(tierInfo.concentrationValue)) or Money(tierInfo.cost + offset) .. " each"
         mixes.picked:SetText(string.format("Picked: %s  %s", pickedText,
             addon:Colorize(string.format(tierInfo.yourPick and "(%s, your pick)"
-                or tierInfo.heldPick and "(%s, uses materials you have)" or "(%s, best of %d)",
+                or tierInfo.heldPick and "(%s, uses materials you have)"
+                or tierInfo.fitPick and "(%s, your concentration covers every craft)" or "(%s, best of %d)",
                 pickedNumbers, #candidates), "muted")))
         mixes.toggle:SetText(open and "Hide" or "Compare")
 
@@ -2181,8 +2198,13 @@ local function CreatePlanScreen(parent)
 
     local function SetCraftState(state)
         screen.craftState = state
-        screen.craft:SetLabel(state and state.label or "Craft")
         local enabled = state ~= nil and state.enabled == true
+        -- Stuck says why, as the queue does ("Needs Alchemist's Lab Bench")
+        local label = state and state.label or "Craft"
+        if state and not enabled and state.blockers and #state.blockers > 0 then
+            label = addon:BlockedLabel(state)
+        end
+        screen.craft:SetLabel(label)
         screen.craft:SetEnabled(enabled)
         screen.craft:SetAlpha(enabled and 1 or 0.5)
         SyncWindow(state)
@@ -2215,6 +2237,7 @@ local function CreatePlanScreen(parent)
         crafts = given or (quantity and quantity > 0
             and addon:WithCharacter(p.charKey, addon.CraftsForItems, addon, p.recipe, quantity))
         crafts = crafts or ui.planCrafts[p.recipe.recipeID] or 1
+        screen.askedCrafts = nil
         screen.qty:SetText(tostring(crafts))
         if quantity or given then ui.planCrafts[p.recipe.recipeID] = crafts end
         screen.list:ScrollToTop()
@@ -2316,10 +2339,20 @@ local function CreatePlanScreen(parent)
         screen.list:SetItems(nodes)
         screen.crafts:SetFormattedText("about %.1f made", plan.expectedOutput)
         if concLimit and concLimit.crafts > 0 then
+            -- The box shows what will be crafted (AskedCrafts)
+            local asked = screen:AskedCrafts()
+            screen.askedCrafts = asked
+            screen.qty:SetText(tostring(plan.crafts))
             screen.crafts:SetText(screen.crafts:GetText() .. addon:Colorize(string.format(
-                "  (planned %d: your %d concentration covers %d craft%s now)", plan.crafts, concLimit.current, concLimit.crafts,
-                concLimit.crafts == 1 and "" or "s"), "warning"))
-        elseif concLimit then
+                "  (you asked for %d: your %d concentration covers %d craft%s now)", asked, concLimit.current,
+                concLimit.crafts, concLimit.crafts == 1 and "" or "s"), "warning"))
+        elseif screen.askedCrafts then
+            -- Back to the number asked for: concentration came back, or
+            -- there's none at all now (the note below says so)
+            screen.qty:SetText(tostring(screen.askedCrafts))
+            screen.askedCrafts = nil
+        end
+        if concLimit and concLimit.crafts == 0 then
             screen.crafts:SetText(screen.crafts:GetText() .. addon:Colorize(string.format(
                 "  (not enough concentration now: %d to start, you have %d)", concLimit.full, concLimit.current), "warning"))
         end

@@ -24,6 +24,7 @@ local LOGO = "Interface\\AddOns\\Goldsmith\\Media\\Logo"
 -- Beside the two cost lines: about their height together
 local LOGO_BESIDE, LOGO_GAP = 30, 8
 local WIDTH = 330
+local NOTE_WIDTH = 260
 local AH_CUT = 0.05
 
 local Money = function(c) return addon:FormatMoney(c) end
@@ -88,8 +89,16 @@ local ORDER = {
         local profit = p.commission + p.rewardsValue - p.cost
         -- Just your cost and the profit: the window already marks what the
         -- customer supplies and shows the commission (user, 2026-10-11)
+        -- When the game filled a slot from your bags with a dearer quality
+        -- than the orders list counts: why the two differ (user,
+        -- 2026-10-18: "i could think its an error")
+        local note
+        if p.cheapest then
+            note = addon:Colorize(string.format("Cheapest qualities: %s. The game picked %s from your bags.",
+                Money(p.cheapest), table.concat(p.pricier, ", ")), "warning")
+        end
         return "Your materials: " .. cost, "Profit: " .. (p.complete and "" or "at most ")
-            .. addon:Colorize(addon:FormatSignedMoney(profit), addon:MoneyColor(profit))
+            .. addon:Colorize(addon:FormatSignedMoney(profit), addon:MoneyColor(profit)), note
     end,
     tooltip = function(tooltip, p)
         tooltip:AddLine("Goldsmith: this order", addon:Color("gold"))
@@ -191,6 +200,9 @@ local function Create(page, form)
     holder.line2 = UI.Text(holder, "small", "text")
     holder.line2:SetPoint("TOPLEFT", holder.line1, "BOTTOMLEFT", 0, -4)
     holder.line2:SetWidth(WIDTH - LOGO_BESIDE - LOGO_GAP)
+    -- A note under the two, on orders only (ORDER.lines)
+    holder.line3 = UI.Text(holder, "small", "text")
+    holder.line3:SetPoint("TOPLEFT", holder.line2, "BOTTOMLEFT", 0, -4)
     holder:EnableMouse(true)
     UI.SetTooltip(holder, function(tooltip)
         local p = page.preview
@@ -207,7 +219,7 @@ local function Create(page, form)
 end
 
 local function SetLineWidth(holder, width)
-    for _, line in ipairs({ holder.line1, holder.line2 }) do
+    for _, line in ipairs({ holder.line1, holder.line2, holder.line3 }) do
         line:SetWidth(width - LOGO_BESIDE - LOGO_GAP)
         line:SetWordWrap(true)
     end
@@ -238,7 +250,10 @@ local function Place(holder, form)
     local w = math.ceil(math.max(holder.line1:GetUnboundedStringWidth(), holder.line2:GetUnboundedStringWidth())) + 2
     local width = w + LOGO_BESIDE + LOGO_GAP
     SetLineWidth(holder, width)
-    holder:SetSize(width, LOGO_BESIDE)
+    -- The note wraps, at least NOTE_WIDTH wide so it isn't a tall column
+    holder.line3:SetWidth(math.max(w, NOTE_WIDTH))
+    local extra = holder.line3:IsShown() and (holder.line3:GetStringHeight() + 4) or 0
+    holder:SetSize(width, LOGO_BESIDE + extra)
 
     -- The lowest of the materials, optional materials, enchant target and
     -- Auctionator's lines
@@ -286,13 +301,15 @@ local function Update(page)
     -- In the window's font, set each time: the slots exist only once a
     -- recipe has been shown
     local font = NativeFont(form)
-    for _, line in ipairs({ holder.line1, holder.line2 }) do
+    for _, line in ipairs({ holder.line1, holder.line2, holder.line3 }) do
         line:SetFontObject(font)
         line:SetTextColor(1, 1, 1)
     end
-    local first, second = def.lines(page.preview)
+    local first, second, third = def.lines(page.preview)
     holder.line1:SetText(first)
     holder.line2:SetText(second)
+    holder.line3:SetText(third or "")
+    holder.line3:SetShown(third ~= nil)
     if not Place(holder, form) then
         holder:Hide()
         return

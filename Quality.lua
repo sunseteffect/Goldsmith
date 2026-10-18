@@ -505,9 +505,15 @@ function addon:ConcentrationPerItem(row)
     return row.concentration / math.max(row.outputPerCraft or 1, 1)
 end
 
--- What making a material quality costs, its concentration charged
-local function CraftedTierCost(itemID, name)
-    local row = addon:CraftedTierRow(itemID, name)
+-- What making a material quality costs, its concentration charged.
+-- sharing: the profession of a craft that spends concentration itself. A
+-- material made with that same concentration isn't counted as made: the
+-- craft takes it first. Gold inks counted as crafted made 2 gold Missives
+-- a +490g to-do; the Missives took 450 of 494, the inks were bought and it
+-- came to +341g (user, 2026-10-18).
+local function CraftedTierCost(itemID, name, sharing)
+    local row, recipe = addon:CraftedTierRow(itemID, name)
+    if row and sharing and row.concentrate and recipe and recipe.profession == sharing then return nil end
     return row and (row.cost + addon:ConcentrationPerItem(row) * addon.CONC_POINT_COST)
 end
 
@@ -515,9 +521,9 @@ end
 -- paid: a gold Sunglass Vial listed at 293g made the gold Draught of
 -- Rampant Abandon row cost 245g each, while its plan crafted the vials for
 -- 49g and came to 61g (2026-10-10)
-local function QualityPrice(itemID, name)
+local function QualityPrice(itemID, name, sharing)
     local market = addon:GetMarketPrice(itemID)
-    local crafted = CraftedTierCost(itemID, name)
+    local crafted = CraftedTierCost(itemID, name, sharing)
     if market and crafted then return math.min(market, crafted) end
     return market or crafted or addon:GetOwnCost(name)
 end
@@ -530,6 +536,7 @@ end
 local function ScenarioCost(recipe, scenario, noProcs)
     local outputPerCraft, modelSlots = addon:GetCraftModel(recipe, noProcs)
     local perCraft, complete = 0, true
+    local sharing = scenario and scenario.concentrate and recipe.profession
     for _, m in ipairs(modelSlots) do
         local ids = m.slot.itemIDs or {}
         local useFactor = m.slot.quantity > 0 and (m.quantity / m.slot.quantity) or 1
@@ -538,8 +545,8 @@ local function ScenarioCost(recipe, scenario, noProcs)
             local low = m.slot.quantity - high
             -- Only the qualities the mix uses (crafting prices are worked out)
             local lowPrice, highPrice
-            if low > 0 then lowPrice = QualityPrice(ids[1], m.slot.names[1]) end
-            if high > 0 then highPrice = QualityPrice(ids[#ids], m.slot.names[#ids]) end
+            if low > 0 then lowPrice = QualityPrice(ids[1], m.slot.names[1], sharing) end
+            if high > 0 then highPrice = QualityPrice(ids[#ids], m.slot.names[#ids], sharing) end
             if (low > 0 and not lowPrice) or (high > 0 and not highPrice) then
                 complete = false
             end
@@ -762,6 +769,22 @@ local function ExpectedConcentration(recipe, scenario)
     return math.max(scenario.concentration - ingenuity / 100 * scenario.ingenuityRefund, 0)
 end
 
+-- Whether concentration mix a beats b: more gold per point, and when both
+-- show the same per point (to the silver, as listed) they earn the same
+-- from a day's concentration, so the one making more per craft wins: fewer
+-- crafts, fewer materials bought and fewer items to sell for the same gold.
+-- All gold (1.144g a point, +246g a craft) ranked above all silver (1.140g,
+-- +374g a craft) on a Missive, both shown as 1.14g (user, 2026-10-18).
+-- Rounded rather than "within x%", so it's a consistent order for sorting.
+local function PointKey(e)
+    return e.concentrationValue and math.floor(e.concentrationValue / 100 + 0.5) or -math.huge
+end
+function addon:BetterConcentration(a, b)
+    local ka, kb = PointKey(a), PointKey(b)
+    if ka ~= kb then return ka > kb end
+    return (a.profit or 0) * (a.outputPerCraft or 1) > (b.profit or 0) * (b.outputPerCraft or 1)
+end
+
 -- One row per reachable tier, for the Crafts tab and plans. For each tier,
 -- the cheapest way to reach it without concentration is preferred
 -- (concentration is limited); otherwise the concentration option that earns
@@ -816,6 +839,7 @@ local function BuildTierRows(recipe)
         end
     end
 
+    -- (BetterConcentration: most per point, ties by profit per craft)
     -- Up to two rows per tier: the cheapest way without concentration, and
     -- the concentration option earning the most per point. Both are shown
     -- so a loss-making way without concentration never hides a profitable
@@ -824,7 +848,7 @@ local function BuildTierRows(recipe)
     for _, e in ipairs(evaluated) do
         if e.concentrate then
             local current = concentrated[e.tier]
-            if not current or (e.concentrationValue or -math.huge) > (current.concentrationValue or -math.huge) then
+            if not current or addon:BetterConcentration(e, current) then
                 concentrated[e.tier] = e
             end
         else

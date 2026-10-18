@@ -2030,6 +2030,38 @@ local function ValueMaterials(used, outputID, today)
     return cost, complete, mats
 end
 
+-- What the order's materials would cost at their lowest qualities, as the
+-- orders list counts them (OrderList.lua), when the game filled a slot
+-- from your bags with a dearer quality (user, 2026-10-18: holding only
+-- gold Azeroot, a Hobbyist Scribe's Quill said 163.68g opened and about
+-- 84g in the list, which looked like an error). Returns that cost and the
+-- names of the dearer materials ("Azeroot (gold)"), or nil when the slots
+-- already hold the cheapest, the gap is under 1g, or the order asks for a
+-- quality (the cheapest might not reach it).
+local QUALITY_NAMES = { [2] = { "silver", "gold" } }
+
+local function CheapestQualities(used, slotOf, outputID, cost, order)
+    if (order.minQuality or 0) > 1 then return nil end
+    local cheap, pricier = {}, {}
+    for id, qty in pairs(used) do
+        local ids = slotOf[id]
+        local lowest = ids and #ids > 1 and ids[1] or id
+        cheap[lowest] = (cheap[lowest] or 0) + qty
+        if lowest ~= id and qty > 0 then
+            local index
+            for i, other in ipairs(ids) do if other == id then index = i end end
+            local names = QUALITY_NAMES[#ids]
+            local quality = (names and index and names[index]) or ("tier " .. (index or "?"))
+            table.insert(pricier, (C_Item.GetItemNameByID(id) or ("item " .. id)) .. " (" .. quality .. ")")
+        end
+    end
+    if #pricier == 0 then return nil end
+    local cheapest, complete = ValueMaterials(cheap, outputID)
+    if not complete or cost - cheapest < 10000 then return nil end
+    table.sort(pricier)
+    return cheapest, pricier
+end
+
 function addon:GetOrderPreview(order, tx)
     if type(order) ~= "table" or not tx then return nil end
     local okR, recipeID = pcall(tx.GetRecipeID, tx)
@@ -2046,11 +2078,49 @@ function addon:GetOrderPreview(order, tx)
 
     local cost, complete, mats = ValueMaterials(used, outputID)
     local rewards = GetOrderRewards(order)
-    return {
+    local result = {
         cost = cost, complete = complete, mats = mats, provided = provided,
         commission = math.max((order.tipAmount or 0) - (order.consortiumCut or 0), 0),
         rewards = rewards, rewardsValue = ValueRewards(rewards),
     }
+    result.cheapest, result.pricier = CheapestQualities(used, slotOf, outputID, cost, order)
+    GoldsmithDB.orderPreviewDebug.orderID = order.orderID
+    GoldsmithDB.orderPreviewDebug.result = PlainCopy(result, 3)
+    GoldsmithDB.orderPreviewDebug.npcOrderRewards = PlainCopy(order.npcOrderRewards, 3)
+    return result
+end
+
+-- The same for an order in the game's list of orders, before it's opened
+-- (OrderList.lua; user, 2026-10-18: see the rewards and the cost without
+-- clicking into each one). No form yet, so every material you supply
+-- counts at its lowest quality, as GetOrderPreview counts a quality slot
+-- the form hasn't filled. Valued as GetOrderPreview values them (what yours
+-- cost you, else the price), so the row and the opened order agree.
+-- Returns the same table, plus learned (you know the recipe), or nil.
+function addon:GetOrderListPreview(order)
+    if type(order) ~= "table" or not order.spellID then return nil end
+    local required, outputID = RequiredSlots(order.spellID)
+    if not required then return nil end
+    local used, slotOf = {}, {}
+    for _, slot in ipairs(required) do
+        local ids = slot.itemIDs or {}
+        for _, id in ipairs(ids) do slotOf[id] = ids end
+        if ids[1] and (slot.quantity or 0) > 0 then used[ids[1]] = (used[ids[1]] or 0) + slot.quantity end
+    end
+    local provided = GetProvided(order.reagents)
+    TakeOffProvided(used, provided, slotOf)
+    local cost, complete, mats = ValueMaterials(used, outputID)
+    local rewards = GetOrderRewards(order)
+    local okI, info = pcall(C_TradeSkillUI.GetRecipeInfo, order.spellID)
+    local result = {
+        cost = cost, complete = complete, mats = mats, provided = provided,
+        commission = math.max((order.tipAmount or 0) - (order.consortiumCut or 0), 0),
+        rewards = rewards, rewardsValue = ValueRewards(rewards),
+        learned = okI and type(info) == "table" and info.learned or false,
+    }
+    -- A check saved on 2026-10-18, no longer needed: cleared from the file
+    GoldsmithDB.orderListDebug = nil
+    return result
 end
 
 -- The same for one of your own crafts in the game's profession window

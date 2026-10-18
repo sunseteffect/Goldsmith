@@ -298,7 +298,14 @@ function addon:CraftUnitCost(itemID, name)
         addon.craftUnitBusy = true
         local options = GetOptions(itemID, name, 1, store.memo, {})
         addon.craftUnitBusy = false
-        cached = options.craft and options.craft.unit or false
+        -- Not when it takes concentration: that isn't free, and the
+        -- craft using it may need it all. Gold inks priced as crafted
+        -- with concentration made gold Missives look +490g for 2 crafts;
+        -- the plan then had none left for the inks and bought them, +341g
+        -- (user, 2026-10-18).
+        local craft = options.craft
+        local concentrated = craft and craft.tierRow and craft.tierRow.concentrate
+        cached = craft and not concentrated and craft.unit or false
         store[itemID] = cached
     end
     return cached or nil
@@ -641,7 +648,16 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
             end
         end
     end
-    if plan.complete and cheapestComplete then
+    -- Only when you made a choice: buying because concentration ran out
+    -- (LimitByConcentration) isn't one, and showed "Your choices add 342g"
+    -- on a plan with none (user, 2026-10-18)
+    local function AnyChoice(nodes)
+        for _, node in ipairs(nodes or {}) do
+            if (node.options and node.options.override) or AnyChoice(node.children) then return true end
+        end
+        return false
+    end
+    if plan.complete and cheapestComplete and AnyChoice(plan.nodes) then
         plan.choiceExtra = plan.cost - cheapestCost
     end
 
@@ -873,6 +889,16 @@ end
 -- isn't tierInfo itself), or tierInfo.
 local HELD_PICK_MIN_SAVING = 10000 -- 1g: not worth switching for less
 
+-- Concentration now for the character whose stats are in use
+-- (WithCharacter): live for you, worked out to now for an alt
+local function ConcentrationNow(profession)
+    local char = addon:StatsChar()
+    if char == addon.char then return (addon:GetConcentration(profession)) end
+    for key, c in pairs(GoldsmithDB.characters) do
+        if c == char then return (addon:GetCharacterConcentration(key, profession)) end
+    end
+end
+
 function addon:PreferHeldMix(recipe, tierInfo, quantity)
     if not (tierInfo and tierInfo.scenarios and quantity and quantity > 0) then return tierInfo end
     local outputPerCraft = GetCraftNumbers(recipe)
@@ -920,10 +946,44 @@ function addon:PreferHeldMix(recipe, tierInfo, quantity)
         end
     end
 
+    -- Concentration you have now. Each craft needs a mix's full cost to
+    -- start, so a mix that can't start them all is cut to the crafts it
+    -- covers. A to-do of 2 Missives (all gold, about 230 a craft, +490g
+    -- with 492) opened as 1 all silver craft (340, +369g): you held silver
+    -- ink, and the extra concentration was charged as if you had it (user,
+    -- 2026-10-18). A mix that covers every craft keeps out one that
+    -- doesn't, and one that can't is swapped for one that can when that
+    -- earns more.
+    local current = tierInfo.concentrate and ConcentrationNow(recipe.profession)
+    local function Full(e) return e.scenario and e.scenario.concentration or e.concentration end
+    local function Startable(e)
+        local full = Full(e)
+        if not (current and full and full > 0) then return crafts end
+        return math.min(crafts, math.floor(current / full))
+    end
+    local function Earns(e) return (e.profit or 0) * (e.outputPerCraft or outputPerCraft) * Startable(e) end
+    if current and Startable(tierInfo) < crafts then
+        local fit
+        for _, e in ipairs(same) do
+            if Startable(e) == crafts and Earns(e) > Earns(tierInfo) and (not fit or Earns(e) > Earns(fit)) then
+                fit = e
+            end
+        end
+        if fit then
+            local pick = {}
+            for k, v in pairs(fit) do pick[k] = v end
+            pick.scenarios, pick.fitPick = tierInfo.scenarios, true
+            pick.demand, pick.demandSource, pick.saleRate = tierInfo.demand, tierInfo.demandSource, tierInfo.saleRate
+            return pick
+        end
+    end
+    local coversAll = current and Startable(tierInfo) == crafts
+
     local best, bestScore = tierInfo, Score(tierInfo.scenario)
     local pickedScore = bestScore
     for _, e in ipairs(same) do
         local score = Score(e.scenario) + ConcentrationCharge(e)
+        if coversAll and Startable(e) < crafts then score = math.huge end
         if score < bestScore then best, bestScore = e, score end
     end
 

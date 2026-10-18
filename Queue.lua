@@ -440,10 +440,17 @@ function addon:QueueRowStatus(row, q)
     if not s then return "", "muted" end
     if s.enabled and s.open then return s.label, "muted" end
     if s.enabled then return s.label, "profit" end
-    local blocker = s.blockers[1] or ""
+    return addon:BlockedLabel(s)
+end
+
+-- Why a craft state can't craft, short, and its color ("Needs Alchemist's
+-- Lab Bench"): the queue's statuses and the plan's Craft button (user,
+-- 2026-10-18: the plan's button still said "Craft 1")
+function addon:BlockedLabel(s)
+    local blocker = s.blockers and s.blockers[1] or ""
     -- Short on concentration beats a missing station: walking to the
     -- table wouldn't let it craft (user, 2026-10-16)
-    for _, b in ipairs(s.blockers) do
+    for _, b in ipairs(s.blockers or {}) do
         if b:find("concentration") then blocker = b break end
     end
     local station = blocker:match("^Needs (.+) nearby")
