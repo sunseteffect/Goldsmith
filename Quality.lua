@@ -779,11 +779,15 @@ local function BuildTierRows(recipe)
     for _, s in ipairs(td.scenarios) do
         local cost, complete, outputPerCraft = ScenarioCost(recipe, s)
         local price, source, age, itemID, note = GetTierPrice(td, s.tier)
+        -- Valued at its usual price when the listing jumped (PriceJump)
+        local usual, jumped = addon:PriceJump(itemID, price, source)
+        if usual then price, note = usual, jumped end
         local e = {
             scenario = s, tier = s.tier, mix = s.mix, concentrate = s.concentrate,
             concentration = ExpectedConcentration(recipe, s),
             cost = cost, partial = not complete, outputPerCraft = outputPerCraft,
             price = price, priceSource = source, priceAge = age, priceNote = note, itemID = itemID,
+            jumped = jumped,
         }
         if price then
             e.profit = price * (1 - AH_CUT) - cost

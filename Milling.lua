@@ -34,6 +34,16 @@ local MAX_SALVAGE_RUNS = 500
 
 local session = nil
 local summaryTimer = nil
+local SalvageVerb -- below, with the Crafts tab rows
+
+-- "Milled", "Prospected", "Salvaged" (Practically Pork isn't milled; user,
+-- 2026-10-17)
+local PAST = { Prospect = "Prospected", Mill = "Milled", Crush = "Crushed",
+               Shatter = "Shattered", Recycle = "Recycled", Salvage = "Salvaged" }
+local function PastVerb(recipeID, profession)
+    local verb = SalvageVerb(recipeID, profession)
+    return PAST[verb] or (verb .. "ed")
+end
 
 local function SnapshotBags()
     local counts = {}
@@ -56,7 +66,8 @@ local function PrintSummary()
     for itemID, qty in pairs(session.summaryOutputs) do
         table.insert(parts, string.format("%d %s", qty, C_Item.GetItemNameByID(itemID) or ("item " .. itemID)))
     end
-    addon:Notify("info", "Milled %d %s: %s", session.summaryMilled, session.herbName,
+    addon:Notify("info", "%s %d %s: %s", PastVerb(session.recipeID, session.profession),
+        session.summaryMilled, session.herbName,
         #parts > 0 and table.concat(parts, ", ") or "nothing yet")
 
     session.summaryMilled = 0
@@ -320,7 +331,8 @@ function addon:ListMilling()
             end
             local herbCost, source = addon:GetHerbUnitCost(herbID, record.name)
             local costText = herbCost and string.format("%s each, %s", FormatGold(herbCost), source) or "no herb cost"
-            print(string.format("  %s: %d milled (%s)", record.name, record.milled, costText))
+            print(string.format("  %s: %d %s (%s)", record.name, record.milled,
+                PastVerb(nil, record.profession or "Inscription"):lower(), costText))
             for _, out in pairs(record.outputs) do
                 local cost = addon:GetMilledCost(out.name)
                 print(string.format("    %s: %d (%.2f per herb)%s", out.name, out.qty, out.qty / record.milled,
@@ -373,7 +385,7 @@ end
 -- "Prospect", "Mill"... from the salvage recipe's name
 local VERBS = { { "Prospect", "Prospect" }, { "Mill", "Mill" }, { "Crush", "Crush" },
                 { "Shatter", "Shatter" }, { "Recycl", "Recycle" } }
-local function SalvageVerb(recipeID, profession)
+function SalvageVerb(recipeID, profession)
     local name = recipeID and C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(recipeID)
     for _, v in ipairs(VERBS) do
         if name and name:find(v[1]) then return v[2] end

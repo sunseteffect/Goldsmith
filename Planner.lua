@@ -279,6 +279,31 @@ GetOptions = function(itemID, name, depth, memo, visiting)
     return options
 end
 
+-- Making an item from today's prices, as a plan prices it, for the Crafts
+-- list's material costs (SlotCost, Pricing.lua): the list had Ink of the
+-- Sea at its 3.50g AH price, the plan crafted it from pigment at 3.12g, and
+-- a glyph showed -1.20g in the list and -0.06g in its plan (user,
+-- 2026-10-18). Kept until data changes, like SlotCost, so it's worked out
+-- with the stats of whichever character asked first. While it's working,
+-- craftUnitBusy is set: a tier recipe's costs come back through SlotCost,
+-- which then leaves crafting out (and doesn't keep that answer) rather
+-- than loop.
+local craftUnitCache = addon:NewCache()
+function addon:CraftUnitCost(itemID, name)
+    if addon.craftUnitBusy or not itemID then return nil end
+    local store = craftUnitCache:Get()
+    local cached = store[itemID]
+    if cached == nil then
+        store.memo = store.memo or {}
+        addon.craftUnitBusy = true
+        local options = GetOptions(itemID, name, 1, store.memo, {})
+        addon.craftUnitBusy = false
+        cached = options.craft and options.craft.unit or false
+        store[itemID] = cached
+    end
+    return cached or nil
+end
+
 -- Your choice of how to get an item in plans ("Buy", "Craft", "Mill",
 -- "Vendor"), or nil to use the cheapest way.
 function addon:SetMethodOverride(itemID, method)
@@ -652,8 +677,12 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
     local priceSource
     if tier then
         plan.price, plan.unconfirmed, plan.doubtPrice = tier.price, tier.unconfirmed, tier.doubtPrice
+        plan.jumped = tier.jumped
     else
         plan.price, priceSource = addon:GetMarketPriceInfo(recipe.outputItemID)
+        -- The usual price when the listing jumped (PriceJump, Pricing.lua)
+        local usual, jumped = addon:PriceJump(recipe.outputItemID, plan.price, priceSource)
+        if usual then plan.price, plan.jumped = usual, jumped end
     end
     plan.tier = tier
     if plan.price then

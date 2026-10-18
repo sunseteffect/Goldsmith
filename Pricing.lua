@@ -289,6 +289,9 @@ local MARKET_TRUST_RATIO = 3
 local SOLD_HIGH_RATIO = 3
 local SOLD_EXTREME_RATIO = 10
 local SOLD_DEEP_QTY = 100
+-- The 10x rule's own depth: 355 Felberry Figs at 10g, sold for 0.98g, are
+-- a shelf, not a wall (user, 2026-10-18); 19,939 at 5.25g still count
+local SOLD_EXTREME_DEEP_QTY = 1000
 local INFO_NOTE = "Note: "
 
 -- Whether a price note means the price was changed (so it shows with "~")
@@ -300,7 +303,7 @@ local function SoldCap(itemID, price)
     local data = GoldsmithPriceData
     local entry = data and data.items and data.items[itemID]
     local level, sold, quantity = entry and entry[5], entry and entry[6], entry and entry[4]
-    if sold and sold > 0 and price > sold * SOLD_EXTREME_RATIO and (quantity or 0) < SOLD_DEEP_QTY then
+    if sold and sold > 0 and price > sold * SOLD_EXTREME_RATIO and (quantity or 0) < SOLD_EXTREME_DEEP_QTY then
         return sold, string.format("listed at %s, but it sold for %s this week", FormatGold(price), FormatGold(sold))
     end
     if level and level < addon.SELL_LEVEL.sells and sold and price > sold * SOLD_HIGH_RATIO then
@@ -395,6 +398,76 @@ end
 --                    Auctionator's is older
 -- nil if nothing has a price.
 local StoredAHPrice -- below
+local SALE_HIGH_RATIO = 3
+
+-- A searched or live price is what's listed now, and gets the same check
+-- against what the item actually sold for as saved prices do: after the
+-- cheap Felberry Figs sold out, 355 sat at 10g while they sold for about
+-- 1g, and a search made Figs a 40g craft (user, 2026-10-18). TSM's region
+-- sale average, else Goldsmith Data's sale price (SoldCap).
+local function SaleCheck(itemID, price, source)
+    local saleAvg = GetTSMValue("DBRegionSaleAvg", itemID)
+    if saleAvg then
+        if price > saleAvg * SALE_HIGH_RATIO then
+            return saleAvg, "TSM sale avg", nil,
+                string.format("listed at %s, but it usually sells for %s", FormatGold(price), FormatGold(saleAvg))
+        end
+        return price, source, nil
+    end
+    local sold, note = SoldCap(itemID, price)
+    if sold then return sold, "Blizzard", nil, note end
+    return price, source, nil, note
+end
+
+-- Price jumps
+--
+-- What you'd sell at, against its usual price: the cheap Felberry Figs
+-- sold out and the lowest went from about 1.50g to 10g, and 500g the day
+-- before; made at 10g each, they sell for 1.40g (user, 2026-10-18). Over
+-- JUMP_RATIO times the usual, an item is valued at the usual price and
+-- the plan warns. Only for what you sell: a material that jumped really
+-- costs what's listed. The usual price: Goldsmith Data's median of the last
+-- 7 days' prices, else TSM's historical price, else the median of your own
+-- saved daily prices before today (JUMP_MIN_DAYS of them).
+local JUMP_RATIO = 3
+local JUMP_MIN_DAYS = 4
+
+local function OwnUsualPrice(itemID)
+    local history = GoldsmithDB.priceHistory and GoldsmithDB.priceHistory[itemID]
+    if not history then return nil end
+    local today, list = date("%Y-%m-%d"), {}
+    for day, price in pairs(history) do
+        if day ~= today then table.insert(list, price) end
+    end
+    if #list < JUMP_MIN_DAYS then return nil end
+    table.sort(list)
+    return list[math.floor((#list + 1) / 2)]
+end
+
+-- An item's usual price and where it's from, or nil
+function addon:UsualPrice(itemID)
+    local data = GoldsmithPriceData
+    local entry = itemID and data and data.items and data.items[itemID]
+    if entry and entry[7] then return entry[7], "Goldsmith Data, last 7 days" end
+    local tsm = GetTSMValue("DBHistorical", itemID)
+    if tsm then return tsm, "TSM" end
+    local own = OwnUsualPrice(itemID)
+    if own then return own, "your saved prices" end
+end
+
+-- For a selling price (from GetMarketPriceInfo): the usual price and a note
+-- when the price jumped, else nil. Not for vendor prices or box contents.
+function addon:PriceJump(itemID, price, source)
+    if not (itemID and price) or source == "Vendor" or source == "Contents" or TourPrices() then return nil end
+    local usual, from = addon:UsualPrice(itemID)
+    if usual and usual > 0 and price > usual * JUMP_RATIO then
+        return usual, string.format("price jumped: listed at %s, usually %s (%s)",
+            FormatGold(price), FormatGold(usual), from)
+    end
+end
+
+-- Most listings expire: under this share sold (TSM's sale rate), plans warn
+addon.LOW_SALE_RATE = 0.10
 
 function addon:GetAHPriceInfo(itemID)
     if not itemID then return nil end
@@ -406,14 +479,14 @@ function addon:GetAHPriceInfo(itemID)
 
     local book = preferred ~= "tsm" and GetFreshOrderBook(itemID)
     if book then
-        return GetRobustBookPrice(book), "Live", nil
+        return SaleCheck(itemID, GetRobustBookPrice(book), "Live")
     end
     local price, source, age, note = StoredAHPrice(itemID, preferred)
     -- A search price, unless it's far below the others: likely a lone
     -- undercut (see SEARCH_MAX_DROP)
     local searched = preferred ~= "tsm" and addon:GetSearchPrice(itemID)
     if searched and (not price or searched >= price * (1 - SEARCH_MAX_DROP)) then
-        return searched, "Search", nil
+        return SaleCheck(itemID, searched, "Search")
     end
     return price, source, age, note
 end
@@ -468,7 +541,6 @@ end
 -- 81,484g). TSM's region sale average is what it actually sold for, so a
 -- price more than SALE_HIGH_RATIO times that is capped at it.
 local OUTLIER_HIGH_RATIO = 5
-local SALE_HIGH_RATIO = 3
 
 function addon:CheckAgainstMarket(itemID, price, source, age)
     local listed, note = price, nil
@@ -2397,7 +2469,8 @@ local function GetSlotCost(slot)
     local cached = store[slot]
     if not cached then
         cached = { SlotCost(slot) }
-        store[slot] = cached
+        -- Worked out without crafting (CraftUnitCost busy): not kept
+        if not addon.craftUnitBusy then store[slot] = cached end
     end
     return cached[1], cached[2], cached[3], cached[4]
 end
@@ -2421,6 +2494,13 @@ SlotCost = function(slot)
             if made[1] and (not best or made[1] < best) then
                 best, bestSource, bestName, bestID = made[1], made[2], name, nil
             end
+        end
+    end
+    -- Crafting it now from today's prices, as the plan would (Planner.lua)
+    for i, itemID in ipairs(slot.itemIDs or {}) do
+        local made = addon.CraftUnitCost and addon:CraftUnitCost(itemID, slot.names[i])
+        if made and (not best or made < best) then
+            best, bestSource, bestName, bestID = made, "craft it", slot.names[i], nil
         end
     end
     if best then
@@ -2600,6 +2680,8 @@ function addon:GetRecipeProfit(recipe, itemID)
     local cost, missing, breakdown, stats = addon:GetRecipeCost(recipe)
     local priceItemID = itemID or recipe.outputItemID
     local price, priceSource, priceAge, priceNote = addon:GetMarketPriceInfo(priceItemID)
+    local usual, jumped = addon:PriceJump(priceItemID, price, priceSource)
+    if usual then price, priceNote = usual, jumped end
     local demand, demandSource = addon:GetDemand(priceItemID, recipe.outputName)
     local profit, margin
     if price then
@@ -2616,6 +2698,7 @@ function addon:GetRecipeProfit(recipe, itemID)
         priceSource = priceSource,
         priceAge = priceAge,
         priceNote = priceNote,
+        jumped = jumped,
         priceAgeText = price and addon:PriceAgeText(priceItemID),
         demand = demand,
         demandSource = demandSource,

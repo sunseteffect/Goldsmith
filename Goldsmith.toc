@@ -4,7 +4,7 @@
 ## Author: sunseteffect
 ## SavedVariables: GoldsmithDB
 ## OptionalDeps: Auctionator, TradeSkillMaster, GoldsmithData
-## Version: 2.5.16-beta
+## Version: 2.5.17-beta
 ## IconTexture: Interface\AddOns\Goldsmith\Media\Logo
 ## AddonCompartmentFunc: Goldsmith_OnAddonCompartmentClick
 

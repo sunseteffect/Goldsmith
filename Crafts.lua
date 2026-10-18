@@ -165,6 +165,14 @@ local function FillCraftRow(row, item)
         or addon:GetRecipeExpansion(item.recipe))
     local label = expansionID
         and addon:Colorize("  " .. addon:GetExpansionName(expansionID), "expansion") or ""
+    -- A daily or out of charges, right after the name: profitable but not
+    -- makeable yet (user, 2026-10-17; from what was saved, no game call)
+    local cooldown = not item.salvage and item.recipe and addon.GetRecipeCooldown
+        and addon:GetRecipeCooldown(item.recipe.recipeID, item.charKey)
+    if cooldown and not cooldown.ready then
+        label = label .. "  " .. UNCONFIRMED_ICON .. addon:Colorize(cooldown.readyAt
+            and ("on cooldown " .. addon:CooldownWait(cooldown.readyAt)) or "on cooldown", "warning")
+    end
     cells.item:SetText(ItemText(item, TIER_ICON_LIST) .. label .. (item.ignored and addon:Colorize("  ignored", "dim") or ""))
     -- A stripe at the row's left edge in the quality's color (gold, silver,
     -- bronze for gear's middle tiers): with the bigger icon, two cues, so
@@ -1482,6 +1490,15 @@ local function CraftState(p, tierInfo, plan)
             c and p.charKey ~= addon.charKey and c.name or "a character who knows it"))
         return state
     end
+    -- A daily (Bouquet of Herbs) or out of charges: nothing to open or make
+    -- until it's back (user, 2026-10-17)
+    local cooldown = addon.GetRecipeCooldown and addon:GetRecipeCooldown(recipe.recipeID, addon.charKey, ProfessionOpen(recipe))
+    if cooldown and not cooldown.ready then
+        state.label = "On cooldown"
+        state.onCooldown = addon:CooldownWarning(recipe.recipeID, cooldown)
+        table.insert(state.blockers, state.onCooldown)
+        return state
+    end
     if not ProfessionOpen(recipe) then
         state.label, state.enabled, state.open = "Open " .. recipe.profession, true, true
         table.insert(state.notes, "Opens " .. recipe.profession .. " at this recipe. The game only crafts with the profession open.")
@@ -1542,6 +1559,11 @@ local function CraftState(p, tierInfo, plan)
     if state.vellums and state.vellums < crafts then
         table.insert(state.notes, string.format("Vellums for %d scroll%s.", state.vellums, state.vellums == 1 and "" or "s"))
         crafts = state.vellums
+    end
+    -- Charges: as many crafts as are ready
+    if cooldown and cooldown.maxCharges and cooldown.charges < crafts then
+        table.insert(state.notes, string.format("%d charge%s ready.", cooldown.charges, cooldown.charges == 1 and "" or "s"))
+        crafts = cooldown.charges
     end
     state.crafts = crafts
     state.enabled = #state.blockers == 0 and crafts > 0
@@ -2454,8 +2476,22 @@ local function CreatePlanScreen(parent)
             warnings = nil
         end
         screen.warnings = warnings
-        screen.warnLine:SetText(warnings and warnings.text or "")
-        SetCraftState(CraftState(p, tierInfo, plan))
+        local state = CraftState(p, tierInfo, plan)
+        -- On cooldown goes first, where it can't be missed
+        local lines = {}
+        if state.onCooldown then table.insert(lines, UNCONFIRMED_ICON .. state.onCooldown) end
+        -- A spiked price, and listings that mostly expire: Felberry Figs made
+        -- at 10g each sell for 1.40g, and 3% of listings sell (user, 2026-10-18)
+        if plan.jumped then
+            table.insert(lines, UNCONFIRMED_ICON .. plan.jumped:gsub("^%l", string.upper) .. ". Valued at the usual price.")
+        end
+        if plan.saleRate and plan.saleRate < addon.LOW_SALE_RATE then
+            table.insert(lines, UNCONFIRMED_ICON .. string.format("Only %s of listings sell (TSM): most expire.",
+                addon:FormatSaleRate(plan.saleRate)))
+        end
+        if warnings and warnings.text then table.insert(lines, warnings.text) end
+        screen.warnLine:SetText(table.concat(lines, " "))
+        SetCraftState(state)
     end
 
     return screen

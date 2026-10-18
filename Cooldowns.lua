@@ -245,6 +245,49 @@ function addon:CooldownStatusText(cd)
     return string.format("in %d days", math.ceil(seconds / 86400))
 end
 
+-- "12h 46m", "5m", "2 days 3h": how long until readyAt
+function addon:CooldownWait(readyAt)
+    local seconds = math.max((readyAt or time()) - time(), 0)
+    local days, hours = math.floor(seconds / 86400), math.floor(seconds % 86400 / 3600)
+    local minutes = math.max(math.ceil(seconds % 3600 / 60), seconds > 0 and 1 or 0)
+    if minutes == 60 then hours, minutes = hours + 1, 0 end
+    if days > 0 then
+        return string.format("%d day%s%s", days, days == 1 and "" or "s", hours > 0 and string.format(" %dh", hours) or "")
+    end
+    if hours > 0 then return string.format("%dh %dm", hours, minutes) end
+    return string.format("%dm", minutes)
+end
+
+-- One recipe's cooldown on a character, worked out to now, or nil when it
+-- has none: { ready, readyAt (nil when ready), charges, maxCharges }.
+-- live: the profession is open on the logged-in character, so the game is
+-- asked first (a closed profession may read as ready when it isn't).
+-- Older expansions' recipes count too: a cooldown blocks the craft either way.
+function addon:GetRecipeCooldown(recipeID, charKey, live)
+    charKey = charKey or addon.charKey
+    if live and charKey == addon.charKey then Record(recipeID) end
+    local c = GoldsmithDB.characters[charKey]
+    local entry = c and c.cooldowns and c.cooldowns[recipeID]
+    if not entry then return nil end
+    local ready, readyAt, charges = Status(entry)
+    return { ready = ready, readyAt = readyAt, charges = charges, maxCharges = entry.maxCharges }
+end
+
+-- "On cooldown: ready in 12h 46m. Ready now on Alt." for a recipe the
+-- logged-in character can't make yet (cooldown from GetRecipeCooldown)
+function addon:CooldownWarning(recipeID, cooldown)
+    local text = cooldown.readyAt and ("On cooldown: ready in " .. addon:CooldownWait(cooldown.readyAt) .. ".")
+        or "On cooldown."
+    local others = {}
+    for key, c in pairs(GoldsmithDB.characters) do
+        local entry = key ~= addon.charKey and addon:IsCharacterIncluded(key) and c.cooldowns and c.cooldowns[recipeID]
+        if entry and Status(entry) then table.insert(others, c.name or key) end
+    end
+    table.sort(others)
+    if #others > 0 then text = text .. " Ready now on " .. table.concat(others, ", ") .. "." end
+    return text
+end
+
 -- Scanning the open profession
 
 local lastScan = {}
