@@ -23,6 +23,15 @@ local UI = addon.UI
 --   craftCost   - "Your materials / Profit" in the game's profession and
 --                 crafting orders windows (OrderCost.lua), like
 --                 Auctionator's own switch (user, 2026-10-16)
+--   ahScan      - Goldsmith's own AH scan at all: off hides the panel by
+--                 the AH (and Buy next with it), no scans, Auctionator's
+--                 scans aren't read (user, 2026-10-19: just in case)
+--   autoScan    - Goldsmith's own AH scan when you open the AH and the last
+--                 is over an hour old (Scan.lua)
+--   buyOver     - Buy next buys without asking when the AH asks up to this
+--                 % more than the plan, of the item's cost or the queue's
+--                 profit (Shop.lua; user, 2026-10-19: a second click for
+--                 1.75g over 820g was friction). 0 always asks
 --   peekKey     - the modifier held to see through the window (Window.lua):
 --                 "alt" or "off" (the key binding only). Not Shift or Ctrl:
 --                 shift-clicks and Ctrl-to-explain would peek (user, 2026-10-17)
@@ -41,6 +50,9 @@ local DEFAULTS = {
     chat = "all",
     showMinimap = true,
     craftCost = true,
+    ahScan = true,
+    autoScan = true,
+    buyOver = 2,
     peekKey = "alt",
 }
 
@@ -120,7 +132,8 @@ end
 --     WithCharacter skips its pcall inside work (addon:InWork) instead
 --   - whose stats are in use (addon.statsChar) belongs to the work: it's
 --     put back while the work waits and restored when it carries on, so
---     other code never sees an alt's stats
+--     other code never sees an alt's stats; the same for the plan choices
+--     in use (addon.planChoices, see WithChoices)
 --   - build shared indexes in a local and store them when complete, so
 --     nothing else sees half of one while the work is paused
 --   - loop over a list, not pairs() of a shared table (addon:Keys)
@@ -141,7 +154,7 @@ function addon:Yield()
     local work = co and works[co]
     if not work then return end
     -- Replaced by newer work: stop here for good
-    if work ~= current then coroutine.yield() end
+    if not work.keep and work ~= current then coroutine.yield() end
     if debugprofilestop() - work.sliceStart >= FRAME_BUDGET_MS then coroutine.yield() end
 end
 
@@ -171,21 +184,23 @@ end
 -- onDone(work) when it finishes, with work.totalMs, work.longestMs and
 -- work.frames. Errors go to the game's error display. label names it in
 -- addon.workLongest.
-function addon:RunWork(fn, onSlow, onDone, label)
-    local work = { co = coroutine.create(fn), statsChar = addon.statsChar,
-        totalMs = 0, longestMs = 0, frames = 0 }
+function addon:RunWork(fn, onSlow, onDone, label, keep)
+    local work = { co = coroutine.create(fn), statsChar = addon.statsChar, planChoices = addon.planChoices,
+        totalMs = 0, longestMs = 0, frames = 0, keep = keep }
     works[work.co] = work
-    current = work
+    -- keep: runs beside other work, not stopped by newer work (the perf
+    -- check's own steps)
+    if not keep then current = work end
     local slow = false
     local function Step()
-        if current ~= work then return end
+        if not work.keep and current ~= work then return end
         work.sliceStart = debugprofilestop()
         -- The work's own stats while it runs (see the rules above)
-        local outside = addon.statsChar
-        addon.statsChar = work.statsChar
+        local outside, outsideChoices = addon.statsChar, addon.planChoices
+        addon.statsChar, addon.planChoices = work.statsChar, work.planChoices
         local ok, err = coroutine.resume(work.co)
-        work.statsChar = addon.statsChar
-        addon.statsChar = outside
+        work.statsChar, work.planChoices = addon.statsChar, addon.planChoices
+        addon.statsChar, addon.planChoices = outside, outsideChoices
         local ms = debugprofilestop() - work.sliceStart
         work.totalMs, work.frames = work.totalMs + ms, work.frames + 1
         work.longestMs = math.max(work.longestMs, ms)
@@ -205,7 +220,7 @@ function addon:RunWork(fn, onSlow, onDone, label)
             if onDone then onDone(work) end
             return
         end
-        if current ~= work then return end
+        if not work.keep and current ~= work then return end
         if not slow then
             slow = true
             if onSlow then onSlow() end
@@ -564,6 +579,7 @@ local CHOICES = {
     minLine = {},
     dealPercent = {},
     heldDays = {},
+    buyOver = {},
     keepDays = {
         { value = 0, label = "Forever" },
         { value = 730, label = "2 years" },
@@ -596,6 +612,10 @@ end
 for _, value in ipairs({ 5, 10, 15, 20, 25 }) do
     table.insert(CHOICES.dealPercent, { value = value, label = string.format("%d%% below usual", value) })
 end
+for _, value in ipairs({ 0, 2, 5, 10 }) do
+    table.insert(CHOICES.buyOver, { value = value,
+        label = value == 0 and "Always ask" or string.format("Up to %d%% more", value) })
+end
 for _, value in ipairs({ 3, 5, 7, 14, 21, 30 }) do
     table.insert(CHOICES.heldDays, { value = value, label = string.format("%d days", value) })
 end
@@ -619,7 +639,7 @@ end
 local HELP = {
     priceSource = {
         "Price source",
-        "Automatic: an Auctionator scan made since you logged in wins; otherwise TSM's price, which its app updates about hourly. Live prices from AH searches you've just made are used first.",
+        "Automatic: the newest scan wins, Goldsmith's own or Auctionator's (one made since you logged in); otherwise TSM's price, which its app updates about hourly. Live prices from AH searches you've just made are used first.",
         "Prefer Auctionator: Auctionator's last scan even if it's days old, TSM only for items it hasn't seen.",
         "Prefer TSM: TSM's price, Auctionator only for items TSM has no price for. Live AH searches are ignored.",
         "Either way, a listing far below or above the usual price is replaced by TSM's market value when TSM is installed.",
@@ -678,6 +698,28 @@ local HELP = {
         "The Goldsmith button on the edge of the minimap: click to show or hide Goldsmith, right-click for these settings, drag to move it.",
         "Other ways to open Goldsmith: /gsm, a key (Options > Keybindings > Goldsmith), or the addons button by the minimap.",
     },
+    -- The row's hover: each box's name in gold, then what it does
+    ahScanRow = {
+        "Auction House scan",
+        "|cffe8c25aOn:|r a panel beside the AH window with Scan the AH and Buy next. Off: no scans.",
+        "|cffe8c25aAuto scan:|r scans when you open the AH and the last scan is over an hour old.",
+    },
+    ahScan = {
+        "On",
+        "A panel beside the AH window with Scan the AH and Buy next.",
+        "Off: no panel and no scans. Prices come from Auctionator, TSM and Goldsmith Data.",
+    },
+    autoScan = {
+        "Auto scan",
+        "Scans when you open the AH and the last scan is over an hour old. About a minute; you can keep using the AH.",
+        "If Auctionator scans too, Goldsmith reads its scan instead.",
+    },
+    buyOver = {
+        "Buy without asking",
+        "How much more than the plan Buy next pays without a second click. Up to 2% more: buys when the extra is under 2% of the item's cost or under 2% of the queue's profit.",
+        "Over that, the panel says how much more and what the queue earns then, and waits for a second click. It always asks when the queue would lose gold.",
+        "Always ask: a second click for anything over the plan. Under the plan always buys at once.",
+    },
     craftCost = {
         "Cost in the profession window",
         "Goldsmith's Your materials and Profit lines in the game's profession and crafting orders windows, under the materials. Hover them for the breakdown.",
@@ -692,7 +734,7 @@ local HELP = {
         "Key to open Goldsmith",
         "Set key opens the game's Keybindings at Goldsmith's section: click the box next to Show or hide the window and press the key you want.",
         "Goldsmith closes while you do it; press your new key to bring it back.",
-        "Two more keys are there: Craft next in the queue, and Open hovered item (hover an item in your bags, the AH or a chat link and press it for the item's page).",
+        "More keys are there: Craft next in the queue, Buy next for the queue at the AH, and Open hovered item (hover an item in your bags, the AH or a chat link and press it for the item's page).",
     },
 }
 
@@ -784,8 +826,8 @@ local function SetKeepDays(value, panel)
 end
 
 local COLUMNS = {
-    { title = "Crafting and prices", rows = { "priceSource", "minROI", "minLine", "dealPercent", "heldDays", "ignored", "keepDays" } },
-    { title = "Display", rows = { "tooltips", "chat", "characters", "showMinimap", "craftCost", "peekKey", "keybind" } },
+    { title = "Crafting and prices", rows = { "priceSource", "autoScan", "buyOver", "minROI", "minLine", "dealPercent", "heldDays", "keepDays" } },
+    { title = "Display", rows = { "ignored", "tooltips", "chat", "characters", "showMinimap", "craftCost", "peekKey", "keybind" } },
 }
 
 function addon:CreateSettingsPanel(parent)
@@ -821,6 +863,7 @@ function addon:CreateSettingsPanel(parent)
     rows.minLine = ChoiceRow(panel, "minLine", "Worth a to-do at", "The gold a suggested batch must make in all.")
     rows.dealPercent = ChoiceRow(panel, "dealPercent", "Cheap materials", "How far below usual a material's price counts as cheap.")
     rows.heldDays = ChoiceRow(panel, "heldDays", "Held too long", "Days unsold before a crafted item is flagged.")
+    rows.buyOver = ChoiceRow(panel, "buyOver", "Buy without asking", "How much over the plan Buy next pays without a second click.")
     rows.keepDays = Row(panel, "keepDays", "Keep history for", "How long purchases, sales and deposits are kept.")
     rows.keepDays.control = Dropdown(rows.keepDays, "keepDays", function(root)
         for _, c in ipairs(CHOICES.keepDays) do
@@ -886,6 +929,29 @@ function addon:CreateSettingsPanel(parent)
     rows.showMinimap.control:SetPoint("TOPRIGHT", 0, 0)
     UI.SetTooltip(rows.showMinimap.control, function(tooltip) AddHelp(tooltip, "showMinimap") end, "ANCHOR_LEFT")
     function rows.showMinimap:Update() self.control:SetChecked(addon:Setting("showMinimap")) end
+
+    -- Two boxes: the scan at all, and scanning when you open the AH
+    rows.autoScan = Row(panel, "ahScanRow", "Auction House scan", "Goldsmith's own scan and Buy next, in a panel beside the AH.")
+    rows.autoScan.on = UI.Checkbox(rows.autoScan, "On", function(checked)
+        addon:SetSetting("ahScan", checked)
+        if addon.UpdateScanPanel then addon.UpdateScanPanel() end
+        panel:Update()
+    end)
+    rows.autoScan.on:SetPoint("TOPLEFT", rows.autoScan, "TOPRIGHT", -170, 0)
+    UI.SetTooltip(rows.autoScan.on, function(tooltip) AddHelp(tooltip, "ahScan") end, "ANCHOR_LEFT")
+    rows.autoScan.control = UI.Checkbox(rows.autoScan, "Auto scan", function(checked)
+        if not addon:Setting("ahScan") then return end
+        addon:SetSetting("autoScan", checked)
+        panel:Update()
+    end)
+    rows.autoScan.control:SetPoint("TOPLEFT", rows.autoScan.on, "BOTTOMLEFT", 0, 0)
+    UI.SetTooltip(rows.autoScan.control, function(tooltip) AddHelp(tooltip, "autoScan") end, "ANCHOR_LEFT")
+    function rows.autoScan:Update()
+        local on = addon:Setting("ahScan")
+        self.on:SetChecked(on)
+        self.control:SetChecked(on and addon:Setting("autoScan"))
+        self.control:SetAlpha(on and 1 or 0.4)
+    end
 
     rows.craftCost = Row(panel, "craftCost", "Cost in the profession window", "Your materials and Profit under a recipe's materials.")
     rows.craftCost.control = UI.Checkbox(rows.craftCost, "Show", function(checked)

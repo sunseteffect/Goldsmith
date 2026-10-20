@@ -226,6 +226,10 @@ function addon:BuildBugReport()
     Add("Prices: source setting %s; Auctionator %s, last scan %s; TSM %s",
         addon:Setting("priceSource"), addon:HasAuctionator() and "yes" or "no",
         Ago(addon:HasAuctionator() and GoldsmithDB.lastPriceUpdate or nil), addon:HasTSM() and "yes" or "no")
+    local own = GoldsmithDB.ownScan
+    Add("Goldsmith scan: %s", own and string.format("%s, %s, %d items, %d auctions, %ds%s, newest: %s",
+        Ago(own.time), tostring(own.method), own.items or 0, own.auctions or 0, own.seconds or 0,
+        own.borrowed and ", read Auctionator's" or "", addon:OwnScanIsNewest() and "yes" or "no") or "none yet")
 
     -- Other addons
     local versions = {}

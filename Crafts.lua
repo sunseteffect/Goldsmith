@@ -783,7 +783,7 @@ local function PlanTooltip(tooltip, node)
     Line(tooltip, "Need", tostring(Whole(node.need)))
     -- A gold row chosen because gold is cheaper than silver right now
     if node.lowID and node.lowID ~= node.itemID and node.qualityTier and node.qualityTier == node.tierCount then
-        local low, high = addon:GetMarketPrice(node.lowID), addon:GetMarketPrice(node.itemID)
+        local low, high = addon:GetMarketPrice(node.lowID, true), addon:GetMarketPrice(node.itemID, true)
         if low and high and high <= low then
             Note(tooltip, string.format("Gold is cheaper than silver right now: %s vs %s.", Money(high), Money(low)), "profit")
         end
@@ -806,17 +806,21 @@ local function PlanTooltip(tooltip, node)
     end
     tooltip:AddLine(" ")
     tooltip:AddLine("Ways to get it (each)", 1, 0.82, 0)
+    -- The plan's own best when it held too few to salvage (node.cheapest)
+    local cheapest = node.cheapest or o.cheapest
     local function Option(option, label, detail)
         if not option then return end
         local tags = {}
-        if o.cheapest == option then
+        if cheapest == option then
             -- Picked for the materials you hold, not price (Planner.lua)
-            local held = o.craftHeld and option == o.craft and o.buy and o.buy.unit < option.unit
+            local held = ((o.craftHeld and option == o.craft) or (o.millHeld and option == o.mill))
+                and o.buy and o.buy.unit < option.unit
             table.insert(tags, held and "you have the materials" or "cheapest")
         end
+        if node.heldTooFew and option == o.mill then table.insert(tags, "you hold too few") end
         if o.override and node.best == option then table.insert(tags, "your choice") end
         Line(tooltip, "  " .. label, Money(option.unit) .. (#tags > 0 and ("  (" .. table.concat(tags, ", ") .. ")") or ""),
-            o.cheapest == option and "profit" or nil)
+            cheapest == option and "profit" or nil)
         -- Wrapped text loses the indent, so details come as short lines
         -- ("\n" between them), each indented
         for line in (detail or ""):gmatch("[^\n]+") do Note(tooltip, "    " .. line) end
@@ -891,31 +895,36 @@ local function PlanTooltip(tooltip, node)
 end
 
 -- Right-click a material: pick how to get it. The choice applies to that
--- item in every plan until changed back to "Cheapest way".
-local function PlanMenu(node)
+-- item in every plan until changed back to the cheapest way. The cheapest
+-- way is marked on its own line rather than listed again on a line of its
+-- own (user, 2026-10-19: "Cheapest way (Mill, 3.05g)" above "Salvage it
+-- (3.05g each)"; it also named the method, Mill, not the item's verb).
+-- Picking that line clears the choice, so it follows the cheapest way as
+-- prices change.
+local function PlanMenu(node, screen)
     local o = node.options
     if not (MenuUtil and MenuUtil.CreateContextMenu) then return end
     MenuUtil.CreateContextMenu(UIParent, function(_, root)
         root:CreateTitle(node.name)
-        local cheapestLabel = "Cheapest way"
-        if o.cheapest then
-            local held = o.craftHeld and o.cheapest == o.craft and o.buy and o.buy.unit < o.cheapest.unit
-            cheapestLabel = string.format(held and "Best way (%s, %s: you have the materials)" or "Cheapest way (%s, %s)",
-                o.cheapest.method, Money(o.cheapest.unit))
-        end
-        root:CreateRadio(cheapestLabel, function() return o.override == nil end, function()
-            addon:SetMethodOverride(node.itemID, nil)
-            addon.Refresh()
-        end)
+        -- Crafting from what you hold can be picked over a cheaper buy;
+        -- the plan's own best when it held too few to salvage
+        local cheapest = node.cheapest or o.cheapest
+        local held = ((o.craftHeld and cheapest == o.craft) or (o.millHeld and cheapest == o.mill))
+            and o.buy and o.buy.unit < cheapest.unit
         for _, m in ipairs(METHOD_LABELS) do
             local option = o[m.key]
             if option then
                 local label = m.key == "mill" and ((option.verb or "Mill") .. " it") or m.label
-                root:CreateRadio(string.format("%s (%s each)", label, Money(option.unit)),
-                    function() return o.override == m.method end,
+                local text = string.format("%s (%s each)", label, Money(option.unit))
+                local isCheapest = option == cheapest
+                if isCheapest then
+                    text = text .. (held and ", best: you have the materials" or ", cheapest")
+                end
+                root:CreateRadio(text,
+                    function() return o.override == m.method or (o.override == nil and isCheapest) end,
                     function()
-                        addon:SetMethodOverride(node.itemID, m.method)
-                        addon.Refresh()
+                        screen:Choices(true)[node.itemID] = (not isCheapest) and m.method or nil
+                        screen:ChoicesChanged()
                     end)
             end
         end
@@ -933,10 +942,11 @@ local function PlanMenu(node)
                 end)
         end
         root:CreateDivider()
-        root:CreateButton("Reset all my choices", function()
-            addon:ClearMethodOverrides()
+        root:CreateButton("Reset my choices", function()
+            local choices = screen:Choices()
+            if choices then wipe(choices) end
             if GoldsmithDB.ui2.useHeldGold then wipe(GoldsmithDB.ui2.useHeldGold) end
-            addon.Refresh()
+            screen:ChoicesChanged()
         end)
     end)
 end
@@ -1218,23 +1228,32 @@ end
 -- Materials: enough to start each craft (resourcefulness may give some
 -- back along the way, so you may get further than this). Adds notes and
 -- blockers to state; returns how many crafts the materials allow.
+-- What's short is given for all the crafts asked for, not one: "4 Tavern
+-- Fixings" for one craft was bought, then the queue of 5 stopped again
+-- (user, 2026-10-19: the goal is to finish the queue).
 local function CheckMaterials(state, needs, crafts)
-    local missing = {}
+    local short, stuck, allowed = {}, false, crafts
     for itemID, per in pairs(needs) do
         local have = C_Item.GetItemCount(itemID, true, false, true, true) or 0
         local possible = math.floor(have / per)
+        if possible < crafts then
+            table.insert(short, string.format("%d %s", per * crafts - have, MaterialName(itemID)))
+        end
         if possible == 0 then
-            table.insert(missing, string.format("%d %s", per - have, MaterialName(itemID)))
-        elseif possible < crafts then
-            table.insert(state.notes, string.format("Materials for %d crafts: %s runs out.", possible, MaterialName(itemID)))
-            crafts = possible
+            stuck = true
+        elseif possible < allowed then
+            allowed = possible
         end
     end
-    if #missing > 0 then
-        table.insert(state.blockers, "Missing for one craft: " .. table.concat(missing, ", ")
-            .. ". Send the shopping list to Auctionator.")
+    local all = string.format("%d craft%s", crafts, crafts == 1 and "" or "s")
+    if stuck then
+        table.insert(state.blockers, string.format("Missing for %s: %s.", all, table.concat(short, ", ")))
+        return crafts
+    elseif allowed < crafts then
+        table.insert(state.notes, string.format("Materials for %d of the %d crafts. Still to get for all %s: %s.",
+            allowed, crafts, all, table.concat(short, ", ")))
     end
-    return crafts
+    return allowed
 end
 
 -- Gold you hold standing in for silver you're short of (GetCraftReagents):
@@ -1352,6 +1371,9 @@ local function MillStepState(node, state)
         local inBank = (C_Item.GetItemCount(herbID, true, false, true, true) or 0) - inBags
         if inBank >= perCast then
             table.insert(state.blockers, string.format("Take %s out of the bank to %s it.", herbName, lower))
+        elseif addon.InMailCount and addon:InMailCount(herbID) > 0 then
+            -- Bought with Buy next, still in the mailbox (Shop.lua)
+            table.insert(state.blockers, string.format("Get %s from your mailbox to %s it.", herbName, lower))
         else
             table.insert(state.blockers, string.format("Not enough %s to %s (%d at a time). Send the shopping list to Auctionator.",
                 herbName, lower, perCast))
@@ -1390,8 +1412,25 @@ local function CheckStation(state, recipeID)
         if not r.met then
             table.insert(state.blockers, "Needs " .. (r.name or "something") .. " nearby.")
             state.nearby = true
+            state.nearbyRecipes = state.nearbyRecipes or {}
+            table.insert(state.nearbyRecipes, recipeID)
         end
     end
+end
+
+-- Whether every station those recipes wanted is nearby now: the
+-- every-second check asks only this, and plans again once it's true.
+-- Planning again every second (the queue, and the Queue tab with it)
+-- dropped frames while walking to an anvil (user, 2026-10-19).
+function addon.StationsMet(recipes)
+    if not (recipes and C_TradeSkillUI.GetRecipeRequirements) then return true end
+    for _, recipeID in ipairs(recipes) do
+        local ok, requirements = pcall(C_TradeSkillUI.GetRecipeRequirements, recipeID)
+        for _, r in ipairs(ok and requirements or {}) do
+            if not r.met then return false end
+        end
+    end
+    return true
 end
 
 local function CraftStepState(node, state)
@@ -1650,6 +1689,21 @@ local function CreatePlanScreen(parent)
 
     -- Adds this plan (how many, tier, concentration) to the crafting
     -- character's queue, or changes how many if it's already there
+    -- Your choices on this plan (right-click a row): the queue entry's once
+    -- it's queued, so Buy next and the queue follow them until it's
+    -- crafted or removed; before that, the plan's own (see WithChoices)
+    function screen:Choices(create)
+        local p = screen.plan
+        if not p then return nil end
+        local owner = screen.queued or p
+        if create and not owner.choices then owner.choices = {} end
+        return owner.choices
+    end
+
+    function screen:ChoicesChanged()
+        if screen.queued then addon:QueueEntryChanged() else addon.Refresh() end
+    end
+
     screen.queue = UI.Button(screen, "Add to queue", 130, 26, function()
         local p = screen.plan
         -- The queue counts items: what these crafts are sure to make
@@ -1657,6 +1711,12 @@ local function CreatePlanScreen(parent)
         if not p or quantity <= 0 then return end
         local concentrate = screen.tierInfo and screen.tierInfo.concentrate == true or false
         local updated = addon:AddToQueue(p.charKey, p.recipe.recipeID, quantity, p.tier, concentrate)
+        -- The choices made before queuing go with it
+        local entry = addon:FindQueueEntry(p.charKey, p.recipe.recipeID, p.tier, concentrate)
+        if entry and p.choices and next(p.choices) then
+            entry.choices = CopyTable(p.choices)
+            addon:QueueEntryChanged()
+        end
         addon:Notify("info", "%s %d %s %s %s's queue.", updated and "Set" or "Added", quantity,
             p.recipe.outputName, updated and "in" or "to", CharName(p.charKey))
         screen:Update()
@@ -1752,7 +1812,7 @@ local function CreatePlanScreen(parent)
             if node.finishingRow or (button == "RightButton" and node.finishing and node.finishingChoice) then
                 FinishingMenu(node.finishingChoice)
             elseif button == "RightButton" then
-                PlanMenu(node)
+                PlanMenu(node, screen)
             elseif IsShiftKeyDown() and addon:ShiftClickItem(node.itemID, node.name) then
                 -- Into the AH search or chat
             else
@@ -2291,13 +2351,13 @@ local function CreatePlanScreen(parent)
             return
         end
 
-        local plan = addon:WithCharacter(p.charKey, addon.BuildPlan, addon, recipe, quantity,
-            true, tierInfo)
+        local plan = addon:WithChoices(screen:Choices(), addon.WithCharacter, addon, p.charKey, addon.BuildPlan,
+            addon, recipe, quantity, true, tierInfo)
         -- With concentration, plan only the crafts it covers now, like the
         -- Craft button: 2 crafts were planned and shopped for with enough
         -- for 1 (user, 2026-10-12). The box keeps your number. Counted at
         -- the full cost: ingenuity's refund is luck (user, 2026-10-16)
-        local concLimit
+        local concLimit, leftover
         if tierInfo and tierInfo.concentrate then
             local current = p.charKey == addon.charKey and addon:GetConcentration(recipe.profession)
                 or addon:GetCharacterConcentration(p.charKey, recipe.profession)
@@ -2307,14 +2367,16 @@ local function CreatePlanScreen(parent)
                 if affordable > 0 and plan.crafts > affordable then
                     concLimit = { crafts = affordable, current = current }
                     local q = screen:PlannedItems(affordable)
-                    local capped = addon:WithCharacter(p.charKey, addon.BuildPlan, addon, recipe, q, true, tierInfo)
+                    local capped = addon:WithChoices(screen:Choices(), addon.WithCharacter, addon, p.charKey,
+                        addon.BuildPlan, addon, recipe, q, true, tierInfo)
                     -- The mix for the crafts planned, not the number typed:
                     -- Make 30 picked one using less of the gold dust you
                     -- hold, though 2 crafts were planned (user, 2026-10-12)
                     local base = screen.baseTierInfo
                     local repick = base and addon:WithCharacter(p.charKey, addon.ChooseMix, addon, recipe, base, q)
                     if repick and repick.scenario ~= tierInfo.scenario then
-                        local again = addon:WithCharacter(p.charKey, addon.BuildPlan, addon, recipe, q, true, repick)
+                        local again = addon:WithChoices(screen:Choices(), addon.WithCharacter, addon, p.charKey,
+                            addon.BuildPlan, addon, recipe, q, true, repick)
                         local full2 = repick.scenario and repick.scenario.concentration or repick.concentration
                         local fits = full2 and (full2 > 0 and math.floor(current / full2) or math.huge) or 0
                         if again.crafts <= fits then
@@ -2325,6 +2387,22 @@ local function CreatePlanScreen(parent)
                     plan = capped
                 elseif affordable == 0 then
                     concLimit = { crafts = 0, current = current, full = full }
+                end
+                -- What the concentration left after these crafts covers with
+                -- a cheaper mix, as the to-do's "other mix, conc left" line
+                -- (4 Sterling Alloy at 1 gold ingot, then 1 at 2 gold; user
+                -- 2026-10-19)
+                local usedFull = tierInfo.scenario and tierInfo.scenario.concentration or tierInfo.concentration or full
+                local left = current - plan.crafts * usedFull
+                if plan.crafts > 0 and left > 0 then
+                    for _, e in ipairs(tierInfo.scenarios or {}) do
+                        local eFull = e.scenario and e.scenario.concentration or e.concentration
+                        if e.tier == tierInfo.tier and e.concentrate and eFull and eFull > 0 and eFull <= left
+                            and (e.profit or 0) > 0 and e.description ~= tierInfo.description
+                            and (not leftover or (e.profit or 0) > (leftover.mix.profit or 0)) then
+                            leftover = { mix = e, left = math.floor(left) }
+                        end
+                    end
                 end
             end
         end
@@ -2344,13 +2422,19 @@ local function CreatePlanScreen(parent)
             screen.askedCrafts = asked
             screen.qty:SetText(tostring(plan.crafts))
             screen.crafts:SetText(screen.crafts:GetText() .. addon:Colorize(string.format(
-                "  (you asked for %d: your %d concentration covers %d craft%s now)", asked, concLimit.current,
-                concLimit.crafts, concLimit.crafts == 1 and "" or "s"), "warning"))
+                "  (%d asked: concentration covers %d now)", asked, plan.crafts), "warning"))
         elseif screen.askedCrafts then
             -- Back to the number asked for: concentration came back, or
             -- there's none at all now (the note below says so)
             screen.qty:SetText(tostring(screen.askedCrafts))
             screen.askedCrafts = nil
+        end
+        if leftover then
+            -- Short: "2 gold mix" for "2 gold Refulgent Copper Ingot"
+            local d = leftover.mix.description or "another mix"
+            local short = d:match("^(%d+ gold)") and (d:match("^(%d+ gold)") .. " mix") or d
+            screen.crafts:SetText(screen.crafts:GetText() .. addon:Colorize(string.format(
+                "  ·  %d conc left: 1 more with the %s", leftover.left, short), "muted"))
         end
         if concLimit and concLimit.crafts == 0 then
             screen.crafts:SetText(screen.crafts:GetText() .. addon:Colorize(string.format(
@@ -2425,7 +2509,7 @@ local function CreatePlanScreen(parent)
             screen.sells.value:SetTextColor(addon:Color("dim"))
             screen.sells.note:SetText(plan.doubtPrice
                 and string.format("Listed at %s, not counted: nothing backs it", Money(plan.doubtPrice))
-                or "No AH price yet. Scan with Auctionator.")
+                or "No AH price yet. Scan the AH (Goldsmith panel beside it).")
             screen.profit.value:SetText("-")
             screen.profit.value:SetTextColor(addon:Color("dim"))
             screen.profit.note:SetText("")
@@ -2485,7 +2569,8 @@ local function CreatePlanScreen(parent)
             if entry.live then live = live + 1 end
             if entry.short then short = true end
         end
-        local spendText = string.format("To buy on the AH: %d item%s, about %s",
+        local spendText = #plan.buyAH == 0 and "Nothing to buy on the AH"
+            or string.format("To buy on the AH: %d item%s, about %s",
             #plan.buyAH, #plan.buyAH == 1 and "" or "s", Money(spend))
         if live > 0 then spendText = spendText .. string.format(" (%d priced from live listings)", live) end
         if short then spendText = spendText .. ". Not enough listed for all of it." end
@@ -2854,7 +2939,7 @@ local function CreateSalvageScreen(parent)
         else
             screen.cost.value:SetText("-")
             screen.cost.value:SetTextColor(addon:Color("dim"))
-            screen.cost.note:SetText("No AH price for " .. t.name .. ". Scan with Auctionator.")
+            screen.cost.note:SetText("No AH price for " .. t.name .. ". Scan the AH (Goldsmith panel beside it).")
             screen.cost.note:SetTextColor(addon:Color("warning"))
         end
         if value > 0 then
@@ -3649,7 +3734,8 @@ end)
 -- (user, 2026-10-09: still greyed out next to the anvil)
 C_Timer.NewTicker(1, function()
     local screen = view and view.plan
-    if screen and screen:IsVisible() and screen.plan and screen.craftState and screen.craftState.nearby then
+    local state = screen and screen.craftState
+    if state and screen:IsVisible() and screen.plan and state.nearby and addon.StationsMet(state.nearbyRecipes) then
         screen:Update()
     end
 end)

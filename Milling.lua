@@ -548,6 +548,7 @@ function addon:GetSalvageRows(prof, opts)
         local profession = record.profession or "Inscription"
         local byChar = totals[itemID]
         local charKey = (record.milled or 0) > 0 and (prof == "All" or profession == prof)
+            and (record.estimated or next(record.outputs or {}) ~= nil)
             and (not opts.showExpansion or opts.showExpansion(addon:GetItemExpansion(itemID)))
             and (not opts.match or opts.match(SalvageNames(itemID, record, byChar)))
             and SalvagerFor(profession, byChar, opts.onlyMine)
@@ -800,8 +801,28 @@ function addon:InitializeMilling()
     end
 
     hooksecurefunc(C_TradeSkillUI, "CraftSalvage", OnCraftSalvage)
-    -- A regular craft uses up materials too, so milling tracking stops there
+    -- A regular craft uses up materials too, so milling tracking stops there;
+    -- enchants too (user, 2026-10-20: a scroll made after shattering Motes
+    -- of Light was counted as what the shatter made)
     hooksecurefunc(C_TradeSkillUI, "CraftRecipe", EndSession)
+    hooksecurefunc(C_TradeSkillUI, "CraftEnchant", EndSession)
+
+    -- Enchant scrolls recorded as salvage output before that are dropped:
+    -- no salvage makes one
+    local dropped = {}
+    for _, record in pairs(GoldsmithDB.milling) do
+        for id, out in pairs(record.outputs or {}) do
+            if out.name and out.name:find("^Enchant ") then
+                record.outputs[id] = nil
+                dropped[id] = true
+            end
+        end
+    end
+    for _, run in ipairs(GoldsmithDB.salvageRuns or {}) do
+        for id in pairs(dropped) do
+            if run.outputs then run.outputs[id] = nil end
+        end
+    end
 
     local frame = CreateFrame("Frame")
     frame:RegisterEvent("BAG_UPDATE_DELAYED")

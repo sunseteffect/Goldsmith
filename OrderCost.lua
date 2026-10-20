@@ -71,6 +71,16 @@ local function ShownOutput(form, recipeID)
     local okO, op = pcall(form.GetRecipeOperationInfo, form)
     local quality = okO and type(op) == "table" and op.craftingQualityID
     if not quality then return nil end
+    -- The item for that quality as the plan knows it: an enchant's scroll
+    -- isn't reported here, so it fell back to the scroll first made, gold
+    -- (user, 2026-10-18: Berserker's Rage +149g here, -581g silver in the plan)
+    local td = addon.char and addon.char.tierData and addon.char.tierData[recipeID]
+    if td and td.qualities and td.outputs then
+        for tier, qualityID in ipairs(td.qualities) do
+            local out = td.outputs[tier]
+            if qualityID == quality and out and out.itemID then return out.itemID end
+        end
+    end
     local ok, out = pcall(C_TradeSkillUI.GetRecipeOutputItemData, recipeID, {}, nil, quality)
     return ok and type(out) == "table" and out.itemID or nil
 end
@@ -131,22 +141,25 @@ local CRAFT = {
         local okR, recipeID = pcall(tx.GetRecipeID, tx)
         return addon:GetCraftPreview(tx, okR and recipeID and ShownOutput(form, recipeID))
     end,
-    -- Totals for one craft with the per-item figure beside them, as the
-    -- Crafts tab's "each" (user, 2026-10-11: "is that per tonic or for
-    -- all 5?")
+    -- Per item first, as the Crafts tab shows it, with one craft's total
+    -- beside it (user, 2026-10-11: "is that per tonic or for all 5?";
+    -- 2026-10-19: +29.54g here against the Crafts tab's +14.27g looked
+    -- like they didn't agree, when one was a craft of about 2)
     lines = function(p)
-        local cost = (p.complete and "" or "at least ") .. Money(p.cost)
-            .. string.format(" (%s each)", Money(p.cost / p.perCraft))
+        local cost = (p.complete and "" or "at least ") .. Money(p.cost / p.perCraft) .. " each"
+            .. string.format(" (%s a craft)", Money(p.cost))
         local second
         if not p.sellable then
             second = addon:Colorize("Can't be sold on the AH", "muted")
+        elseif p.scrollMissing then
+            second = addon:Colorize("Scroll not found yet (hover for why)", "muted")
         elseif not p.unitPrice then
             second = addon:Colorize("No AH price for what it makes", "muted")
         else
             local profit = CraftWorth(p) - p.cost
             second = "Profit: " .. (p.complete and "" or "at most ")
-                .. addon:Colorize(addon:FormatSignedMoney(profit), addon:MoneyColor(profit))
-                .. string.format(" (%s each)", addon:FormatSignedMoney(profit / p.perCraft))
+                .. addon:Colorize(addon:FormatSignedMoney(profit / p.perCraft), addon:MoneyColor(profit)) .. " each"
+                .. string.format(" (%s a craft)", addon:FormatSignedMoney(profit))
         end
         return "Your materials: " .. cost, second
     end,
@@ -162,7 +175,9 @@ local CRAFT = {
         end
         local made = p.perCraft == math.floor(p.perCraft) and tostring(p.perCraft)
             or string.format("%.1f", p.perCraft)
-        if not p.sellable then
+        if p.scrollMissing then
+            tooltip:AddLine(addon.SCROLL_MISSING_TEXT, 0.8, 0.8, 0.8, true)
+        elseif not p.sellable then
             tooltip:AddDoubleLine("Makes " .. made, "can't be sold", 1, 1, 1, 0.8, 0.8, 0.8)
         elseif p.unitPrice then
             tooltip:AddDoubleLine("Makes " .. made, Money(CraftWorth(p)) .. " after AH cut", 1, 1, 1, 1, 1, 1)

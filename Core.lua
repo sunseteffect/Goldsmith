@@ -15,6 +15,7 @@ end
 BINDING_HEADER_GOLDSMITH = "Goldsmith"
 BINDING_NAME_GOLDSMITH_TOGGLE = "Show or hide the window"
 BINDING_NAME_GOLDSMITH_CRAFT_NEXT = "Craft next in the queue"
+BINDING_NAME_GOLDSMITH_BUY_NEXT = "Buy next for the queue"
 BINDING_NAME_GOLDSMITH_OPEN_ITEM = "Open hovered item"
 BINDING_NAME_GOLDSMITH_PEEK = "Hold to see through"
 
@@ -54,8 +55,22 @@ function addon:RecordPurchase()
 
     local prof = addon:GetProfessionForItemName(p.name) or "Unassigned"
     addon.ledger:addCost(prof, p.name, p.quantity, spent, "PURCHASE", p.itemID)
-    addon:Notify("money", "Bought %s x%d for %.2fg (%.2fg each)",
-        p.name, p.quantity, spent / 10000, (spent / p.quantity) / 10000)
+    -- Bought with Buy next: how far from the plan, in all (user, 2026-10-19:
+    -- "show the variance in price we paid vs the plan. keep it short"; the
+    -- difference reads quicker than the plan's price each)
+    local planned = addon.buyNextPlanned
+    addon.buyNextPlanned = nil
+    local plannedText = ""
+    if planned and planned.itemID == p.itemID and planned.quantity == p.quantity and planned.cost then
+        local diff = spent - planned.cost
+        if math.abs(diff) < 100 then
+            plannedText = ", on plan"
+        else
+            plannedText = string.format(", %.2fg %s plan", math.abs(diff) / 10000, diff > 0 and "over" or "under")
+        end
+    end
+    addon:Notify("money", "Bought %s x%d for %.2fg (%.2fg each%s)",
+        p.name, p.quantity, spent / 10000, (spent / p.quantity) / 10000, plannedText)
     addon:ShoppingListBought(p.itemID, p.quantity)
 
     if addon.Refresh then
@@ -401,6 +416,18 @@ function addon:ReassignProfessions()
     end
 end
 
+-- A purchase is recorded a moment after the last change in gold
+local settleCount = 0
+local function SettleMoney()
+    settleCount = settleCount + 1
+    local mine = settleCount
+    C_Timer.After(1, function()
+        if mine == settleCount and awaitingMoney and pending and GetMoney() < pending.moneyBefore then
+            addon:RecordPurchase()
+        end
+    end)
+end
+
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("COMMODITY_PURCHASE_SUCCEEDED")
@@ -418,12 +445,11 @@ frame:SetScript("OnEvent", function(self, event, arg1)
 
     elseif event == "COMMODITY_PURCHASE_SUCCEEDED" then
         if not pending then return end
-        -- Gold may already be deducted; if not, wait for PLAYER_MONEY
-        if GetMoney() < pending.moneyBefore then
-            addon:RecordPurchase()
-        else
-            awaitingMoney = true
-        end
+        -- The gold can come off in more than one step: 23 Cellular Slab
+        -- for 220.32g were saved as 206.77g, recorded at the first drop
+        -- (2026-10-19). Recorded once it has been still for a moment.
+        awaitingMoney = true
+        SettleMoney()
 
     elseif event == "COMMODITY_PURCHASE_FAILED" then
         pending = nil
@@ -431,7 +457,7 @@ frame:SetScript("OnEvent", function(self, event, arg1)
 
     elseif event == "PLAYER_MONEY" then
         if awaitingMoney then
-            addon:RecordPurchase()
+            SettleMoney()
         end
         if #pendingSales > 0 and knownMoney then
             local increase = GetMoney() - knownMoney
@@ -541,6 +567,7 @@ local function PrintHelp()
     print("  /gsm data - check the numbers behind the window")
     print("  /gsm setup - show the getting started checklist again")
     print("  /gsm tour - a short tour of the window")
+    print("  /gsm scan - scan the AH for every price (at the AH)")
     print("  /gsm cooldowns - craft cooldowns on every character")
     print("  /gsm gathered - what was counted as gathered today, and what was skipped")
     print("  /gsm buffs - your buffs, and the crafting buffs Goldsmith has seen")
@@ -573,6 +600,8 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:ShowSetup()
     elseif cmd == "tour" then
         addon:StartTour()
+    elseif cmd == "scan" then
+        addon:ScanAH(false)
     elseif cmd == "stats" then
         addon:DumpCraftingStats()
     elseif cmd == "salvage" then

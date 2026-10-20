@@ -186,6 +186,44 @@ local function GetRobustBookPrice(book)
     return book.levels[#book.levels].price
 end
 
+-- The same rule for Goldsmith's own scan, which sees every listing (Scan.lua)
+function addon:RobustBookPrice(book)
+    return GetRobustBookPrice(book)
+end
+
+-- Goldsmith's own AH scan (Scan.lua), saved as
+--   GoldsmithDB.ownScan = { time, method, auctions, items, seconds,
+--                           prices = { [itemID] = { fair, lowest, quantity } } }
+-- fair: the lowest price with real quantity behind it (the order book
+-- rule above), from every listing in a full scan; a page-by-page scan only
+-- sees each item's lowest, so there fair = lowest. Used like an
+-- Auctionator scan: when it's the newest price there is (OwnScanIsNewest),
+-- or for items nothing else prices.
+function addon:GetScanPrice(itemID)
+    -- The scan turned off in Settings: its prices aren't used either
+    local scan = not TourPrices() and addon:Setting("ahScan") and GoldsmithDB.ownScan
+    local entry = scan and scan.prices and itemID and scan.prices[itemID]
+    if not entry then return nil end
+    return entry[1], math.max(0, math.floor((time() - scan.time) / 86400))
+end
+
+function addon:GetOwnScanTime()
+    if not addon:Setting("ahScan") then return nil end
+    return GoldsmithDB.ownScan and GoldsmithDB.ownScan.time
+end
+
+-- Newer than Auctionator's last full scan and Goldsmith Data; with TSM,
+-- only a scan from this session (TSM's app refreshes about hourly)
+function addon:OwnScanIsNewest()
+    local scanned = not TourPrices() and addon:GetOwnScanTime()
+    if not scanned then return false end
+    if addon:HasAuctionator() and (GoldsmithDB.lastFullScan or 0) > scanned then return false end
+    local data = addon:GetBlizzardDataTime()
+    if data and data > scanned then return false end
+    if addon:HasTSM() and scanned < sessionStart then return false end
+    return true
+end
+
 -- Average price per unit to buy `quantity` from the live listings, whether
 -- enough were listed, and the book's time; nil without a fresh order book.
 function addon:GetLiveBuyCost(itemID, quantity)
@@ -314,7 +352,7 @@ local function SoldCap(itemID, price)
     end
 end
 
-local function GetBlizzardPrice(itemID)
+local function GetBlizzardPrice(itemID, buying)
     local data = GoldsmithPriceData
     local entry = data and data.items and data.items[itemID]
     if not entry then return nil end
@@ -328,7 +366,8 @@ local function GetBlizzardPrice(itemID)
         note = string.format("lowest listing %s looked like a small undercut", FormatGold(price))
         price = market
     end
-    local sold, soldNote = SoldCap(itemID, price)
+    local sold, soldNote
+    if not buying then sold, soldNote = SoldCap(itemID, price) end
     if sold then price, note = sold, soldNote elseif soldNote then note = note or soldNote end
     local age = math.max(0, math.floor((time() - (data.updated or time())) / 86400))
     return price, age, note
@@ -405,7 +444,11 @@ local SALE_HIGH_RATIO = 3
 -- cheap Felberry Figs sold out, 355 sat at 10g while they sold for about
 -- 1g, and a search made Figs a 40g craft (user, 2026-10-18). TSM's region
 -- sale average, else Goldsmith Data's sale price (SoldCap).
-local function SaleCheck(itemID, price, source)
+-- Not when buying: a material costs what's listed, whatever it sold for
+-- before (user, 2026-10-20: Hollow Grouper bought out and relisted at 3g,
+-- the plan still salvaged it at its 0.50g sale average)
+local function SaleCheck(itemID, price, source, buying)
+    if buying then return price, source, nil end
     local saleAvg = GetTSMValue("DBRegionSaleAvg", itemID)
     if saleAvg then
         if price > saleAvg * SALE_HIGH_RATIO then
@@ -469,7 +512,10 @@ end
 -- Most listings expire: under this share sold (TSM's sale rate), plans warn
 addon.LOW_SALE_RATE = 0.10
 
-function addon:GetAHPriceInfo(itemID)
+-- buying: the price to pay for it (plans, material costs), without the
+-- checks against what it sold for (SaleCheck, SoldCap, TSM sale average),
+-- which are for valuing what you'd sell
+function addon:GetAHPriceInfo(itemID, buying)
     if not itemID then return nil end
 
     -- The price source setting: "auto" (above), "auctionator" (its last
@@ -479,21 +525,26 @@ function addon:GetAHPriceInfo(itemID)
 
     local book = preferred ~= "tsm" and GetFreshOrderBook(itemID)
     if book then
-        return SaleCheck(itemID, GetRobustBookPrice(book), "Live")
+        return SaleCheck(itemID, GetRobustBookPrice(book), "Live", buying)
     end
-    local price, source, age, note = StoredAHPrice(itemID, preferred)
+    local price, source, age, note = StoredAHPrice(itemID, preferred, buying)
     -- A search price, unless it's far below the others: likely a lone
     -- undercut (see SEARCH_MAX_DROP)
     local searched = preferred ~= "tsm" and addon:GetSearchPrice(itemID)
     if searched and (not price or searched >= price * (1 - SEARCH_MAX_DROP)) then
-        return SaleCheck(itemID, searched, "Search")
+        return SaleCheck(itemID, searched, "Search", buying)
     end
     return price, source, age, note
 end
 
 -- The AH price from saved data (Auctionator, TSM, Goldsmith Data), as
 -- GetAHPriceInfo returns it, without live or searched prices
-StoredAHPrice = function(itemID, preferred)
+StoredAHPrice = function(itemID, preferred, buying)
+    -- Goldsmith's own scan, when it's the newest (not with a source preferred)
+    local scanned, scanAge = addon:GetScanPrice(itemID)
+    if scanned and preferred == "auto" and addon:OwnScanIsNewest() then
+        return addon:CheckAgainstMarket(itemID, scanned, "Scan", scanAge, buying)
+    end
     local auctionator = addon:GetAuctionatorPrice(itemID)
     local age = auctionator and GetAuctionatorAge(itemID)
     local price, source
@@ -518,15 +569,19 @@ StoredAHPrice = function(itemID, preferred)
         else
             -- No price from either addon, or Auctionator's is a day or more
             -- old and the Blizzard data is fresher
-            local blizzard, blizzardAge, note = GetBlizzardPrice(itemID)
+            local blizzard, blizzardAge, note = GetBlizzardPrice(itemID, buying)
             if blizzard then
                 return blizzard, "Blizzard", blizzardAge, note
             end
         end
     end
+    -- Nothing else prices it: Goldsmith's own scan, however old
+    if not price and scanned then
+        return addon:CheckAgainstMarket(itemID, scanned, "Scan", scanAge, buying)
+    end
     if not price then return nil end
 
-    return addon:CheckAgainstMarket(itemID, price, source, age)
+    return addon:CheckAgainstMarket(itemID, price, source, age, buying)
 end
 
 -- Outlier check against TSM's market value: a lowest price far below it
@@ -542,16 +597,17 @@ end
 -- price more than SALE_HIGH_RATIO times that is capped at it.
 local OUTLIER_HIGH_RATIO = 5
 
-function addon:CheckAgainstMarket(itemID, price, source, age)
+function addon:CheckAgainstMarket(itemID, price, source, age, buying)
     local listed, note = price, nil
     local market = GetTSMValue("DBMarket", itemID)
     if not market then
         local blizzard, blizzardAge
-        if source ~= "Blizzard" then blizzard, blizzardAge = GetBlizzardPrice(itemID) end
+        if source ~= "Blizzard" then blizzard, blizzardAge = GetBlizzardPrice(itemID, buying) end
         if blizzard and price > blizzard * OUTLIER_HIGH_RATIO then
             return blizzard, "Blizzard", blizzardAge,
                 string.format("lowest listing %s is far above the usual price", FormatGold(listed))
         end
+        if buying then return price, source, age, note end
         local sold, soldNote = SoldCap(itemID, price)
         if sold then
             return sold, "Blizzard", blizzardAge, soldNote
@@ -565,7 +621,7 @@ function addon:CheckAgainstMarket(itemID, price, source, age)
         price, source, age = market, "TSM market", nil
         note = string.format("lowest listing %s is far above the usual price", FormatGold(listed))
     end
-    local saleAvg = GetTSMValue("DBRegionSaleAvg", itemID)
+    local saleAvg = not buying and GetTSMValue("DBRegionSaleAvg", itemID)
     if saleAvg and price > saleAvg * SALE_HIGH_RATIO then
         return saleAvg, "TSM sale avg", nil,
             string.format("listed at %s, but it usually sells for %s", FormatGold(listed), FormatGold(saleAvg))
@@ -573,20 +629,20 @@ function addon:CheckAgainstMarket(itemID, price, source, age)
     return price, source, age, note
 end
 
-function addon:GetAHPrice(itemID)
-    return (addon:GetAHPriceInfo(itemID))
+function addon:GetAHPrice(itemID, buying)
+    return (addon:GetAHPriceInfo(itemID, buying))
 end
 
 -- What an item costs to get: the AH price, unless a vendor sells it for
 -- less (or it isn't on the AH), in which case the vendor price with source
 -- "Vendor". Same returns as GetAHPriceInfo.
-function addon:GetMarketPriceInfo(itemID)
+function addon:GetMarketPriceInfo(itemID, buying)
     if not itemID then return nil end
     -- A box you craft and have opened (School of Gems): what's inside, on
     -- average (Gathered.lua). It can't go on the AH itself.
     local box = addon.GetBoxValue and addon:GetBoxValue(itemID)
     if box then return box, "Contents", nil end
-    local price, source, age, note = addon:GetAHPriceInfo(itemID)
+    local price, source, age, note = addon:GetAHPriceInfo(itemID, buying)
     local vendor = addon:GetVendorPrice(itemID)
     if vendor and (not price or vendor <= price) then
         return vendor, "Vendor", nil
@@ -594,8 +650,9 @@ function addon:GetMarketPriceInfo(itemID)
     return price, source, age, note
 end
 
-function addon:GetMarketPrice(itemID)
-    return (addon:GetMarketPriceInfo(itemID))
+-- buying: what it costs to get (see GetAHPriceInfo)
+function addon:GetMarketPrice(itemID, buying)
+    return (addon:GetMarketPriceInfo(itemID, buying))
 end
 
 -- Auctionator's own age for an item's price, regardless of which source is
@@ -637,6 +694,11 @@ function addon:PlainPriceSourceText(itemID, source, age)
         local s = itemID and GoldsmithDB.searchPrices and GoldsmithDB.searchPrices[itemID]
         return s and string.format("AH search, %dm ago", math.floor((time() - s.time) / 60)) or "AH search"
     end
+    if source == "Scan" then
+        local t = addon:GetOwnScanTime()
+        if t and date("%Y-%m-%d", t) == date("%Y-%m-%d") then return "Goldsmith scan, " .. date("%H:%M", t) end
+        return "Goldsmith scan, " .. addon:FormatAge(math.max(1, age or 1))
+    end
     if source == "TSM" then return "TSM" end
     if source == "TSM market" then return "TSM market value" end
     if source == "TSM sale avg" then return "TSM sale average" end
@@ -661,8 +723,8 @@ function addon:PriceAgeText(itemID)
 end
 
 -- Same as PriceAgeText, for the AH price only (ignoring vendor prices)
-function addon:AHPriceAgeText(itemID)
-    local price, source, age, note = addon:GetAHPriceInfo(itemID)
+function addon:AHPriceAgeText(itemID, buying)
+    local price, source, age, note = addon:GetAHPriceInfo(itemID, buying)
     if not price then return "no price" end
     return addon:PriceSourceText(itemID, source, age, note)
 end
@@ -1289,6 +1351,22 @@ end
 -- enhancement (scroll), not something else with the same name.
 local ENCHANTING_VELLUM = 38682
 
+-- An enchant whose scroll Goldsmith hasn't found yet (by recipe ID or the
+-- enchant's name): nothing to price it by, which looked broken (user,
+-- 2026-10-18: Rite of the Hash'ey, a "?" page with no price)
+local SCROLL_MISSING_TEXT = "Goldsmith hasn't found this enchant's scroll yet. It fills in once one shows up in an AH scan or you craft one."
+function addon:EnchantScrollMissing(recipeID, name)
+    if recipeID then
+        return GoldsmithDB.pendingEnchants[recipeID] ~= nil and not GoldsmithDB.scrollOutputs[recipeID]
+    end
+    if not name then return false end
+    for id, pending in pairs(GoldsmithDB.pendingEnchants) do
+        if pending.name == name and not GoldsmithDB.scrollOutputs[id] then return true end
+    end
+    return false
+end
+addon.SCROLL_MISSING_TEXT = SCROLL_MISSING_TEXT
+
 local function GetVellumID()
     for _, scroll in pairs(GoldsmithDB.scrollOutputs) do
         if scroll.vellumID then
@@ -1427,6 +1505,8 @@ local function ReadFinishingOptions(recipeID)
             local quantity = math.max(slot.quantityRequired or 1, 1)
             for _, reagent in ipairs(slot.reagents) do
                 if reagent.itemID then
+                    -- Each option is a call to the game: the scan can wait here
+                    if addon.TierYield then addon.TierYield() end
                     local list = { { reagent = { itemID = reagent.itemID }, quantity = quantity,
                         dataSlotIndex = slot.dataSlotIndex } }
                     local okOp, op = pcall(C_TradeSkillUI.GetCraftingOperationInfo, recipeID, list, nil, false)
@@ -1504,6 +1584,7 @@ function addon:RefreshRecipeStats(recipeID)
     -- from it)
     if op.isQualityCraft and (GoldsmithDB.recipes[recipeID] or GoldsmithDB.unlearned[recipeID])
         and addon.RefreshTierData then
+        if addon.TierYield then addon.TierYield() end
         addon:RefreshTierData(recipeID)
     end
 end
@@ -1999,7 +2080,7 @@ end
 -- the price, or making it yourself (milling, your crafts) when that's
 -- cheaper, or what you paid when there's no price
 local function TodaysUnit(id, name, outputID)
-    local best = addon:GetMarketPrice(id)
+    local best = addon:GetMarketPrice(id, true)
     if name and id ~= outputID then
         for _, made in ipairs({ addon:GetMilledCost(name) or false, addon:GetCraftedCostByName(name) or false }) do
             if made and (not best or made < best) then best = made end
@@ -2020,7 +2101,7 @@ local function ValueMaterials(used, outputID, today)
             if today then
                 unit = TodaysUnit(id, name, outputID)
             else
-                unit = (name and addon:GetOwnCost(name, outputID, id)) or addon:GetMarketPrice(id)
+                unit = (name and addon:GetOwnCost(name, outputID, id)) or addon:GetMarketPrice(id, true)
             end
             if unit then cost = cost + unit * qty else complete = false end
             table.insert(mats, { itemID = id, qty = qty, unit = unit })
@@ -2166,6 +2247,7 @@ function addon:GetCraftPreview(tx, outputItemID)
         itemID = itemID, perCraft = perCraft, base = base,
         unitPrice = sellable and itemID and addon:GetMarketPrice(itemID) or nil,
         sellable = sellable,
+        scrollMissing = not itemID and addon:EnchantScrollMissing(recipeID) or nil,
         -- A bound box: priced by what's inside, from this many opened
         opened = bound and opened or nil,
     }
@@ -2194,7 +2276,7 @@ function addon:RepairOrderLots()
             for id, qty in pairs(used) do
                 if qty > 0 then
                     lot.yours[id] = qty
-                    local unit = (names[id] and addon:GetOwnCost(names[id], lot.itemID)) or addon:GetMarketPrice(id)
+                    local unit = (names[id] and addon:GetOwnCost(names[id], lot.itemID)) or addon:GetMarketPrice(id, true)
                     if unit then cost = cost + unit * qty else complete = false end
                 end
             end
@@ -2269,7 +2351,7 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTe
     -- 2 silver Munsell Ink at 37.50g each (gold ones in the average) made a
     -- Missive cost 66g instead of about 40g (2026-10-10).
     local function UnitValue(id)
-        return (names[id] and addon:GetOwnCost(names[id], resultData.itemID, id)) or addon:GetMarketPrice(id)
+        return (names[id] and addon:GetOwnCost(names[id], resultData.itemID, id)) or addon:GetMarketPrice(id, true)
     end
 
     -- Materials resourcefulness gave back. On your own crafts they lower
@@ -3221,7 +3303,18 @@ end
 -- avoid a hitch, and each recipe is only tried once per session. Stats
 -- (and tier mixes) are read again each time a profession window opens.
 local SCAN_BATCH = 20
-local FRAME_BUDGET_MS = 5
+-- 2 ms a frame: at 130 fps a frame is under 8 ms, and 5 took it to about
+-- 50 while the scan ran (user, 2026-10-19). Slower, but in the background.
+local FRAME_BUDGET_MS = 2
+-- Stats are read again when a profession window opens only after
+-- something that changes them (skill, knowledge, gear), or an hour on
+-- (prices pick which mixes are tried): every open re-read every recipe
+local STATS_STALE = 3600
+-- A slice every STEP_GAP seconds, not every frame: even 2 ms a frame
+-- was felt on the first open after a reload (user, 2026-10-19). Most
+-- frames are left alone; the scan takes longer, in the background.
+local STEP_GAP = 0.05
+local statsDirty, statsReadAt = true, 0
 local scanTimer = nil
 local scanning = false
 local triedThisSession = {}
@@ -3313,26 +3406,61 @@ local function ScanLearnedRecipes()
     local before = CountRecipes()
     local statsIndex = 1
     local i = 1
-    local function Step()
-        -- Stats first: they update costs for recipes you have. Each one
-        -- also checks its tiers and material mixes, so work in slices of
-        -- FRAME_BUDGET_MS per frame rather than a fixed count, to keep the
-        -- game from stuttering.
-        local start = debugprofilestop()
-        while toStats[statsIndex] and debugprofilestop() - start < FRAME_BUDGET_MS do
-            addon:RefreshRecipeStats(toStats[statsIndex])
-            statsIndex = statsIndex + 1
+    -- Stats run as a coroutine that can stop for the frame partway through
+    -- a recipe: one recipe's tiers and mixes are 20 to 40 calls to the game,
+    -- more than a frame's budget on their own, and checking only between
+    -- recipes dropped frames for about 10 s after opening Blacksmithing
+    -- (user, 2026-10-19)
+    local statsCo, sliceStart
+    addon.TierYield = function()
+        if statsCo and coroutine.running() == statsCo and debugprofilestop() - sliceStart >= FRAME_BUDGET_MS then
+            coroutine.yield()
         end
-        if toStats[statsIndex] then
-            C_Timer.After(0, Step)
+    end
+    local function Step()
+        -- Stats first: they update costs for recipes you have
+        if toStats[statsIndex] or statsCo then
+            statsCo = statsCo or coroutine.create(function()
+                while toStats[statsIndex] do
+                    addon:RefreshRecipeStats(toStats[statsIndex])
+                    statsIndex = statsIndex + 1
+                    addon.TierYield()
+                end
+            end)
+            -- For /gsm perf only (user, 2026-10-19: no progress shown to
+            -- players, who have nothing to wait for): how long the read
+            -- took, its work, and its longest slice and where
+            local rec = addon.lastRecipeScan
+            if not rec or rec.done then
+                rec = { recipes = #toStats, at = time(), started = GetTime(), slices = 0, busyMs = 0, longestMs = 0 }
+                addon.lastRecipeScan = rec
+            end
+            local recipeBefore = toStats[statsIndex]
+            sliceStart = debugprofilestop()
+            local ok, err = coroutine.resume(statsCo)
+            local ms = debugprofilestop() - sliceStart
+            rec.slices, rec.busyMs = rec.slices + 1, rec.busyMs + ms
+            if ms > rec.longestMs then rec.longestMs, rec.longestRecipe = ms, recipeBefore end
+            if not ok then
+                -- Skip the rest rather than stop the scan
+                statsCo, statsIndex = nil, #toStats + 1
+                geterrorhandler()(err)
+            elseif coroutine.status(statsCo) == "dead" then
+                statsCo = nil
+            end
+            if not statsCo then
+                rec.done, rec.seconds = true, GetTime() - rec.started
+            end
+            C_Timer.After(STEP_GAP, Step)
             return
         end
+        local start = debugprofilestop()
         -- Then recipes not learned yet (their stats too, so a slice each)
         while toUnlearned[1] and debugprofilestop() - start < FRAME_BUDGET_MS do
             SaveRecipe(table.remove(toUnlearned, 1), true, 1, nil, true)
         end
         if toUnlearned[1] then
-            C_Timer.After(0, Step)
+            C_Timer.After(STEP_GAP, Step)
             return
         end
 
@@ -3340,6 +3468,7 @@ local function ScanLearnedRecipes()
             local id = toSave[i]
             if not id then
                 scanning = false
+                addon.TierYield = nil
                 -- Saves retry for a few seconds while item names load, so
                 -- wait before counting and re-sorting the log
                 C_Timer.After(4, function()
@@ -3362,7 +3491,7 @@ local function ScanLearnedRecipes()
             SaveRecipe(id, true)
             i = i + 1
         end
-        C_Timer.After(0, Step)
+        C_Timer.After(STEP_GAP, Step)
     end
     Step()
 end
@@ -3601,10 +3730,7 @@ function addon:InitializePricing()
     searchFrame:SetScript("OnEvent", function(_, event, added)
         -- The first time at the AH without Auctionator: one tip, once ever
         if event == "AUCTION_HOUSE_SHOW" then
-            if not addon:HasAuctionator() and not GoldsmithDB.auctionatorTipShown then
-                GoldsmithDB.auctionatorTipShown = true
-                addon:Notify("info", "Tip: with Auctionator, one scan refreshes every Goldsmith price.")
-            end
+            -- (Was a tip to install Auctionator; Goldsmith scans by itself now, Scan.lua)
             return
         end
         local ok, results
@@ -3667,13 +3793,24 @@ function addon:InitializePricing()
     resultFrame:RegisterEvent("TRADE_SKILL_SHOW")
     resultFrame:RegisterEvent("TRADE_SKILL_LIST_UPDATE")
     resultFrame:RegisterEvent("NEW_RECIPE_LEARNED")
+    for _, e in ipairs({ "SKILL_LINES_CHANGED", "TRAIT_CONFIG_UPDATED", "PLAYER_EQUIPMENT_CHANGED" }) do
+        resultFrame:RegisterEvent(e)
+    end
     resultFrame:SetScript("OnEvent", function(_, event, resultData)
         if event == "TRADE_SKILL_ITEM_CRAFTED_RESULT" then
             OnCraftResult(resultData)
+        elseif event == "SKILL_LINES_CHANGED" or event == "TRAIT_CONFIG_UPDATED" or event == "PLAYER_EQUIPMENT_CHANGED" then
+            -- Skill, knowledge points or gear (profession tools too): the
+            -- next window open reads every recipe's stats again
+            statsDirty = true
         else
             -- Stats change with knowledge points, gear and skill, so they're
-            -- read again every time a profession window opens
-            if event == "TRADE_SKILL_SHOW" then wipe(statsReadThisSession) end
+            -- read again when a profession window opens after one of those
+            -- changed (or STATS_STALE on)
+            if event == "TRADE_SKILL_SHOW" and (statsDirty or time() - statsReadAt > STATS_STALE) then
+                wipe(statsReadThisSession)
+                statsDirty, statsReadAt = false, time()
+            end
             -- Just learned: looked at again, though seen unlearned earlier this session
             if event == "NEW_RECIPE_LEARNED" and resultData then
                 triedThisSession[resultData], statsReadThisSession[resultData] = nil, nil

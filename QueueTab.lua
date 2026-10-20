@@ -147,6 +147,11 @@ local function RowTooltip(tooltip, item)
     if plan then
         tooltip:AddDoubleLine("Crafts", string.format("%d, about %.1f made", plan.crafts, plan.expectedOutput),
             0.8, 0.8, 0.8, 1, 1, 1)
+        -- A set mix (a split's other mix): the list only has room for icons
+        if item.entry.mix then
+            tooltip:AddDoubleLine("Mix", item.entry.mix, 0.8, 0.8, 0.8, 0.91, 0.76, 0.35)
+            addon:Explain(tooltip, "A different mix for the concentration left after the entry above: too little for another craft of that one.")
+        end
         local full = RowConcentration(item)
         if full then
             tooltip:AddDoubleLine("Concentration", string.format("%d to start", math.floor(full + 0.5)),
@@ -343,6 +348,17 @@ local function Create(parent)
         addon:CraftNext()
     end)
     view.craft:SetPoint("BOTTOMRIGHT", view.shop, "TOPRIGHT", 0, 8)
+    -- The next craft's crafting buff when it's off, as on the plan
+    view.buffWarn = UI.Text(summary, "small", "warning", "RIGHT")
+    view.buffWarn:SetPoint("BOTTOMRIGHT", view.craft, "TOPRIGHT", 0, 6)
+    view.buffWarn:SetWidth(320)
+    local auraWatch = CreateFrame("Frame", nil, view.craft)
+    auraWatch:RegisterUnitEvent("UNIT_AURA", "player")
+    auraWatch:SetScript("OnEvent", function()
+        if not view.craft:IsVisible() then return end
+        local buff = addon:QueueMissingBuff(view.next, view.mine)
+        view.buffWarn:SetText(buff and (buff .. " isn't active") or "")
+    end)
     UI.Style(view.craft, "highlight", "borderGold")
     view.craft.label:SetTextColor(addon:Color("gold"))
     view.craft:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderGold")) end)
@@ -455,8 +471,9 @@ local function Refresh(v)
             if entry.live then live = live + 1 end
             if entry.short then short = true end
         end
-        local text = string.format("To buy on the AH: %d item%s, about %s", #q.buyAH, #q.buyAH == 1 and "" or "s",
-            Money(q.spend))
+        local text = #q.buyAH == 0 and "Nothing to buy on the AH"
+            or string.format("To buy on the AH: %d item%s, about %s", #q.buyAH, #q.buyAH == 1 and "" or "s",
+                Money(q.spend))
         if live > 0 then text = text .. string.format(" (%d priced from live listings)", live) end
         if short then text = text .. ". Not enough listed for all of it." end
         if not q.mine then text = text .. ". Planned without their bags: log in on them for what they already have." end
@@ -492,6 +509,9 @@ local function Refresh(v)
     v.craft:SetLabel(key and (label .. " (" .. key .. ")") or label)
     v.craft:SetEnabled(enabled)
     v.craft:SetAlpha(enabled and 1 or 0.5)
+    v.mine = q.mine
+    local buff = addon:QueueMissingBuff(v.next, q.mine)
+    v.buffWarn:SetText(buff and (buff .. " isn't active") or "")
 end
 
 local function Reset(v)
@@ -511,12 +531,18 @@ end
 addon:RegisterView("queue", { create = Create, refresh = Refresh, reset = Reset, legend = Legend })
 
 -- Walking up to an anvil fires no event, so while the next craft needs one
--- nearby the tab is checked every second, like the plan and the panel
+-- nearby the tab is checked every second, like the plan and the panel:
+-- only whether it's there now (Crafts.lua's StationsMet), then redrawn
+-- once. Redrawing every second dropped frames all the way to the anvil
+-- (user, 2026-10-19).
 C_Timer.NewTicker(1, function()
     local screen = addon.GetTabScreen and addon:GetTabScreen("queue")
     local v = screen and screen.view
     local state = v and v.next and v.next.state
-    if state and state.nearby and screen.frame and screen.frame:IsVisible() then Refresh(v) end
+    if state and state.nearby and screen.frame and screen.frame:IsVisible()
+        and addon.StationsMet(state.nearbyRecipes) then
+        Refresh(v)
+    end
 end)
 
 _G.Goldsmith = addon

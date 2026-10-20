@@ -193,6 +193,7 @@ function addon:RefreshTierData(recipeID)
     end
 
     local qslots = QualitySlots(schematic)
+    if addon.TierYield then addon.TierYield() end
     local base = Operation(recipeID, BuildList(qslots, {}), false, allocationGUID)
     if not base then return end
     local baseSkill = Skill(base)
@@ -203,6 +204,9 @@ function addon:RefreshTierData(recipeID)
         local key = (concentrate and "c" or "n")
         for i = 1, #qslots do key = key .. ":" .. (highUnits[i] or 0) end
         if seen[key] then return seen[key] end
+        -- Each mix asks the game once or twice; the profession-open scan can
+        -- wait for the next frame here (Pricing.lua's TierYield)
+        if addon.TierYield then addon.TierYield() end
         local list = BuildList(qslots, highUnits)
         local op = Operation(recipeID, list, concentrate, allocationGUID)
         local tier = op and tierOf[op.craftingQualityID]
@@ -214,6 +218,7 @@ function addon:RefreshTierData(recipeID)
         -- Planning still only uses what the character has (Planner.lua).
         local reachedSkill
         if concentrate then
+            if addon.TierYield then addon.TierYield() end
             local plain = Operation(recipeID, list, false, allocationGUID)
             local plainTier = plain and tierOf[plain.craftingQualityID]
             if plainTier and (not tier or tier <= plainTier) and (plain.concentrationCost or 0) > 0
@@ -249,10 +254,11 @@ function addon:RefreshTierData(recipeID)
     for i, s in ipairs(qslots) do
         local full = {}
         full[i] = s.quantity
+        if addon.TierYield then addon.TierYield() end
         local op = Operation(recipeID, BuildList(qslots, full), false, allocationGUID)
         local gained = op and (Skill(op) - baseSkill) or 0
-        local lowPrice = addon:GetMarketPrice(s.low)
-        local highPrice = addon:GetMarketPrice(s.high)
+        local lowPrice = addon:GetMarketPrice(s.low, true)
+        local highPrice = addon:GetMarketPrice(s.high, true)
         if gained > 0 and highPrice then
             table.insert(upgrades, {
                 slot = i,
@@ -346,7 +352,7 @@ function addon:RefreshTierData(recipeID)
     -- gold; the cheapest way to each tier then picks it up (2026-10-08).
     local free = {}
     for i, s in ipairs(qslots) do
-        local lowPrice, highPrice = addon:GetMarketPrice(s.low), addon:GetMarketPrice(s.high)
+        local lowPrice, highPrice = addon:GetMarketPrice(s.low, true), addon:GetMarketPrice(s.high, true)
         if lowPrice and highPrice and highPrice <= lowPrice then free[i] = s.quantity end
     end
     if next(free) then
@@ -522,7 +528,7 @@ end
 -- Rampant Abandon row cost 245g each, while its plan crafted the vials for
 -- 49g and came to 61g (2026-10-10)
 local function QualityPrice(itemID, name, sharing)
-    local market = addon:GetMarketPrice(itemID)
+    local market = addon:GetMarketPrice(itemID, true)
     local crafted = CraftedTierCost(itemID, name, sharing)
     if market and crafted then return math.min(market, crafted) end
     return market or crafted or addon:GetOwnCost(name)
@@ -706,7 +712,7 @@ function addon:MixUsesCheaperGold(recipe, scenario)
     for _, slot in ipairs(recipe.reagents) do
         local ids = slot.itemIDs or {}
         if #ids > 1 and addon:ScenarioHighUnits(scenario, slot) > 0 then
-            local low, high = addon:GetMarketPrice(ids[1]), addon:GetMarketPrice(ids[#ids])
+            local low, high = addon:GetMarketPrice(ids[1], true), addon:GetMarketPrice(ids[#ids], true)
             if low and high and high <= low then return true end
         end
     end
@@ -721,7 +727,7 @@ local HELD_UPGRADE_MARGIN = 0.10
 function addon:MayUseHeldGold(lowID, highID)
     local chosen = GoldsmithDB.ui2.useHeldGold and GoldsmithDB.ui2.useHeldGold[highID]
     if chosen ~= nil then return chosen end
-    local low, high = addon:GetMarketPrice(lowID), addon:GetMarketPrice(highID)
+    local low, high = addon:GetMarketPrice(lowID, true), addon:GetMarketPrice(highID, true)
     if not low or not high then return false end
     return high <= low * (1 + HELD_UPGRADE_MARGIN)
 end
@@ -729,7 +735,7 @@ end
 -- And silver you hold for gold you're short of: when silver costs about
 -- the same or less (it's worth no more used than sold)
 function addon:MayUseHeldSilver(lowID, highID)
-    local low, high = addon:GetMarketPrice(lowID), addon:GetMarketPrice(highID)
+    local low, high = addon:GetMarketPrice(lowID, true), addon:GetMarketPrice(highID, true)
     if not low or not high then return false end
     return low <= high * (1 + HELD_UPGRADE_MARGIN)
 end

@@ -25,13 +25,17 @@ local MAX_DEPTH = 4
 -- cheaper than the other ways (user, 2026-10-09)
 local MIN_SALVAGE_CASTS = 10
 local SALVAGE_MARGIN = 0.10
+local SalvageCasts -- below, sized for an unlucky run
 
 local function GetOnHand(itemID)
     -- The tour's sample (Tour.lua): what its "you" holds, not your bags
     if addon:UsingTourData() then
         return addon.char.stock and addon.char.stock[itemID] or 0
     end
-    return C_Item.GetItemCount(itemID, true, false, true, true) or 0
+    -- Bought with Buy next and waiting in the mailbox counts as yours
+    -- (Shop.lua), so it isn't bought again or swapped for something else
+    return (C_Item.GetItemCount(itemID, true, false, true, true) or 0)
+        + (addon.InMailCount and addon:InMailCount(itemID) or 0)
 end
 
 -- Crafting from materials you already hold beats buying unless buying is
@@ -40,6 +44,13 @@ end
 -- 234 ore in the bags (user, 2026-10-16). Saves a trip to the AH, and a
 -- plan doesn't flip mid-queue over pennies.
 local HELD_CRAFT_MARGIN = 0.10
+-- Salvaging what you already hold (a salvage at least) is picked unless
+-- another way costs under this share of it, and without the work margin:
+-- 5 Hollow Grouper bought for the plan at 0.88g, once the AH showed that
+-- price instead of an old 0.24g, made buying 5 fillets cheaper and the plan
+-- dropped the salvage (user, 2026-10-19: "use what i have first", unless
+-- the material is suddenly worth far more than what it makes)
+local HELD_SALVAGE_SHARE = 0.5
 
 -- Whether you hold enough of every material for at least one craft (any
 -- quality of each)
@@ -150,12 +161,12 @@ GetOptions = function(itemID, name, depth, memo, visiting)
     -- Vendor: a recorded vendor price. Buying on the AH is only offered
     -- when it's cheaper than the vendor.
     local vendorPrice = addon:GetVendorPrice(itemID)
-    local ahPrice = addon:GetAHPrice(itemID)
+    local ahPrice = addon:GetAHPrice(itemID, true)
     if vendorPrice then
         options.vendor = { method = "Vendor", unit = vendorPrice, detail = "Vendor price" }
     end
     if ahPrice and (not vendorPrice or ahPrice < vendorPrice) then
-        options.buy = { method = "Buy", unit = ahPrice, ageText = addon:AHPriceAgeText(itemID) }
+        options.buy = { method = "Buy", unit = ahPrice, ageText = addon:AHPriceAgeText(itemID, true) }
     end
     if not vendorPrice and not ahPrice and name then
         -- No prices at all: if you've bought it before it's likely a vendor
@@ -221,7 +232,7 @@ GetOptions = function(itemID, name, depth, memo, visiting)
         local out = record.outputs[itemID]
         local casts = record.perCast and record.milled / math.max(record.perCast, 1) or 0
         if out and out.qty > 0 and record.milled > 0 and casts >= MIN_SALVAGE_CASTS then
-            local herbCost = addon:GetMarketPrice(herbID) or addon:GetAverageCost(record.name)
+            local herbCost = addon:GetMarketPrice(herbID, true) or addon:GetAverageCost(record.name)
             if herbCost then
                 -- Split the herb's cost across its pigments by AH value
                 local sumValue, sumQty, allPriced, ownValue = 0, 0, true, nil
@@ -237,8 +248,14 @@ GetOptions = function(itemID, name, depth, memo, visiting)
                 end
                 local share = (allPriced and sumValue > 0) and (ownValue / sumValue) or (out.qty / sumQty)
                 local unit = herbCost * record.milled * share / out.qty
-                if not options.mill or unit < options.mill.unit then
+                -- One you hold gets HELD_CRAFT_MARGIN off when picking: two
+                -- plant parts about the same price swapped back and forth as
+                -- AH searches came in, and Buy next could buy one, then ask
+                -- for the other with the first in the bags (user, 2026-10-19)
+                local rank = GetOnHand(herbID) > 0 and unit * (1 - HELD_CRAFT_MARGIN) or unit
+                if not options.mill or rank < options.mill.rank then
                     options.mill = {
+                        rank = rank,
                         -- verb: how it's salvaged ("Prospect" for ore)
                         method = "Mill", unit = unit, verb = addon:GetSalvageVerb(herbID),
                         herbID = herbID, herbName = record.name,
@@ -257,20 +274,29 @@ GetOptions = function(itemID, name, depth, memo, visiting)
     -- Crafting from what you hold gets HELD_CRAFT_MARGIN off
     local craftHeld = options.craft and HoldsMaterials(options.craft.recipe)
     options.craftHeld = craftHeld or nil
+    local millRecord = options.mill and GoldsmithDB.milling[options.mill.herbID]
+    local millHeld = millRecord and GetOnHand(options.mill.herbID) >= math.max(millRecord.perCast or 1, 1)
+    options.millHeld = millHeld or nil
     local cheapestUnit
     for _, key in ipairs({ "buy", "vendor", "craft", "mill" }) do
         local option = options[key]
         local unit = option and (key == "mill" and option.unit * (1 + SALVAGE_MARGIN) or option.compareUnit or option.unit)
         if unit and key == "craft" and craftHeld then unit = unit * (1 - HELD_CRAFT_MARGIN) end
+        -- The best way that isn't salvaging, for BuildNode's held share
+        if option and key ~= "mill" and (not options.otherUnit or unit < options.otherUnit) then
+            options.other, options.otherUnit = option, unit
+        end
+        if unit and key == "mill" and millHeld then unit = option.unit * HELD_SALVAGE_SHARE end
         if option and (not cheapestUnit or unit < cheapestUnit) then
             options.cheapest, cheapestUnit = option, unit
         end
     end
 
     -- Your own choice (right-click a plan row) wins over the cheapest, if
-    -- that way is available for this item. memo.ignoreOverrides is used to
-    -- price the plan the cheapest way, for comparison.
-    local override = not memo.ignoreOverrides and GoldsmithDB.ui.methodOverrides[itemID]
+    -- that way is available for this item. Choices belong to one plan and
+    -- its queue entry (WithChoices). memo.ignoreOverrides is used to price
+    -- the plan the cheapest way, for comparison.
+    local override = not memo.ignoreOverrides and addon.planChoices and addon.planChoices[itemID]
     local chosen = override and options[string.lower(override)]
     options.best = chosen or options.cheapest
     options.override = chosen and override or nil
@@ -311,14 +337,32 @@ function addon:CraftUnitCost(itemID, name)
     return cached or nil
 end
 
--- Your choice of how to get an item in plans ("Buy", "Craft", "Mill",
--- "Vendor"), or nil to use the cheapest way.
-function addon:SetMethodOverride(itemID, method)
-    GoldsmithDB.ui.methodOverrides[itemID] = method
-end
+-- Your choices of how to get items ("Buy", "Craft", "Mill", "Vendor" by
+-- itemID; none = the cheapest way) for the plans fn builds. They belong to
+-- one plan, and to its queue entry once queued (entry.choices), and end
+-- with it. They used to be saved per item for every plan: a "Salvage"
+-- picked for Thalassian Fillet while testing on 2026-10-19 still chose
+-- salvaging Hollow Grouper at 3g over buying fillets at 0.90g the next day
+-- (user, 2026-10-20: "we usually want the cheapest"; "per queue for sure").
+-- Kept in addon.planChoices while fn runs; inside work it's the work's
+-- own (RunWork swaps it like statsChar) and there's no pcall, as in
+-- WithCharacter.
+local function Pack(...) return { n = select("#", ...), ... } end
 
-function addon:ClearMethodOverrides()
-    wipe(GoldsmithDB.ui.methodOverrides)
+function addon:WithChoices(choices, fn, ...)
+    local previous = addon.planChoices
+    addon.planChoices = choices
+    if addon:InWork() then
+        local results = Pack(fn(...))
+        addon.planChoices = previous
+        return unpack(results, 1, results.n)
+    end
+    addon.noYield = addon.noYield + 1
+    local results = Pack(pcall(fn, ...))
+    addon.noYield = addon.noYield - 1
+    addon.planChoices = previous
+    if not results[1] then error(results[2], 0) end
+    return unpack(results, 2, results.n)
 end
 
 -- Choices for one of the craft's own materials, as { choice, units } parts
@@ -496,6 +540,24 @@ local function BuildNode(itemID, name, need, depth, ctx, quality, gold)
         end
     end
 
+    -- Salvage picked for what you hold (millHeld) counts the held part at
+    -- HELD_SALVAGE_SHARE and the rest at its price: 2 Hollow Grouper held
+    -- made the plan salvage 109 at 3g (1.49g a fillet) over buying fillets
+    -- at 0.90g (user, 2026-10-20). Holding all of it is the old rule.
+    if options.millHeld and node.best == options.mill and not options.override
+        and node.toGet > 0 and options.other then
+        local mill = options.mill
+        local record = GoldsmithDB.milling[mill.herbID]
+        local perCast = record and record.perCast and record.perCast > 1 and record.perCast or 1
+        local herbs = SalvageCasts(node.toGet, mill.perHerb * perCast) * perCast
+        local share = herbs > 0 and math.min(GetOnHand(mill.herbID) / herbs, 1) or 1
+        if mill.unit * (1 - (1 - HELD_SALVAGE_SHARE) * share) >= options.otherUnit then
+            node.best = options.other
+            -- The menu and hover go by this, not options.cheapest
+            node.cheapest = options.other
+            node.heldTooFew = true
+        end
+    end
     if options.best and options.best.method == "Craft" and options.best.tierRow then
         LimitByConcentration(node, ctx, (GetCraftNumbers(options.best.recipe)))
     end
@@ -520,17 +582,34 @@ local function BuildNode(itemID, name, need, depth, ctx, quality, gold)
             end
         end
     elseif best and best.method == "Mill" and node.toGet > 0 then
-        local herbs = node.toGet / best.perHerb
+        -- Enough salvages for an unlucky run, so one trip to the AH covers
+        -- it (user, 2026-10-05: never shop twice): 23 Cellular Slab sized on
+        -- the 3.35 average gave 63 Plant Protein, 2.74 each, 12 short
+        -- (2026-10-19). Cost stays on the average (the parent's unit).
+        local record = GoldsmithDB.milling[best.herbID]
+        local perCast = record and record.perCast and record.perCast > 1 and record.perCast or 1
+        local casts = SalvageCasts(node.toGet, best.perHerb * perCast)
         -- Each mill uses a fixed number of herbs (10 in Midnight), so you
         -- need whole mills' worth
-        local record = GoldsmithDB.milling[best.herbID]
-        local perCast = record and record.perCast
-        if perCast and perCast > 1 then
-            herbs = math.ceil(herbs / perCast - 0.0001) * perCast
-        end
+        local herbs = casts * perCast
         table.insert(node.children, BuildNode(best.herbID, best.herbName, herbs, depth + 1, ctx))
     end
     return node
+end
+
+-- Salvages needed to get `need` items at `perCast` on average, even in a
+-- bad run. Each salvage's yield is taken to spread SALVAGE_SPREAD of its
+-- average (no per-salvage data is kept yet); the count covers the low end
+-- at SALVAGE_Z standard errors (about 1 run in 100 falls short). With N
+-- salvages: N * perCast - z * spread * perCast * sqrt(N) >= need.
+local SALVAGE_SPREAD = 0.4
+local SALVAGE_Z = 2.33
+
+SalvageCasts = function(need, perCast)
+    if perCast <= 0 then return 0 end
+    local b = SALVAGE_Z * SALVAGE_SPREAD * perCast
+    local x = (b + math.sqrt(b * b + 4 * perCast * need)) / (2 * perCast)
+    return math.ceil(x * x - 0.0001)
 end
 
 -- Walk the tree collecting what to buy on the AH and from vendors
@@ -583,7 +662,8 @@ end
 -- pool (optional, for the queue): itemID -> how many of what you have
 -- earlier plans already use; this plan uses what's left and adds its own.
 function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
-    GoldsmithDB.ui.methodOverrides = GoldsmithDB.ui.methodOverrides or {}
+    -- The old choices for every plan (see WithChoices) are dropped
+    GoldsmithDB.ui.methodOverrides = nil
     local ctx = { memo = {}, useOnHand = useOnHand, pool = pool, conc = {} }
     local outputQty, slots = GetCraftNumbers(recipe)
     local crafts = WholeCrafts(quantity, SurePerCraft(recipe, outputQty))
@@ -917,9 +997,9 @@ function addon:PreferHeldMix(recipe, tierInfo, quantity)
             local id, units, other = p[1], p[2], p[3]
             if units > 0 then
                 local need = units * crafts
-                local price = addon:GetMarketPrice(id) or 0
+                local price = addon:GetMarketPrice(id, true) or 0
                 local used = math.min(need, GetOnHand(id))
-                local premium = math.max(price - (addon:GetMarketPrice(other) or price), 0)
+                local premium = math.max(price - (addon:GetMarketPrice(other, true) or price), 0)
                 score = score + (need - used) * price + used * premium
             end
         end
@@ -984,6 +1064,11 @@ function addon:PreferHeldMix(recipe, tierInfo, quantity)
     for _, e in ipairs(same) do
         local score = Score(e.scenario) + ConcentrationCharge(e)
         if coversAll and Startable(e) < crafts then score = math.huge end
+        -- Short of concentration either way: never a mix that starts fewer
+        -- crafts. A to-do of 5 Sterling Alloy (4 at 1 gold ingot, 1 at 2
+        -- gold) opened as 3 all silver crafts, +400g against +505g, for the
+        -- silver ingots held (user, 2026-10-19)
+        if current and not coversAll and Startable(e) < Startable(tierInfo) then score = math.huge end
         if score < bestScore then best, bestScore = e, score end
     end
 
@@ -1065,6 +1150,37 @@ function addon:ChooseMix(recipe, tierInfo, quantity)
         end
     end
     return pick
+end
+
+-- The same-tier mix with this description (a queue entry's set mix), as
+-- an entry to plan with, or nil when the game no longer offers it
+function addon:MixByDescription(tierInfo, description)
+    for _, e in ipairs(tierInfo and tierInfo.scenarios or {}) do
+        if e.tier == tierInfo.tier and (e.concentrate == true) == (tierInfo.concentrate == true)
+            and e.description == description then
+            local mine = {}
+            for k, v in pairs(e) do mine[k] = v end
+            mine.scenarios, mine.setMix = tierInfo.scenarios, true
+            mine.demand, mine.demandSource, mine.saleRate = tierInfo.demand, tierInfo.demandSource, tierInfo.saleRate
+            return mine
+        end
+    end
+end
+
+-- "2 gold mix" for "2 gold Refulgent Copper Ingot"; others as they are
+function addon:ShortMix(description)
+    local gold = description and description:match("^(%d+ gold)")
+    return gold and (gold .. " mix") or (description or "another mix")
+end
+
+-- Shorter still, for a list column: "(1 <gold icon>)" for "1 gold ...",
+-- the gold material quality icon in place of the words ("1 gold..." was cut
+-- off in the Queue tab, user 2026-10-19)
+function addon:MixIcon(description)
+    local n = description and description:match("^(%d+) gold")
+    if n then return string.format("(%s%s)", n, addon:TierIconText(2, 2, 12)) end
+    if description and description:match("^All silver") then return string.format("(%s)", addon:TierIconText(1, 2, 12)) end
+    return addon:ShortMix(description)
 end
 
 -- Clicking a mix: remember it, or forget it when it's the one Goldsmith

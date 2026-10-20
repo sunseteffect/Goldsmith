@@ -122,6 +122,12 @@ local function PriceSourceText()
         local text, fresh = AuctionatorText(scan)
         return text .. " (preferred)", fresh and "muted" or "warning"
     end
+    -- Goldsmith's own scan (Scan.lua), when it's the newest price there is
+    local own = addon:GetOwnScanTime()
+    if source == "auto" and addon:OwnScanIsNewest() then
+        return "Prices: Goldsmith scan " .. When(own),
+            date("%Y-%m-%d", own) == date("%Y-%m-%d") and "muted" or "warning"
+    end
     if addon:ScannedThisSession() then
         -- Items this update didn't see use TSM when it's installed
         local text, fresh = AuctionatorText(scan)
@@ -139,10 +145,12 @@ local function PriceSourceText()
         local days = math.floor((time() - updated) / 86400)
         return "Prices: Goldsmith Data " .. When(updated),
             days >= DATA_STALE_DAYS and "warning" or "muted"
+    elseif own then
+        return "Prices: Goldsmith scan " .. When(own), "warning"
     elseif addon:HasAuctionator() then
         return "Prices: no Auctionator scan yet", "warning"
     end
-    return "Prices: install Auctionator or TSM", "warning"
+    return "Prices: scan at the AH", "warning"
 end
 
 local function ProfessionLabel(prof)

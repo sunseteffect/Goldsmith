@@ -172,6 +172,26 @@ function addon:RecordPriceHistory(isFullScan)
     PruneHistory(history)
 end
 
+-- Goldsmith's own AH scan (Scan.lua) saves today's price for every
+-- material and crafted item, as an Auctionator scan does, so the chart,
+-- usual prices and Cheap materials fill in without Auctionator
+function addon:RecordScanHistory()
+    local history = GoldsmithDB.priceHistory
+    local today = date("%Y-%m-%d")
+    local added = 0
+    for itemID in pairs(HistoryItems()) do
+        local price = type(itemID) == "number" and addon:GetScanPrice(itemID)
+        if price and price > 0 then
+            history[itemID] = history[itemID] or {}
+            history[itemID][today] = price
+            added = added + 1
+        end
+    end
+    PruneHistory(history)
+    if added > 0 then addon:DataChanged() end
+    return added
+end
+
 -- Stock-up insights
 --
 -- Today's price compared with the item's usual price: the median of its

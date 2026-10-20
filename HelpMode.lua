@@ -61,7 +61,7 @@ local function HeaderParts(list)
         "Pick one profession or all of them, the dates for profits and charts, and which expansions' items to show. They apply on every tab.",
         filters[1], filters[2])
     Add(list, "Prices",
-        "Where prices come from right now: Goldsmith Data's daily prices for your region, an Auctionator scan, or TSM. It turns orange when they're old.",
+        "Where prices come from right now: Goldsmith's own AH scan, Goldsmith Data's daily prices for your region, an Auctionator scan, or TSM. It turns orange when they're old.",
         Part("price"))
     Add(list, "Settings",
         "Prices, when a craft is worth suggesting, item tooltips, chat messages and which characters count. Help, support and bug reports are in there too.",

@@ -63,6 +63,18 @@ local function Report(run)
     table.sort(longest)
     print("  Longest frame of loading this session (what you feel): "
         .. (#longest > 0 and table.concat(longest, ", ") or "none yet, open some tabs first"))
+    -- The recipe stats read when a profession window opens (Pricing.lua),
+    -- in the background where players don't see it
+    local scan = run.recipeScan
+    if scan then
+        local recipe = scan.longestRecipe and GoldsmithDB.recipes[scan.longestRecipe]
+        print(string.format("  Recipe stats read (profession window opened %s): %d recipes in %s, %d ms of work in %d slices, longest slice %d ms%s",
+            date("%H:%M", scan.at), scan.recipes, scan.seconds and string.format("%.0f s", scan.seconds) or "still running",
+            math.floor(scan.busyMs + 0.5), scan.slices, math.floor(scan.longestMs + 0.5),
+            recipe and (" (" .. (recipe.outputName or recipe.name or "?") .. ")") or ""))
+    else
+        print("  Recipe stats read: not this session (opens with a profession window after a reload, a gear, skill or knowledge change, or an hour)")
+    end
 end
 
 local running = false
@@ -90,7 +102,7 @@ local function Run()
     end
     local function DataStep(label, fn)
         table.insert(steps, { label = label, start = function(done)
-            addon:RunWork(fn, nil, done, "perf")
+            addon:RunWork(fn, nil, done, "perf", true)
         end })
     end
     DataStep("Crafts rows, every expansion", function()
@@ -120,6 +132,11 @@ local function Run()
             for _, days in pairs(GoldsmithDB.priceHistory or {}) do points = points + Count(days) end
             run.memoryKB = MemoryKB()
             run.loginMs = addon.initMs
+            if addon.lastRecipeScan then
+                local s = {}
+                for k, v in pairs(addon.lastRecipeScan) do s[k] = v end
+                run.recipeScan = s
+            end
             run.data = {
                 characters = Count(GoldsmithDB.characters), recipes = Count(GoldsmithDB.recipes),
                 entries = #(GoldsmithDB.entries or {}), priceHistory = points,

@@ -44,7 +44,7 @@ local TIME_KEYS = {
 -- 2026-10-13).
 local SHARED_KEYS = {
     "ui", "ui2", "professionIcons", "tourOffered", "auctionatorTipShown",
-    "lastPriceUpdate", "lastFullScan", "errorLog",
+    "lastPriceUpdate", "lastFullScan", "errorLog", "ownScan", "lastFullRequest",
 }
 -- Window choices the tour starts from (ui2 is shared with the window, so
 -- the player's are saved and put back when it ends): everything shown,

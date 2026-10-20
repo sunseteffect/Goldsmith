@@ -7,6 +7,9 @@
     <Binding name="GOLDSMITH_CRAFT_NEXT" category="Goldsmith">
         Goldsmith:CraftNext()
     </Binding>
+    <Binding name="GOLDSMITH_BUY_NEXT" category="Goldsmith">
+        Goldsmith:BuyNext()
+    </Binding>
     <Binding name="GOLDSMITH_OPEN_ITEM" category="Goldsmith">
         Goldsmith:OpenHoveredItem()
     </Binding>

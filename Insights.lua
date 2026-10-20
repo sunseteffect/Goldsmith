@@ -1111,11 +1111,13 @@ function addon:GetCharacterTodo(prof, conc)
     end
 
     -- A concentration plan can split one item between two mixes of
-    -- material qualities (the cheaper one runs out of the gold materials
-    -- you hold). The queue holds one entry per item and quality and picks
-    -- the mix as you craft, so the two are one line here: two lines looked
-    -- like a repeat and only one could be queued (user, 2026-10-16).
-    -- item.mixes lists the split for the hover.
+    -- material qualities: the cheaper one runs out of concentration or of
+    -- the gold materials you hold. Each mix is its own line, the second
+    -- marked as the leftover (item.leftoverOf, kept right under the first):
+    -- one line of "5x" read as 5 of one mix, and the plan it opened showed
+    -- 4 (user, 2026-10-19; one line since 2026-10-16, when two looked like
+    -- a repeat). Both open the same plan for all the crafts (planCrafts),
+    -- since the queue holds one entry per item and quality.
     for _, r in ipairs(conc.rows) do
         local byItem = {}
         for _, p in ipairs(r.plan or {}) do
@@ -1123,24 +1125,20 @@ function addon:GetCharacterTodo(prof, conc)
             local quantity = math.max(math.floor(p.crafts * (p.row.outputPerCraft or 1)), 1)
             if itemID then planned[itemID] = (planned[itemID] or 0) + quantity end
             local id = tostring(p.recipe.recipeID) .. ":" .. tostring(itemID) .. ":" .. tostring(p.row.tier)
-            local mix = { crafts = p.crafts, description = p.row.description, points = p.points }
-            local item = byItem[id]
-            if item then
-                item.crafts = item.crafts + p.crafts
-                item.quantity = item.quantity + quantity
-                item.profit = item.profit + p.profit
-                item.concentration = item.concentration + p.points
-                table.insert(item.mixes, mix)
-                todo[r.key].total = todo[r.key].total + p.profit
+            local item = {
+                recipe = p.recipe, row = p.row, itemID = itemID, tierCount = p.tierCount,
+                crafts = p.crafts, quantity = quantity, profit = p.profit, concentration = p.points,
+                planCrafts = p.crafts, leftovers = {},
+            }
+            local first = byItem[id]
+            if first then
+                item.leftoverOf = first
+                first.planCrafts = first.planCrafts + p.crafts
+                table.insert(first.leftovers, item)
             else
-                item = {
-                    recipe = p.recipe, row = p.row, itemID = itemID, tierCount = p.tierCount,
-                    crafts = p.crafts, quantity = quantity, profit = p.profit, concentration = p.points,
-                    mixes = { mix },
-                }
                 byItem[id] = item
-                Add(r.key, item)
             end
+            Add(r.key, item)
         end
     end
 
@@ -1168,6 +1166,15 @@ function addon:GetCharacterTodo(prof, conc)
 
     for _, t in pairs(todo) do
         table.sort(t.items, function(a, b) return a.profit > b.profit end)
+        -- A leftover mix right under its first line
+        local ordered = {}
+        for _, item in ipairs(t.items) do
+            if not item.leftoverOf then
+                table.insert(ordered, item)
+                for _, l in ipairs(item.leftovers or {}) do table.insert(ordered, l) end
+            end
+        end
+        t.items = ordered
     end
     return todo
 end

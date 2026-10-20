@@ -76,6 +76,13 @@ local function Mine(list, field)
     return mine
 end
 
+-- "  queued" when it's already in that character's queue, as the
+-- Characters tab's to-do says it (user, 2026-10-19)
+local function Queued(charKey, recipe, tier, concentrate)
+    local e = addon:FindQueueEntry(charKey or addon.charKey, recipe.recipeID, tier, concentrate == true)
+    return e and addon:Colorize("  queued", "muted") or ""
+end
+
 -- Character name, only when it isn't you (you're the default)
 local function OnWho(charKey)
     if not charKey or charKey == addon.charKey then return "" end
@@ -257,16 +264,24 @@ local function ConcentrationAction(conc)
     end
     if not best then return nil end
     local first = best.plan[1]
-    local items = {}
+    local items, queue, seen = {}, {}, {}
     for _, p in ipairs(best.plan) do
         table.insert(items, { itemID = p.recipe.outputItemID, name = p.recipe.outputName,
             qty = math.floor(p.crafts * (p.row.outputPerCraft or 1)) })
+        -- A split's other mix is its own queue entry with that mix set
+        local id = tostring(p.recipe.recipeID) .. ":" .. tostring(p.row.tier)
+        local mix = seen[id] and p.row.description or nil
+        seen[id] = true
+        table.insert(queue, { charKey = best.key, recipe = p.recipe, tier = p.row.tier, tierCount = p.tierCount,
+            itemID = p.row.itemID, concentrate = true, crafts = p.crafts, mix = mix })
     end
     return {
         items = items,
+        queue = queue,
         highlight = true,
-        title = string.format("%sCraft %dx %s", addon:ProfessionIconText(best.profession),
-            first.crafts, ItemText(first.row.itemID, ShortName(first.recipe.outputName, 34), first.row.tier, first.tierCount)),
+        title = string.format("%sCraft %dx %s%s", addon:ProfessionIconText(best.profession),
+            first.crafts, ItemText(first.row.itemID, ShortName(first.recipe.outputName, 34), first.row.tier, first.tierCount),
+            Queued(best.key, first.recipe, first.row.tier, true)),
         detail = string.format("With %d concentration%s  ·  %s profit",
             math.floor(first.points + 0.5), OnWho(best.key), addon:Colorize(Signed(first.profit), "profit")),
         tooltip = function(tooltip)
@@ -307,19 +322,24 @@ local function CooldownAction(prof)
         local c = crafts[i]
         local icon = prof == "All" and addon:ProfessionIconText(c.recipe.profession) or ""
         local who = OnWho(c.charKey)
-        table.insert(parts, string.format("%s%dx %s   %s%s", icon, c.crafts,
+        table.insert(parts, string.format("%s%dx %s   %s%s%s", icon, c.crafts,
             ItemText(c.itemID, ShortName(c.recipe.outputName, 26), c.row.tier, c.row.tierCount),
             addon:Colorize(Signed(c.profit * c.crafts * (c.outputPerCraft or 1)), "profit"),
-            who ~= "" and ("  ·" .. who) or ""))
+            who ~= "" and ("  ·" .. who) or "", Queued(c.charKey, c.recipe, c.row.tier, false)))
     end
     local first = crafts[1]
-    local items = {}
+    local items, queue = {}, {}
     for i = 1, math.min(#crafts, CRAFTS_SHOWN) do
         table.insert(items, { itemID = crafts[i].recipe.outputItemID, name = crafts[i].recipe.outputName,
             qty = math.floor(crafts[i].crafts * (crafts[i].outputPerCraft or 1)) })
     end
+    for _, c in ipairs(crafts) do
+        table.insert(queue, { charKey = c.charKey, recipe = c.recipe, tier = c.row.tier, tierCount = c.row.tierCount,
+            itemID = c.itemID, concentrate = false, crafts = c.crafts })
+    end
     return {
         items = items,
+        queue = queue,
         title = addon:CooldownsLabel() .. " ready",
         detail = table.concat(parts, "\n"),
         tooltip = function(tooltip)
@@ -350,17 +370,26 @@ local function CraftsAction(crafts, prof)
         local c = crafts[i]
         local icon = prof == "All" and addon:ProfessionIconText(c.recipe.profession) or ""
         local who = OnWho(c.charKey)
-        table.insert(parts, string.format("%s%s   %s each%s", icon,
+        table.insert(parts, string.format("%s%s   %s each%s%s", icon,
             ItemText(c.itemID, ShortName(c.recipe.outputName, 26), c.row.tier, c.row.tierCount),
-            addon:Colorize(Signed(c.profit), "profit"), who ~= "" and ("  ·" .. who) or ""))
+            addon:Colorize(Signed(c.profit), "profit"), who ~= "" and ("  ·" .. who) or "",
+            Queued(c.charKey, c.recipe, c.row.tier, false)))
     end
     local items = {}
     for i = 1, math.min(#crafts, CRAFTS_SHOWN) do
         table.insert(items, { itemID = crafts[i].recipe.outputItemID, name = crafts[i].recipe.outputName,
             qty = crafts[i].make })
     end
+    local queue = {}
+    for _, c in ipairs(crafts) do
+        if c.make and c.make > 0 then
+            table.insert(queue, { charKey = c.charKey, recipe = c.recipe, tier = c.row.tier, tierCount = c.row.tierCount,
+                itemID = c.itemID, concentrate = false, items = c.make })
+        end
+    end
     return {
         items = items,
+        queue = #queue > 0 and queue or nil,
         title = "Best crafts right now",
         detail = table.concat(parts, "\n"),
         tooltip = function(tooltip)
@@ -507,6 +536,36 @@ local function NotThisMenu(owner, items)
     end)
 end
 
+-- Right-click a suggestion: queue it without opening its plan (user,
+-- 2026-10-19: "less clicks once i know i can trust goldsmith"), one line
+-- per craft it suggests, or all of them
+local function QueueMenu(owner, queue)
+    if not (MenuUtil and MenuUtil.CreateContextMenu) then return end
+    MenuUtil.CreateContextMenu(owner, function(_, root)
+        root:CreateTitle("Add to the queue")
+        for _, s in ipairs(queue) do
+            local tier = s.tier and s.tierCount and (addon:TierIconText(s.tier, s.tierCount) .. " ") or ""
+            local count = s.crafts and string.format("%d craft%s", s.crafts, s.crafts == 1 and "" or "s")
+                or string.format("%d", s.items)
+            local queued = addon:FindQueueEntry(s.charKey or addon.charKey, s.recipe.recipeID, s.tier,
+                s.concentrate == true, nil, s.mix)
+            root:CreateButton(string.format("%s %s%s%s%s%s", count, tier, s.recipe.outputName,
+                s.mix and (", " .. addon:ShortMix(s.mix)) or "", OnWho(s.charKey),
+                queued and " (queued: set it)" or ""), function()
+                addon:QueueSuggestion(s.charKey, s.recipe, s.tier, s.concentrate, s.crafts, s.items, s.mix)
+            end)
+        end
+        if #queue > 1 then
+            root:CreateDivider()
+            root:CreateButton("All of these", function()
+                for _, s in ipairs(queue) do
+                    addon:QueueSuggestion(s.charKey, s.recipe, s.tier, s.concentrate, s.crafts, s.items, s.mix)
+                end
+            end)
+        end
+    end)
+end
+
 local function CreateActionRow(parent, i)
     local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     -- Height and position are set in FillActionRow / Refresh, to fit the text
@@ -536,6 +595,7 @@ local function CreateActionRow(parent, i)
     row:EnableMouse(true)
     UI.SetTooltip(row, function(tooltip)
         if row.action and row.action.tooltip then row.action.tooltip(tooltip) end
+        if row.action and row.action.queue then addon:RightClickHint(tooltip, "Right-click to add to the queue") end
     end)
     -- Rows that lead somewhere get a gold border on hover
     row:HookScript("OnEnter", function(self)
@@ -548,6 +608,7 @@ local function CreateActionRow(parent, i)
     end)
     row:SetScript("OnMouseUp", function(self, button)
         if button == "LeftButton" and self.action and self.action.onClick then self.action.onClick() end
+        if button == "RightButton" and self.action and self.action.queue then QueueMenu(self, self.action.queue) end
     end)
     return row
 end
@@ -941,14 +1002,16 @@ local function SetupSteps()
     end
 
     local scanned = hasAuctionator and GoldsmithDB.lastPriceUpdate
-    if scanned or hasTSM or addon:GetBlizzardDataTime() then
+    local ownScan = addon:GetOwnScanTime()
+    if ownScan or scanned or hasTSM or addon:GetBlizzardDataTime() then
         table.insert(steps, { true, "AH prices in",
-            scanned and "Auctionator has prices. Scan again whenever you're at the AH."
+            ownScan and "Goldsmith has scanned the AH. It scans again when you open the AH and the last scan is over an hour old."
+            or scanned and "Auctionator has prices. Scan again whenever you're at the AH."
             or hasTSM and "Using TSM's prices."
-            or "Using Goldsmith Data: the region's AH prices for materials, updated daily. Gear needs an Auctionator scan." })
+            or "Using Goldsmith Data: the region's AH prices for materials, updated daily. Open the AH and Goldsmith scans everything else." })
     else
         table.insert(steps, { false, "Scan the auction house",
-            "Open the AH and run Auctionator's Full Scan on its Auctionator tab (or search for your materials)." })
+            "Open the AH: Goldsmith scans it by itself (or press Scan the AH on the Goldsmith panel beside it)." })
     end
     return steps
 end

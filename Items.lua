@@ -82,6 +82,50 @@ if TooltipDataProcessor and Enum.TooltipDataType then
 end
 
 -- The hover first; an open chat link's tooltip when nothing is hovered
+-- The recipe under the mouse in the profession window: a row of the
+-- recipe list, or anywhere on the recipe shown (its name, the details).
+-- Neither shows an item tooltip (user, 2026-10-18).
+local function HoveredRecipeID()
+    local focus = (GetMouseFoci and GetMouseFoci()[1]) or (GetMouseFocus and GetMouseFocus())
+    local f, depth = focus, 0
+    while f and depth < 6 do
+        if f.GetElementData then
+            local ok, node = pcall(f.GetElementData, f)
+            local data = ok and type(node) == "table" and (node.GetData and node:GetData() or node)
+            local info = type(data) == "table" and data.recipeInfo
+            if type(info) == "table" and info.recipeID then return info.recipeID end
+        end
+        f = f.GetParent and f:GetParent()
+        depth = depth + 1
+    end
+    local frame = ProfessionsFrame
+    if not (frame and frame:IsVisible()) then return nil end
+    local orderView = frame.OrdersPage and frame.OrdersPage.OrderView
+    local forms = {
+        frame.CraftingPage and frame.CraftingPage.SchematicForm,
+        orderView and orderView.OrderDetails and orderView.OrderDetails.SchematicForm,
+    }
+    for _, form in ipairs(forms) do
+        if form and form:IsVisible() and form:IsMouseOver() then
+            local ok, info = pcall(function() return form.GetRecipeInfo and form:GetRecipeInfo() end)
+            info = ok and info or form.currentRecipeInfo
+            if type(info) == "table" and info.recipeID then return info.recipeID end
+        end
+    end
+end
+
+-- What a recipe makes: Goldsmith's own record (an enchant's scroll), else
+-- the game's
+local function RecipeItem(recipeID)
+    local r = GoldsmithDB.recipes[recipeID] or GoldsmithDB.unlearned[recipeID]
+    if r and (r.outputItemID or r.outputName) then return r.outputName, r.outputItemID end
+    local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+    if ok and schematic then
+        if schematic.outputItemID then return nil, schematic.outputItemID end
+        return schematic.name, nil
+    end
+end
+
 function addon:OpenHoveredItem()
     for _, tooltip in ipairs({ GameTooltip, ItemRefTooltip }) do
         local id = tooltip and tooltip:IsShown() and tooltipItem[tooltip]
@@ -90,7 +134,15 @@ function addon:OpenHoveredItem()
             return
         end
     end
-    addon:Notify("info", "Hover an item first, in your bags, the AH or a chat link.")
+    local recipeID = HoveredRecipeID()
+    if recipeID then
+        local name, id = RecipeItem(recipeID)
+        if name or id then
+            addon:OpenItem(name, id)
+            return
+        end
+    end
+    addon:Notify("info", "Hover an item first, in your bags, the AH, a chat link or the profession window.")
 end
 
 -- Opens the Items landing page. opts.inBags shows what you hold;
@@ -712,6 +764,13 @@ local function CreatePage(parent)
             table.insert(sub, "crafted on " .. (c and c.name or d.charKey))
         end
         page.sub:SetText(table.concat(sub, "  ·  "))
+        page.sub:SetTextColor(addon:Color("muted"))
+        -- An enchant with no scroll found: say so, it isn't broken
+        local scrollMissing = not d.itemID and addon:EnchantScrollMissing(nil, d.name)
+        if scrollMissing then
+            page.sub:SetText("Scroll not found yet: it fills in once an AH scan sees one, or you craft one.")
+            page.sub:SetTextColor(addon:Color("warning"))
+        end
         page.craft:SetShown(d.recipe ~= nil)
 
         -- Tiles
@@ -722,7 +781,8 @@ local function CreatePage(parent)
         -- hover
         local adjusted = addon:PriceAdjusted(d.priceNote)
         t[1]:Set("AH price", d.price and ((adjusted and "~" or "") .. Money(d.price)) or "-", d.price and "text" or "dim",
-            d.price and d.priceText or "scan with Auctionator", (stale or adjusted) and "warning" or "muted")
+            d.price and d.priceText or (scrollMissing and "scroll not found yet" or "scan the AH"),
+            (stale or adjusted) and "warning" or "muted")
         t[1].tooltip = function(tooltip)
             tooltip:AddLine("AH price", 1, 1, 1)
             if d.priceSource then tooltip:AddDoubleLine("From", d.priceText or d.priceSource, 0.8, 0.8, 0.8, 1, 1, 1) end
@@ -745,7 +805,7 @@ local function CreatePage(parent)
                 addon:Explain(tooltip, string.format("Goldsmith Data's price for your region over the last 7 days, until you have %d days of your own (%d so far).",
                     5, d.historyDays or 0), 0.6, 0.6, 0.6, true)
             else
-                addon:Explain(tooltip, "The middle of the prices saved each day Auctionator scans, not counting today.", 0.6, 0.6, 0.6, true)
+                addon:Explain(tooltip, "The middle of the prices saved each day the AH is scanned, not counting today.", 0.6, 0.6, 0.6, true)
             end
             if insight and not insight.regional then
                 tooltip:AddDoubleLine("Lowest", Money(insight.low), 0.8, 0.8, 0.8, 1, 1, 1)
@@ -1149,7 +1209,7 @@ local function Refresh(v, state)
         v.list:SetEmptyText(search ~= "" and "No cheap material matches."
             or string.format("No materials are %d%% or more below their usual price right now.", addon:Setting("dealPercent")))
         v.list:SetColumnsAndItems(CHEAP_COLUMNS, items)
-        v.footer:SetText(string.format("%s %d%%+ below usual. Usual = median price over the saved days (Auctionator scans).",
+        v.footer:SetText(string.format("%s %d%%+ below usual. Usual = median price over the saved days (AH scans).",
             Plural(#items, "material"), addon:Setting("dealPercent")))
         v.note:SetText(state.profession ~= "All" and ("Only " .. state.profession) or "")
     elseif inBags then

@@ -48,7 +48,16 @@ local UpdateSoon -- defined below
 
 local function Changed()
     UpdateSoon()
+    -- Buy next at the AH lists what the queue needs (user, 2026-10-19: a
+    -- craft added with the AH open didn't show until it was reopened)
+    if addon.ShopQueueChanged then addon.ShopQueueChanged() end
+    if addon.VendorQueueChanged then addon.VendorQueueChanged() end
     if addon.Refresh then addon.Refresh() end
+end
+
+-- A queue entry changed in place (its choices, from the plan)
+function addon:QueueEntryChanged()
+    Changed()
 end
 
 function addon:GetQueue(charKey)
@@ -66,33 +75,52 @@ function addon:GetQueuedCharacters()
     return keys
 end
 
-local function Same(e, recipeID, tier, concentrate, salvageID)
+-- mix: an entry made with a set mix of material qualities (its
+-- description), for a concentration split's other mix: the same item and
+-- quality as the main entry, with the concentration left after it (user,
+-- 2026-10-19: "it doesn't let me add the same item to the queue of a
+-- different mix"). Entries without one pick their mix as they're planned.
+local function Same(e, recipeID, tier, concentrate, salvageID, mix)
     if salvageID then return e.salvageID == salvageID end
     return e.recipeID ~= nil and e.recipeID == recipeID and e.tier == tier
-        and (e.concentrate == true) == (concentrate == true)
+        and (e.concentrate == true) == (concentrate == true) and e.mix == mix
 end
 
--- The queued craft (recipe, tier, concentration) or salvage batch
--- (salvageID = the item salvaged), or nil
-function addon:FindQueueEntry(charKey, recipeID, tier, concentrate, salvageID)
+-- The queued craft (recipe, tier, concentration, set mix) or salvage
+-- batch (salvageID = the item salvaged), or nil
+function addon:FindQueueEntry(charKey, recipeID, tier, concentrate, salvageID, mix)
     for _, e in ipairs(Queue(charKey) or {}) do
-        if Same(e, recipeID, tier, concentrate, salvageID) then return e end
+        if Same(e, recipeID, tier, concentrate, salvageID, mix) then return e end
     end
 end
 
 -- Queues `quantity` of a craft, or, if it's already queued the same way,
 -- sets it to make `quantity` more from now. Returns true when it was
 -- already queued.
-function addon:AddToQueue(charKey, recipeID, quantity, tier, concentrate)
-    local e = addon:FindQueueEntry(charKey, recipeID, tier, concentrate)
+function addon:AddToQueue(charKey, recipeID, quantity, tier, concentrate, mix)
+    local e = addon:FindQueueEntry(charKey, recipeID, tier, concentrate, nil, mix)
     if e then
         e.quantity, e.made = quantity, 0
     else
         table.insert(Queue(charKey, true), { recipeID = recipeID, quantity = quantity, made = 0, tier = tier,
-                                             concentrate = concentrate == true, added = time() })
+                                             concentrate = concentrate == true, mix = mix, added = time() })
     end
     Changed()
     return e ~= nil
+end
+
+-- A suggestion queued straight from its line (right-click on the
+-- Characters tab's to-do or the Overview's Do this next; user, 2026-10-19:
+-- "less clicks once i know i can trust goldsmith"): `crafts` crafts, or
+-- `items` when the suggestion counts items, queued as the items those
+-- crafts are sure to make, the way the plan's Add to queue does.
+function addon:QueueSuggestion(charKey, recipe, tier, concentrate, crafts, items, mix)
+    local quantity = items or addon:WithCharacter(charKey, addon.ItemsForCrafts, addon, recipe, crafts)
+    quantity = math.max(math.floor(quantity + 0.0001), 1)
+    local updated = addon:AddToQueue(charKey, recipe.recipeID, quantity, tier, concentrate == true, mix)
+    addon:Notify("info", "%s %d %s %s %s's queue.", updated and "Set" or "Added", quantity, recipe.outputName,
+        updated and "in" or "to", CharName(charKey))
+    if addon.RefreshWindow then addon.RefreshWindow() end
 end
 
 -- Same for a salvage batch: `quantity` items to salvage
@@ -355,11 +383,14 @@ function addon:BuildQueue(charKey)
                 else
                     -- The mix the planner shows: what you hold, or your pick
                     if row.tierInfo then
-                        row.tierInfo = addon:WithCharacter(charKey, addon.ChooseMix, addon, row.recipe, row.tierInfo,
-                            row.remaining)
+                        -- A set mix (a split's other mix) while the game
+                        -- still offers it, else the usual pick
+                        local set = e.mix and addon:MixByDescription(row.tierInfo, e.mix)
+                        row.tierInfo = set or addon:WithCharacter(charKey, addon.ChooseMix, addon, row.recipe,
+                            row.tierInfo, row.remaining)
                     end
-                    plan = addon:WithCharacter(charKey, addon.BuildPlan, addon, row.recipe, row.remaining, useOnHand,
-                        row.tierInfo, pool)
+                    plan = addon:WithChoices(e.choices, addon.WithCharacter, addon, charKey, addon.BuildPlan, addon,
+                        row.recipe, row.remaining, useOnHand, row.tierInfo, pool)
                     if mine then row.state = addon.GetCraftState(row.p, row.tierInfo, plan) end
                 end
                 if row.tierMissing then q.complete = false end
@@ -413,6 +444,15 @@ function addon:QueueStalePrices(q)
     return stale
 end
 
+-- The crafting buff (Shattered Essence, Everburning Ignition) that's off
+-- for the next craft, as the plan says above its Craft button; nil when
+-- it's on, not that profession's, or another character's queue (user,
+-- 2026-10-19: Maddoxynn's queue didn't say Shattered Essence was off)
+function addon:QueueMissingBuff(row, mine)
+    local recipe = mine and row and not row.entry.salvageID and row.recipe
+    return recipe and recipe.profession and addon:MissingCraftBuff(recipe.profession, recipe) or nil
+end
+
 -- A queued entry's name, with tier icon
 function addon:QueueRowName(row)
     local name = row.recipe and row.recipe.outputName
@@ -428,7 +468,9 @@ function addon:QueueRowName(row)
         local tier, tierCount = addon:FixedTier(row.recipe)
         icon = tier and (addon:TierIconText(tier, tierCount) .. " ") or ""
     end
-    return icon .. name
+    -- A set mix says which, so it doesn't read as a repeat
+    local mix = row.entry.mix and ("  " .. addon:MixIcon(row.entry.mix)) or ""
+    return icon .. name .. mix
 end
 
 -- A short status for a queued entry and its color: what Craft next would
@@ -462,6 +504,8 @@ function addon:BlockedLabel(s)
         return "Needs concentration", "warning"
     elseif blocker:find("^Open") then
         return blocker:match("^(Open %S+)") or "Open profession", "muted"
+    elseif blocker:find("mailbox") then
+        return "In the mailbox", "warning"
     elseif blocker:find("bank") then
         return "In the bank", "warning"
     end
@@ -571,6 +615,8 @@ end
 local function CreatePanel()
     if panel or not ProfessionsFrame then return end
     panel = CreateFrame("Frame", nil, ProfessionsFrame, "BackdropTemplate")
+    -- Above the whole profession window when dragged over it
+    UI.RaiseAbove(panel, ProfessionsFrame)
     panel:SetWidth(PANEL_WIDTH)
     UI.Style(panel, "panel", "borderGold")
     panel:EnableMouse(true)
@@ -597,8 +643,10 @@ local function CreatePanel()
     panel.open = UI.IconButton(panel, 18, ">", "Open the Queue tab", function() addon:ShowTab("queue") end,
         { font = "small" })
     panel.open:SetPoint("TOPRIGHT", -6, -6)
+
     UI.SetTooltip(panel, function(tooltip)
         tooltip:AddLine("Goldsmith queue", 1, 1, 1)
+
         addon:Explain(tooltip, "Drag to move it. Right-click to put it back or open the Queue tab.", 0.6, 0.6, 0.6, true)
     end)
 
@@ -612,6 +660,10 @@ local function CreatePanel()
     UI.Style(panel.button, "highlight", "borderGold")
     panel.button.label:SetTextColor(addon:Color("gold"))
     panel.button:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderGold")) end)
+    -- The next craft's crafting buff when it's off (QueueMissingBuff)
+    panel.buff = UI.Text(panel, "small", "warning", "CENTER")
+    panel.buff:SetPoint("BOTTOMLEFT", 10, 56)
+    panel.buff:SetPoint("BOTTOMRIGHT", -10, 56)
     panel.hint = UI.Text(panel, "small", "dim", "CENTER")
     panel.hint:SetPoint("BOTTOMLEFT", 10, 8)
     panel.hint:SetPoint("BOTTOMRIGHT", -10, 8)
@@ -646,6 +698,30 @@ local function UpdatePanel()
     if not panel then return end
     local entries = Queue(addon.charKey)
     if not entries or #entries == 0 then
+        -- Multicraft can fill the last entry before the game's batch ends;
+        -- it keeps crafting (materials were bought for the unlucky case),
+        -- so the panel stays until it stops (user, 2026-10-20: Sienna Ink)
+        if Busy() and panel:IsShown() then
+            panel.row, panel.nearby = nil, nil
+            for i, line in ipairs(panel.lines) do
+                if i == 1 then
+                    line.text:SetText("Queue done")
+                    line.text:SetTextColor(addon:Color("gold"))
+                    line.status:SetText("")
+                    line:Show()
+                else
+                    line:Hide()
+                end
+            end
+            panel.shownLines = 1
+            panel.buff:SetText("")
+            panel:SetHeight(30 + LINE_HEIGHT + 64)
+            panel.button:SetLabel("Finishing the batch")
+            panel.button:SetEnabled(false)
+            panel.button:SetAlpha(0.5)
+            panel.hint:SetText("made enough early; the rest are extra")
+            return
+        end
         panel:Hide()
         return
     end
@@ -675,7 +751,11 @@ local function UpdatePanel()
         last.text:SetTextColor(addon:Color("muted"))
         last.status:SetText("")
     end
-    panel:SetHeight(30 + shown * LINE_HEIGHT + 64)
+    -- Room for the buff line when it shows; kept for the aura watch below
+    panel.shownLines = shown
+    local buff = addon:QueueMissingBuff(row, true)
+    panel.buff:SetText(buff and (buff .. " isn't active") or "")
+    panel:SetHeight(30 + shown * LINE_HEIGHT + 64 + (buff and 16 or 0))
 
     local busy = Busy()
     local state = row and row.state
@@ -737,10 +817,26 @@ events:SetScript("OnEvent", function(_, event)
     UpdateSoon()
 end)
 
+-- Your buffs changed: just the buff line, not the whole queue (planning
+-- on every aura change would be the frame drops again)
+local auraWatch = CreateFrame("Frame")
+auraWatch:RegisterUnitEvent("UNIT_AURA", "player")
+auraWatch:SetScript("OnEvent", function()
+    if not (panel and panel:IsShown() and panel.row) then return end
+    local buff = addon:QueueMissingBuff(panel.row, true)
+    panel.buff:SetText(buff and (buff .. " isn't active") or "")
+    panel:SetHeight(30 + (panel.shownLines or 0) * LINE_HEIGHT + 64 + (buff and 16 or 0))
+end)
+
 -- Walking up to an anvil fires no event, so while the next craft needs one
 -- nearby the panel is checked every second
 C_Timer.NewTicker(1, function()
-    if panel and panel:IsShown() and panel.nearby then UpdateSoon() end
+    -- Only once the station is there: planning every second dropped frames
+    -- (Crafts.lua's StationsMet)
+    local state = panel and panel.row and panel.row.state
+    if panel and panel:IsShown() and panel.nearby and addon.StationsMet(state and state.nearbyRecipes) then
+        UpdateSoon()
+    end
 end)
 
 _G.Goldsmith = addon

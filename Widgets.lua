@@ -389,6 +389,20 @@ function UI.SetTooltip(frame, fill, anchor)
     frame:HookScript("OnLeave", GameTooltip_Hide)
 end
 
+-- Puts a panel on the draw layer (strata) above its window's, so the
+-- window's buttons, border and close button never show through it when
+-- it's dragged over the window. A frame level alone wasn't enough.
+local STRATA = { "BACKGROUND", "LOW", "MEDIUM", "HIGH", "DIALOG", "FULLSCREEN", "FULLSCREEN_DIALOG" }
+function UI.RaiseAbove(panel, window)
+    local strata = window:GetFrameStrata()
+    for i, s in ipairs(STRATA) do
+        if s == strata and STRATA[i + 1] then
+            panel:SetFrameStrata(STRATA[i + 1])
+            return
+        end
+    end
+end
+
 -- A flat button. onClick(self, mouseButton).
 function UI.Button(parent, text, width, height, onClick)
     local button = CreateFrame("Button", nil, parent, "BackdropTemplate")

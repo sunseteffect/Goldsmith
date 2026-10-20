@@ -35,9 +35,12 @@ end
 -- until it's crafted, but says it's taken care of (user, 2026-10-16)
 local function TodoText(item, charKey)
     local queued = charKey and item.recipe.recipeID
-        and addon:FindQueueEntry(charKey, item.recipe.recipeID, item.row.tier, item.concentration ~= nil)
-    return string.format("%dx %s%s", item.crafts,
-        ItemText(item.itemID, item.recipe.outputName, item.row.tier, item.tierCount),
+        and addon:FindQueueEntry(charKey, item.recipe.recipeID, item.row.tier, item.concentration ~= nil, nil,
+            item.leftoverOf and item.row.description or nil)
+    -- The second mix of a split, marked so it doesn't read as a repeat
+    local leftover = item.leftoverOf and addon:Colorize("  other mix, conc left", "warning") or ""
+    return string.format("%dx %s%s%s", item.crafts,
+        ItemText(item.itemID, item.recipe.outputName, item.row.tier, item.tierCount), leftover,
         queued and addon:Colorize("  queued", "muted") or "")
 end
 
@@ -153,6 +156,19 @@ local function CreateTodoLine(card, i)
             end
             MenuUtil.CreateContextMenu(self, function(_, root)
                 root:CreateTitle(item.recipe.outputName)
+                -- Queue it without opening the plan (user, 2026-10-19). A
+                -- split's other mix shares the first line's queue entry
+                -- (one per item and quality), so it waits its turn.
+                -- A split's other mix is its own entry with that mix set,
+                -- after the main one (Queue.lua)
+                local concentrate = item.concentration ~= nil
+                local mix = item.leftoverOf and item.row.description or nil
+                local queued = addon:FindQueueEntry(card.key, item.recipe.recipeID, item.row.tier, concentrate, nil, mix)
+                root:CreateButton(string.format(queued and "In the queue: set to %d craft%s%s" or "Add %d craft%s to the queue%s",
+                    item.crafts, item.crafts == 1 and "" or "s", mix and (" (" .. addon:ShortMix(mix) .. ")") or ""), function()
+                    addon:QueueSuggestion(card.key, item.recipe, item.row.tier, concentrate, item.crafts, nil, mix)
+                end)
+                root:CreateDivider()
                 root:CreateButton("Not this: hide it for a day", function()
                     addon:SetSnoozed(item.recipe.outputItemID, item.recipe.outputName, true)
                 end)
@@ -162,7 +178,11 @@ local function CreateTodoLine(card, i)
             end)
         elseif self.item then
             local item = self.item
-            addon:OpenCraftPlan(item.recipe, item.row, card.key, nil, nil, item.crafts)
+            -- A split opens the first mix's plan for its own crafts; the
+            -- plan notes the leftover one. All of them made it say "you
+            -- asked for 5" (user, 2026-10-19)
+            local first = item.leftoverOf or item
+            addon:OpenCraftPlan(first.recipe, first.row, card.key, nil, nil, first.crafts)
         end
     end)
     UI.SetTooltip(line, function(tooltip)
@@ -170,15 +190,19 @@ local function CreateTodoLine(card, i)
         if not item then return end
         tooltip:AddLine(ItemText(item.itemID, item.recipe.outputName, item.row.tier, item.tierCount), 1, 1, 1)
         addon:AddItemDescription(tooltip, item.itemID or item.recipe.outputItemID)
-        -- One mix, or the split between two (Insights.lua GetCharacterTodo)
-        if item.mixes and #item.mixes > 1 then
-            for _, m in ipairs(item.mixes) do
-                tooltip:AddDoubleLine(string.format("%dx %s", m.crafts, m.description or "a mix"),
-                    string.format("%d conc", math.floor(m.points + 0.5)), 0.8, 0.8, 0.8, 1, 1, 1)
-            end
-            addon:Explain(tooltip, "Two mixes of material qualities: the cheaper one is limited by the materials you hold. Goldsmith picks the mix for each craft as you go.")
-        elseif item.concentration and item.row.description then
+        -- Its mix, and for a split (Insights.lua GetCharacterTodo) how the
+        -- two lines go together
+        if item.concentration and item.row.description then
             tooltip:AddDoubleLine("Mix", item.row.description, 0.8, 0.8, 0.8, 1, 1, 1)
+        end
+        if item.leftoverOf then
+            tooltip:AddLine(string.format("A different mix for the concentration left after the %d craft%s above, too little for another of those.",
+                item.leftoverOf.crafts, item.leftoverOf.crafts == 1 and "" or "s"), 0.91, 0.76, 0.35, true)
+            addon:Explain(tooltip, "Right-click to queue it with this mix: it goes after the line above, which Craft next makes first.")
+        elseif item.leftovers and #item.leftovers > 0 then
+            local l = item.leftovers[1]
+            tooltip:AddLine(string.format("Then %dx with %s from the concentration left (the line below).",
+                l.crafts, l.row.description or "another mix"), 0.91, 0.76, 0.35, true)
         end
         tooltip:AddDoubleLine("Crafts", tostring(item.crafts), 0.8, 0.8, 0.8, 1, 1, 1)
         tooltip:AddDoubleLine("Makes about", tostring(item.quantity), 0.8, 0.8, 0.8, 1, 1, 1)
@@ -240,7 +264,7 @@ local function CreateTodoLine(card, i)
                 0.6, 0.6, 0.6, true)
         end
         addon:ClickHint(tooltip, "Click to plan it: materials and shopping list.")
-        addon:RightClickHint(tooltip, "Right-click: hide it for a day, or ignore it")
+        addon:RightClickHint(tooltip, "Right-click: add it to the queue, hide it for a day, or ignore it")
     end)
     return line
 end

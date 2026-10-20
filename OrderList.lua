@@ -317,11 +317,39 @@ local function Update(force)
 
     -- The header's text hidden, Goldsmith's labels in its place
     local keep = {}
-    for _, region in ipairs({ header:GetRegions() }) do
-        if region:GetObjectType() == "FontString" then
-            Hide(region)
-            keep[region] = true
+    local function HideHeaderText()
+        for _, region in ipairs({ header:GetRegions() }) do
+            if region:GetObjectType() == "FontString" then
+                Hide(region)
+                region:SetAlpha(0)
+                keep[region] = true
+            end
         end
+    end
+    HideHeaderText()
+    -- Hovering the header redraws its text in the highlight style, and
+    -- "Patron Name" came back over the labels (user, 2026-10-19): hidden
+    -- again right after the game's own hover handling
+    if not header.goldsmithHooked then
+        header.goldsmithHooked = true
+        -- At once (the hooks run after the game's handler, before the frame
+        -- is drawn), and a frame later in case the game changes it then: a
+        -- frame later alone let it flash (user, 2026-10-19)
+        local function HideNow()
+            if labels and labels:IsShown() then
+                for _, region in ipairs({ header:GetRegions() }) do
+                    if region:GetObjectType() == "FontString" then Hide(region); region:SetAlpha(0) end
+                end
+            end
+        end
+        local function Again()
+            HideNow()
+            C_Timer.After(0, HideNow)
+        end
+        header:HookScript("OnEnter", Again)
+        header:HookScript("OnLeave", Again)
+        if header.HookScript and header:HasScript("OnMouseDown") then header:HookScript("OnMouseDown", Again) end
+        if header:HasScript("OnClick") then header:HookScript("OnClick", Again) end
     end
     if not labels then CreateLabels() end
     labels:ClearAllPoints()
