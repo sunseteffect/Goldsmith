@@ -7,8 +7,9 @@ Most players don't want to study the auction house. Goldsmith gives you a short 
 ## What it does
 - **Do this next:** the best crafts right now, where to spend concentration, cooldowns ready to use, salvage worth doing, and materials selling cheap. How many to make follows how fast your own batches sell: more when they sell out quickly, fewer when they slow down. Suggestions are kept to solid bets: a craft has to make a profit *and* sell.
 - **Crafts:** every recipe your characters know, costed with each character's own stats (multicraft, resourcefulness, ingenuity) and the cheapest mix of material qualities for each tier, with and without concentration. Show Recommended, Profitable, All crafts, or Not learned yet (recipes you haven't learned, with what they'd earn and where to learn them). Hide gear, search, or ignore items you never want to see. Each craft shows how well it sells: Sells, Slow or Hardly sells.
-- **Planner:** for any craft, whether to buy, craft, mill or prospect each material, a shopping list sent to Auctionator, and a Craft button that walks you through each step. Shopping lists cover the unlucky case, so one trip is always enough.
-- **Queue:** queue crafts on each character and shop for all of them at once. Then press Craft next (or its key binding) to work through them: mill, make materials, then craft.
+- **Planner:** for any craft, whether to buy, craft, mill or prospect each material (right-click one to choose another way, for that plan only), and a Craft button that walks you through each step. Shopping lists cover the unlucky case, so one trip is always enough.
+- **Queue:** queue crafts on each character and shop for all of them at once; right-click a craft in Overview or Characters to queue it in one click. Then press Craft next (or its key binding) to work through them: mill, make materials, then craft.
+- **Shopping:** Goldsmith scans the AH itself for every price. **Buy next** buys your queue's materials one item at a time right from the AH, and warns you when the AH asks more than the plan counted on. The vendor panel buys the exact vendor materials in one click. The shopping list can also go to Auctionator.
 - **Salvage:** milling, prospecting and crushing as profit rows, from the yields you actually get. The planner shows whether salvaging beats buying.
 - **Characters:** a to-do list for each alt, with their professions, concentration and craft cooldowns. Cooldowns that are ready and worth making show up in Do this next.
 - **Items and History:** prices and price history, your stock across bags, banks and the warband bank, every sale, purchase and deposit with real profit after the AH cut, and your total gold over time with where it is.
@@ -20,15 +21,15 @@ Most players don't want to study the auction house. Goldsmith gives you a short 
 - [Goldsmith Data](https://github.com/sunseteffect/GoldsmithData): region-wide AH prices for US, EU, KR and TW, refreshed daily, and how well each item sells. CurseForge installs it with Goldsmith.
 
 ## Recommended
-- Auctionator (free on CurseForge, not required), for live prices when you buy and sell, and for shopping lists.
+- Auctionator (free on CurseForge, not required), for posting your crafts and for shopping lists if you prefer it to Buy next.
 
 ## If you already use TSM
-Not needed: Goldsmith Data covers prices and how well each item sells. If TradeSkillMaster and its desktop app are installed anyway, Goldsmith uses TSM's region sales per day and sale rates instead of Goldsmith Data's Sells / Slow / Hardly sells, plus prices between your Auctionator scans and a check on listings far from the usual price.
+Not needed: Goldsmith Data covers prices and how well each item sells. If TradeSkillMaster and its desktop app are installed anyway, Goldsmith uses TSM's region sales per day and sale rates instead of Goldsmith Data's Sells / Slow / Hardly sells, plus prices between your AH scans and a check on listings far from the usual price.
 
 ## Getting started
-1. Install Goldsmith (with Goldsmith Data) and Auctionator, then log in.
+1. Install Goldsmith (with Goldsmith Data), then log in.
 2. Open each of your professions once so Goldsmith can load your recipes.
-3. For live prices, run a full Auctionator scan at the auction house. Until then, Goldsmith Data's prices fill in.
+3. For live prices, open the auction house and press **Scan the AH**. Until then, Goldsmith Data's prices fill in.
 4. Type `/gsm` or click the minimap button. The Overview shows a checklist until you're set up.
 
 Repeat step 2 on each alt with professions.
@@ -42,7 +43,7 @@ Repeat step 2 on each alt with professions.
 You can also set keys for opening Goldsmith and for Craft next in the game's Key Bindings, in their own Goldsmith section.
 
 ## Good to know
-- Goldsmith never crafts, buys or posts on its own. Every craft is one press of a button or key.
+- Goldsmith never crafts, buys or posts on its own. Every craft and every purchase is one press of a button or key.
 - Posting your crafts on the AH is up to you (TSM or Auctionator do that well).
 
 ## Support and feedback
