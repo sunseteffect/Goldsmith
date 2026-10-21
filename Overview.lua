@@ -1399,6 +1399,7 @@ end
 local function Legend()
     return {
         { "click", "a suggestion: its plan" },
+        { "right", "a suggestion: queue it" },
         { "click", "other characters: their to-do lists" },
         { "hover", ": details" },
         { "ctrl", "in a hover: explain" },

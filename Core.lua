@@ -567,6 +567,7 @@ local function PrintHelp()
     print("  /gsm data - check the numbers behind the window")
     print("  /gsm setup - show the getting started checklist again")
     print("  /gsm tour - a short tour of the window")
+    print("  /gsm news - what's new in this version")
     print("  /gsm scan - scan the AH for every price (at the AH)")
     print("  /gsm cooldowns - craft cooldowns on every character")
     print("  /gsm gathered - what was counted as gathered today, and what was skipped")
@@ -600,6 +601,8 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:ShowSetup()
     elseif cmd == "tour" then
         addon:StartTour()
+    elseif cmd == "news" then
+        addon:ShowNews()
     elseif cmd == "scan" then
         addon:ScanAH(false)
     elseif cmd == "stats" then

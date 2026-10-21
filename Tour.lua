@@ -44,7 +44,7 @@ local TIME_KEYS = {
 -- 2026-10-13).
 local SHARED_KEYS = {
     "ui", "ui2", "professionIcons", "tourOffered", "auctionatorTipShown",
-    "lastPriceUpdate", "lastFullScan", "errorLog", "ownScan", "lastFullRequest",
+    "lastPriceUpdate", "lastFullScan", "errorLog", "ownScan", "lastFullRequest", "newsSeen",
 }
 -- Window choices the tour starts from (ui2 is shared with the window, so
 -- the player's are saved and put back when it ends): everything shown,
@@ -342,9 +342,11 @@ local function StopWatching()
     watcher = nil
 end
 
--- Seven steps along one path: what to do, how to do it, where the rest
--- is. It was 20 steps of three or four ideas each, and a friend found it
--- too much to take in (2026-10-15). One idea a step now, and everything
+-- One path, the core of Goldsmith: what to craft, queue it, buy it, craft
+-- it (user, 2026-10-20: "That's the core of the workflow. The rest is just
+-- bonus or fun stuff"; Buy next took them from almost never queuing to
+-- always). It was 20 steps of three or four ideas each, and a friend found
+-- it too much to take in (2026-10-15). One idea a step, and everything
 -- else is in help mode (HelpMode.lua): the last step shows where that is,
 -- so players learn the rest when they're about to use it.
 --
@@ -353,67 +355,63 @@ end
 -- inside the tab to open first ("plan", "page"); until then pickLead (or
 -- lead; a different line, so it isn't the tab step twice), ask (what to
 -- click) and clickTarget (where).
+local function PlanStep(step)
+    step.tab, step.screen = "crafts", "plan"
+    step.lead = "Next: everything your characters can craft."
+    step.pickLead = "Every craft has a plan behind it."
+    step.ask = "Click the highlighted " .. CRAFT_PICK .. " to open its plan."
+    step.askAny = "Click any craft in the list to open its plan."
+    step.clickTarget = function()
+        local view = Screen("crafts")
+        return view and view.list
+    end
+    return step
+end
+
+local function QueuePart(key)
+    local view, frame = Screen("queue")
+    return view and view[key] or frame
+end
+
 local STEPS = {
-    { tab = "overview", title = "Do this next",
-      text = "Each step lights up one part of the window. This one is what to do now on the character you're on, best first. Click one to open its plan.",
+    { tab = "overview", title = "1. What to craft",
+      text = "Each step lights up one part of the window. Start here: what's worth crafting now on the character you're on, best first. Click one to open its plan, or right-click to queue it.",
       target = function()
           local view = Screen("overview")
           return view and view.actionsTitle:GetParent()
       end },
-    { tab = "overview", title = "Your other characters",
-      text = "Who has the most gold waiting. Click it for every character's to-do list.",
-      target = function()
-          local view = Screen("overview")
-          return view and (view.others:IsShown() and view.others or view.actionsPanel)
-      end },
-    { tab = "crafts", screen = "plan", title = "A craft's plan",
-      lead = "Next: everything your characters can craft.",
-      pickLead = "Every craft has a plan behind it.",
-      ask = "Click the highlighted " .. CRAFT_PICK .. " to open its plan.",
-      askAny = "Click any craft in the list to open its plan.",
-      clickTarget = function()
-          local view = Screen("crafts")
-          return view and view.list
-      end,
+    PlanStep({ title = "A craft's plan",
       text = "How many to make, what it costs and what it makes, worked out from your own crafting stats.",
       target = function()
           local view = Screen("crafts")
           return view and view.plan
-      end },
-    { tab = "crafts", screen = "plan", title = "Materials",
-      lead = "Next: everything your characters can craft.",
-      pickLead = "Every craft has a plan behind it.",
-      ask = "Click the highlighted " .. CRAFT_PICK .. " to open its plan.",
-      askAny = "Click any craft in the list to open its plan.",
-      clickTarget = function()
-          local view = Screen("crafts")
-          return view and view.list
-      end,
+      end }),
+    PlanStep({ title = "Materials",
       text = "Where each material comes from: your bags, a vendor, the AH, or crafting it first. Right-click one to change it.",
       target = function()
           local view = Screen("crafts")
           return view and view.plan.list
-      end },
-    { tab = "crafts", screen = "plan", title = "Shopping list",
-      lead = "Next: everything your characters can craft.",
-      pickLead = "Every craft has a plan behind it.",
-      ask = "Click the highlighted " .. CRAFT_PICK .. " to open its plan.",
-      askAny = "Click any craft in the list to open its plan.",
-      clickTarget = function()
-          local view = Screen("crafts")
-          return view and view.list
-      end,
-      text = "With Auctionator, this sends everything you need to buy to its Shopping tab at the AH.",
+      end }),
+    PlanStep({ title = "2. Queue it",
+      text = "Happy with the plan? Add it to the queue. Queue as many crafts as you like, on any character.",
       target = function()
           local view = Screen("crafts")
-          return view and view.plan.shop
-      end },
-    { tab = "queue", title = "Queue",
-      lead = "Next: crafts lined up to make.",
-      text = "Add crafts here from any plan. Craft next makes the next one: one click per craft.",
-      target = function() return select(2, Screen("queue")) end },
+          return view and view.plan.queue
+      end }),
+    { tab = "queue", title = "Your queue",
+      lead = "Next: everything you've queued.",
+      text = "Everything queued on this character, and what the materials cost.",
+      target = function() return QueuePart("list") end },
+    { tab = "queue", title = "3. Buy it",
+      lead = "Next: everything you've queued.",
+      text = "Then go to the AH. Goldsmith's panel beside it scans prices, and Buy next buys everything the queue needs, one click per item. At a vendor, Goldsmith's panel buys the vendor materials in one click.\n\nPrefer Auctionator? This button sends the list there instead.",
+      target = function() return QueuePart("shop") end },
+    { tab = "queue", title = "4. Craft it",
+      lead = "Next: everything you've queued.",
+      text = "With your profession window open, press Craft next (or set a key for it). One click per craft, down the queue: it makes the materials first when the plan says so.",
+      target = function() return QueuePart("craft") end },
     { title = "Anything else",
-      text = "Want to know what something is? Click ?, then click that part of the window.\n\nThat's the tour. /gsm tour starts it again.",
+      text = "That's the core: pick a craft, queue it, buy it, craft it. Everything else is extra.\n\nWant to know what something is? Click ?, then click that part of the window. /gsm tour starts this tour again.",
       target = function() return Part("help") end },
 }
 
@@ -847,6 +845,8 @@ StaticPopupDialogs["GOLDSMITH_TOUR"] = {
 function addon:OfferTour()
     if GoldsmithDB.tourOffered or current then return end
     GoldsmithDB.tourOffered = true
+    -- A new player: no What's new for them (WhatsNew.lua)
+    addon.newPlayer = true
     StaticPopup_Show("GOLDSMITH_TOUR")
 end
 

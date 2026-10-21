@@ -811,12 +811,17 @@ function addon:CreateWindow()
         -- Bag changes out in the world only mark stock stale (Characters.lua)
         if addon.CountStockIfStale then addon:CountStockIfStale() end
         -- New players: offer the tour once (Tour.lua)
-        if addon.OfferTour then C_Timer.After(0.5, function() addon:OfferTour() end) end
+        -- then What's new after an update (WhatsNew.lua)
+        C_Timer.After(0.5, function()
+            if addon.OfferTour then addon:OfferTour() end
+            if addon.OfferNews then addon:OfferNews() end
+        end)
     end)
     frame:SetScript("OnHide", function()
         settings:Hide()
         if addon.EndTour then addon:EndTour() end
         if addon.ExitHelpMode then addon:ExitHelpMode() end
+        if addon.HideNews then addon:HideNews() end
     end)
 
     addon.window = frame

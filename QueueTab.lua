@@ -477,6 +477,9 @@ local function Refresh(v)
         if live > 0 then text = text .. string.format(" (%d priced from live listings)", live) end
         if short then text = text .. ". Not enough listed for all of it." end
         if not q.mine then text = text .. ". Planned without their bags: log in on them for what they already have." end
+        -- Where to buy it, always in sight (user, 2026-10-20: nobody would
+        -- know Buy next is there)
+        if q.mine and #q.buyAH > 0 and not short then text = text .. ". At the AH, Goldsmith's Buy next buys them." end
         v.spendLine:SetText(text)
         v.spendLine:SetTextColor(addon:Color(short and "warning" or "muted"))
     end

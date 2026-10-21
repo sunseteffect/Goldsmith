@@ -95,7 +95,7 @@ TAB_PARTS.overview = function(list)
             view.actionsPanel)
     else
         Add(list, "Do this next",
-            "What to do now on the character you're on, best first. Only solid bets show here: things that sell. Click one to open its plan.",
+            "What to do now on the character you're on, best first. Only solid bets show here: things that sell. Click one to open its plan, or right-click to queue it.",
             view.actionsPanel)
         Add(list, "Followed",
             "How the suggestions you crafted turned out: what they made compared to what Goldsmith expected. Hover it for each one.",
@@ -126,7 +126,7 @@ TAB_PARTS.crafts = function(list)
             "Plans this quality with concentration, using the mix of material qualities that earns the most.",
             plan.useConc)
         Add(list, "Materials",
-            "Each material and where it comes from: your bags, a vendor, the AH, or crafting it first. Right-click one to change that.",
+            "Each material and where it comes from: your bags, a vendor, the AH, or crafting it first. Right-click one to change that, for this plan and its queue entry.",
             plan.list)
         Add(list, "Material qualities",
             "The mix of material qualities. Goldsmith picks the best one for this quality and lists the top three to compare. Click one to use it instead, or click the bar to hide or show them.",
@@ -170,7 +170,7 @@ TAB_PARTS.queue = function(list)
     Add(list, "Whose queue", "Each character has their own queue. Switch between them here.", view.who)
     Add(list, "Queue", "Crafts lined up to make, added from a plan or by right-clicking a craft.", view.list)
     Add(list, "Shopping list",
-        "With Auctionator, one shopping list for everything in this character's queue (the one picked in Whose queue). Items come off it as you buy them.",
+        "With Auctionator, one shopping list for everything in this character's queue (the one picked in Whose queue). Items come off it as you buy them. Or press Buy next in Goldsmith's panel beside the AH, and use the panel beside a vendor for vendor materials.",
         view.shop)
     Add(list, "Craft next", "Does the next step of the queue: one click per craft.", view.craft)
 end
@@ -246,7 +246,7 @@ TAB_PARTS.characters = function(list)
             "Leave out a character you don't play: their gold, stock and recipes stay out of everything.",
             card.exclude)
         Add(list, "A character",
-            "Professions, concentration, craft cooldowns and a to-do list for each character, most gold first. Click a to-do to open its plan.",
+            "Professions, concentration, craft cooldowns and a to-do list for each character, most gold first. Click a to-do to open its plan, or right-click to queue it.",
             card)
     end
     Add(list, "Followed",

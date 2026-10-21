@@ -522,7 +522,7 @@ local function Reset(view) view.offset = 0 end
 local function Legend()
     return {
         { "click", "a to-do: its plan" },
-        { "right", "a to-do: hide for a day or ignore" },
+        { "right", "a to-do: queue, hide or ignore" },
         { "right", "a card: exclude or remove" },
         { "hover", ": details" },
     }
