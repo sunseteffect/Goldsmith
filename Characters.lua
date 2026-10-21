@@ -5,6 +5,7 @@ local function Print(msg, ...)
 end
 
 local function FormatGold(copper)
+    if addon.isForever then return addon:FormatMoney(copper) end
     return string.format("%.2fg", copper / 10000)
 end
 
@@ -397,13 +398,18 @@ end
 function addon:GetStock(itemID)
     local list, total = {}, 0
     for key, c in pairs(GoldsmithDB.characters) do
-        local count = addon:IsCharacterIncluded(key) and c.stock[itemID]
-        if count and count > 0 then
+        local included = addon:IsCharacterIncluded(key)
+        local count = included and c.stock[itemID] or 0
+        -- In their mailbox: bought with Buy next, or mailed from another
+        -- of your characters (Shop.lua)
+        local book = included and GoldsmithDB.inMail and GoldsmithDB.inMail[key]
+        local mail = book and book[itemID] and math.max(book[itemID].quantity or 0, 0) or 0
+        if count + mail > 0 then
             -- bank: how many of them are in the bank (nil: not known yet,
             -- saved before this was kept)
             local bank = c.stockBank and math.min(c.stockBank[itemID] or 0, count)
-            table.insert(list, { key = key, name = c.name, count = count, bank = bank })
-            total = total + count
+            table.insert(list, { key = key, name = c.name, count = count + mail, bank = bank, mail = mail })
+            total = total + count + mail
         end
     end
     local warband = GoldsmithDB.warbandStock[itemID]
@@ -418,6 +424,17 @@ end
 -- "4 (bags)", "2 (bank)", "4 (3 bags, 1 bank)" for a GetStock entry
 function addon:StockWhereText(entry)
     local count = tostring(entry.count)
+    local mail = entry.mail or 0
+    if mail > 0 then
+        local bank = entry.bank or 0
+        local bags = entry.count - bank - mail
+        local parts = {}
+        if bags > 0 then table.insert(parts, bags .. " bags") end
+        if bank > 0 then table.insert(parts, bank .. " bank") end
+        table.insert(parts, mail .. " mail")
+        if #parts == 1 then return count .. " (mail)" end
+        return count .. " (" .. table.concat(parts, ", ") .. ")"
+    end
     if entry.key == "warband" or entry.bank == nil then return count end
     if entry.bank == 0 then return count .. " (bags)" end
     if entry.bank >= entry.count then return count .. " (bank)" end

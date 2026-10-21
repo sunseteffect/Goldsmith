@@ -464,6 +464,8 @@ function addon:CreateWindow()
         end)
     end)
     expansionButton:SetPoint("LEFT", rangeButton, "RIGHT", 8, 0)
+    -- Forever has one expansion: nothing to pick
+    if addon.isForever then expansionButton:SetAlpha(0); expansionButton:EnableMouse(false); expansionButton:SetWidth(1) end
 
     local closeButton = UI.IconButton(header, 34, "X", nil, function() frame:Hide() end,
         { font = "close", hoverColor = "loss" })

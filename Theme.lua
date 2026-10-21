@@ -117,7 +117,16 @@ end
 function addon:FormatMoney(copper)
     local gold = math.abs(copper) / 10000
     local text
-    if gold < 1000 then
+    -- Forever: most prices are silver and copper, which 0.00g hid (a
+    -- 10c Linen Cloth; stress test, 2026-10-21). 12s 40c, 3g 25s.
+    local c = math.floor(math.abs(copper) + 0.5)
+    if addon.isForever and c < 10000 then
+        local s, cc = math.floor(c / 100), c % 100
+        text = (s > 0 and (s .. "s") or "") .. ((cc > 0 or s == 0) and ((s > 0 and " " or "") .. cc .. "c") or "")
+    elseif addon.isForever and gold < 100 then
+        local g, s = math.floor(c / 10000), math.floor((c % 10000) / 100)
+        text = g .. "g" .. (s > 0 and (" " .. s .. "s") or "")
+    elseif gold < 1000 then
         text = string.format("%.2fg", gold)
     elseif gold < 1000000 then
         text = Thousands(math.floor(gold + 0.5)) .. "g"

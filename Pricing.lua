@@ -5,6 +5,7 @@ local function Print(msg, ...)
 end
 
 local function FormatGold(copper)
+    if addon.isForever then return addon:FormatMoney(copper) end
     return string.format("%.2fg", copper / 10000)
 end
 

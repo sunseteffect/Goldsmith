@@ -1,5 +1,8 @@
 local ADDON_NAME = "Goldsmith"
 local addon = _G.Goldsmith or {}
+-- WoW Forever (project "Camelot", 18): one expansion, no qualities or
+-- concentration, prices mostly silver and copper
+addon.isForever = WOW_PROJECT_ID == (WOW_PROJECT_CAMELOT or 18)
 
 -- Purchase in flight: { itemID, quantity, moneyBefore }
 local pending = nil

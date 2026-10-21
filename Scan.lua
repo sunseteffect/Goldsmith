@@ -84,6 +84,11 @@ local function Finish(prices, auctions, method)
     }
     run = nil
     addon:Notify("info", "Goldsmith scan: %s items priced.", BreakUpLargeNumbers(items))
+    -- Buy to vendor (below): Forever only for now; retail's 350,000
+    -- listings would need the chunked tally and a look at what it finds
+    if addon.isForever then
+        C_Timer.After(0.5, function() if addon.FindVendorFlips then addon:FindVendorFlips(method) end end)
+    end
     UpdatePanel()
     -- One part a frame, so the end of a scan doesn't freeze the game. The
     -- times go to GoldsmithDB.scanTiming (a page scan has only these).
@@ -485,3 +490,177 @@ UpdatePanel = function()
     panel:Show()
 end
 addon.UpdateScanPanel = function() UpdatePanel() end
+
+-- Buy to vendor (Forever, tested at the stress test 2026-10-21)
+--
+-- After each scan: listings whose price each is under what a vendor pays
+-- for the item, in a list under the panel. Click a row to search it on the
+-- AH, buy it there, sell it to any vendor. A full scan sees every listing;
+-- a page scan only each item's cheapest, so its counts are "at least".
+
+local FLIP_ROWS = 8
+local FLIP_ROW_HEIGHT = 18
+local flipFrame
+local flipList = {}
+local flipMethod
+
+local function SellPrice(itemID)
+    local sell = select(11, C_Item.GetItemInfo(itemID))
+    if sell == nil and C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(itemID) end
+    return sell
+end
+
+local function SearchItem(itemID)
+    local ah = AuctionHouseFrame
+    local bar = ah and ah:IsShown() and ah.SearchBar
+    local name = C_Item.GetItemNameByID(itemID)
+    if not (bar and bar.SearchBox and name) then return end
+    if ah.SetDisplayMode and AuctionHouseFrameDisplayMode then
+        pcall(ah.SetDisplayMode, ah, AuctionHouseFrameDisplayMode.Buy)
+    end
+    bar.SearchBox:SetText(name)
+    if bar.StartSearch then pcall(bar.StartSearch, bar) end
+end
+
+local function ShowFlips()
+    if not panel or not panel:IsShown() then return end
+    if not flipFrame then
+        flipFrame = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+        UI.Style(flipFrame, "panel", "borderGold")
+        flipFrame:SetWidth(PANEL_WIDTH)
+        flipFrame:SetPoint("TOPLEFT", panel, "BOTTOMLEFT", 0, -4)
+        flipFrame.title = UI.Text(flipFrame, "label", "gold")
+        flipFrame.title:SetPoint("TOPLEFT", 10, -10)
+        flipFrame.title:SetText("BUY TO VENDOR")
+        flipFrame.note = UI.Text(flipFrame, "small", "muted")
+        flipFrame.note:SetPoint("TOPLEFT", flipFrame.title, "BOTTOMLEFT", 0, -4)
+        flipFrame.note:SetPoint("RIGHT", -10, 0)
+        flipFrame.rows = {}
+        for i = 1, FLIP_ROWS do
+            local row = CreateFrame("Button", nil, flipFrame)
+            row:SetHeight(FLIP_ROW_HEIGHT)
+            row:SetPoint("TOPLEFT", 10, -44 - (i - 1) * FLIP_ROW_HEIGHT)
+            row:SetPoint("RIGHT", -10, 0)
+            row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
+            row.name = UI.Text(row, "small", "text")
+            row.name:SetPoint("LEFT", 0, 0)
+            row.name:SetPoint("RIGHT", -70, 0)
+            row.gain = UI.Text(row, "small", "profit", "RIGHT")
+            row.gain:SetPoint("RIGHT", 0, 0)
+            row:SetScript("OnClick", function(self) if self.itemID then SearchItem(self.itemID) end end)
+            row:SetScript("OnEnter", function(self)
+                if not self.entry then return end
+                local e = self.entry
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:SetItemByID(e.itemID)
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine(string.format("%s%d on the AH under vendor price", flipMethod == "pages" and "at least " or "", e.count), 1, 0.82, 0)
+                GameTooltip:AddDoubleLine("Cheapest", addon:FormatMoney(e.low) .. " each", 0.8, 0.8, 0.8, 1, 1, 1)
+                GameTooltip:AddDoubleLine("Vendor pays", addon:FormatMoney(e.sell) .. " each", 0.8, 0.8, 0.8, 1, 1, 1)
+                GameTooltip:AddDoubleLine("Buy them all", addon:FormatMoney(e.cost), 0.8, 0.8, 0.8, 1, 1, 1)
+                GameTooltip:AddDoubleLine("You make", addon:FormatMoney(e.gain), 0.8, 0.8, 0.8, 0.2, 1, 0.2)
+                GameTooltip:AddLine("Click: search it on the AH", 0.6, 0.6, 0.6)
+                GameTooltip:Show()
+            end)
+            row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            flipFrame.rows[i] = row
+        end
+    end
+    local total = 0
+    for _, e in ipairs(flipList) do total = total + e.gain end
+    if #flipList == 0 then
+        flipFrame.note:SetText("Nothing under vendor price in the last scan.")
+    else
+        flipFrame.note:SetText(string.format("%d items, about %s to make", #flipList, addon:FormatMoney(total)))
+    end
+    local shown = math.min(#flipList, FLIP_ROWS)
+    for i, row in ipairs(flipFrame.rows) do
+        local e = flipList[i]
+        row.entry, row.itemID = e, e and e.itemID
+        if e then
+            local name = C_Item.GetItemNameByID(e.itemID) or ("item " .. e.itemID)
+            row.name:SetText(string.format("%s x%d", name, e.count))
+            row.gain:SetText("+" .. addon:FormatMoney(e.gain))
+            row:Show()
+        else
+            row:Hide()
+        end
+    end
+    flipFrame:SetHeight(50 + shown * FLIP_ROW_HEIGHT)
+    flipFrame:Show()
+end
+
+local function RankFlips(listings)
+    flipList = {}
+    for itemID, rows in pairs(listings) do
+        local sell = SellPrice(itemID)
+        if sell and sell > 0 then
+            local e
+            for _, r in ipairs(rows) do
+                if r[1] < sell then
+                    e = e or { itemID = itemID, sell = sell, count = 0, cost = 0, gain = 0, low = r[1] }
+                    e.count = e.count + r[2]
+                    e.cost = e.cost + r[1] * r[2]
+                    e.gain = e.gain + (sell - r[1]) * r[2]
+                    if r[1] < e.low then e.low = r[1] end
+                end
+            end
+            if e then e.cost, e.gain = math.floor(e.cost + 0.5), math.floor(e.gain + 0.5); table.insert(flipList, e) end
+        end
+    end
+    table.sort(flipList, function(a, b) return a.gain > b.gain end)
+    local total = 0
+    for _, e in ipairs(flipList) do total = total + e.gain end
+    if #flipList > 0 then
+        addon:Notify("info", "Goldsmith: %d items on the AH under vendor price, about %s to make.", #flipList, addon:FormatMoney(total))
+    end
+    ShowFlips()
+end
+
+-- Reads the scan's listings (a frame at a time), then waits for item data
+-- so the vendor prices are known
+function addon:FindVendorFlips(method)
+    flipMethod = method
+    local listings = {}
+    local function Rank()
+        for itemID in pairs(listings) do SellPrice(itemID) end
+        C_Timer.After(2, function() RankFlips(listings) end)
+    end
+    local api = C_AuctionHouse
+    if method == "full" then
+        local ok, num = pcall(api.GetNumReplicateItems)
+        if not ok or type(num) ~= "number" then return end
+        local i = 0
+        local function Step()
+            local started = debugprofilestop()
+            while i < num do
+                local okI, _, _, count, _, _, _, _, _, _, buyout, _, _, _, _, _, _, itemID =
+                    pcall(api.GetReplicateItemInfo, i)
+                i = i + 1
+                if okI and itemID and type(buyout) == "number" and buyout > 0 and type(count) == "number" and count > 0 then
+                    listings[itemID] = listings[itemID] or {}
+                    table.insert(listings[itemID], { buyout / count, count })
+                end
+                if debugprofilestop() - started > 6 then break end
+            end
+            if i < num then C_Timer.After(0, Step) else Rank() end
+        end
+        Step()
+    else
+        local ok, results = pcall(api.GetBrowseResults)
+        for _, r in ipairs(ok and type(results) == "table" and results or {}) do
+            local key = r.itemKey
+            if key and key.itemID and (key.battlePetSpeciesID or 0) == 0 and type(r.minPrice) == "number" and r.minPrice > 0 then
+                listings[key.itemID] = listings[key.itemID] or {}
+                table.insert(listings[key.itemID], { r.minPrice, 1 })
+            end
+        end
+        Rank()
+    end
+end
+
+local flipEvents = CreateFrame("Frame")
+flipEvents:RegisterEvent("AUCTION_HOUSE_SHOW")
+flipEvents:SetScript("OnEvent", function()
+    C_Timer.After(0.2, function() if flipMethod then ShowFlips() end end)
+end)

@@ -206,7 +206,9 @@ local function TrackMail()
     if not book then return end
     for itemID, e in pairs(book) do
         local count = BagCount(itemID)
-        if count > e.last then e.quantity = e.quantity - (count - e.last) end
+        -- Mailed from another of your characters: its bags weren't seen
+        -- until now, so this is where it starts
+        if e.last and count > e.last then e.quantity = e.quantity - (count - e.last) end
         e.last = count
         if e.quantity <= 0 or time() - e.time > MAIL_DAYS * 86400 then book[itemID] = nil end
     end
@@ -217,6 +219,50 @@ end
 -- the same item kept 7 Photosynthesized Scrap from being bought twice,
 -- and the plan, not seeing them, switched to buying Cellular Slab instead
 -- (2026-10-19).
+-- Mailed to another of your characters: in their mailbox until they log in
+-- and take it (Forever has no warband bank, so cloth mailed to an alt
+-- vanished from Goldsmith's count; user, 2026-10-21). Forever names can
+-- have a surname ("Namo Dormammu"), so the first word is matched too.
+local sendSnapshot = {}
+local function ReadSendItems()
+    local items = {}
+    for i = 1, ATTACHMENTS_MAX_SEND or 12 do
+        local _, itemID, _, count = GetSendMailItem(i)
+        if itemID and count and count > 0 then table.insert(items, { itemID, count }) end
+    end
+    return items
+end
+local mailWatch = CreateFrame("Frame")
+mailWatch:RegisterEvent("MAIL_SEND_INFO_UPDATE")
+mailWatch:SetScript("OnEvent", function() sendSnapshot = ReadSendItems() end)
+hooksecurefunc("SendMail", function(recipient)
+    if type(recipient) ~= "string" or recipient == "" then return end
+    local who = (strsplit("-", recipient)):lower()
+    local first = who:match("^(%S+)")
+    local realm = GetRealmName()
+    local key
+    for k, c in pairs(GoldsmithDB.characters or {}) do
+        local name = c.name and c.name:lower()
+        if name and (name == who or name == first) and (not c.realm or c.realm == realm) then key = k end
+    end
+    if not key or key == addon.charKey then return end
+    local items = ReadSendItems()
+    if #items == 0 then items = sendSnapshot end
+    GoldsmithDB.inMail = GoldsmithDB.inMail or {}
+    GoldsmithDB.inMail[key] = GoldsmithDB.inMail[key] or {}
+    local book = GoldsmithDB.inMail[key]
+    for _, it in ipairs(items) do
+        local e = book[it[1]]
+        if e then
+            e.quantity, e.time = e.quantity + it[2], time()
+        else
+            book[it[1]] = { quantity = it[2], time = time() }
+        end
+    end
+    sendSnapshot = {}
+    if addon.DataChanged then addon:DataChanged() end
+end)
+
 function addon:InMailCount(itemID)
     local book = GoldsmithDB.inMail and GoldsmithDB.inMail[addon.charKey]
     local e = book and book[itemID]

@@ -605,9 +605,14 @@ for _, value in ipairs({ 0, 5, 10, 15, 20, 30, 50 }) do
     table.insert(CHOICES.minROI, { value = value,
         label = value == 0 and "Any profit" or string.format("%d%%", value) })
 end
-for _, value in ipairs({ 0, 5, 10, 25, 50, 100 }) do
+-- Forever's gold is scarce: silver amounts (in gold, as the setting is)
+local isForever = WOW_PROJECT_ID == (WOW_PROJECT_CAMELOT or 18)
+if isForever then DEFAULTS.minLine = 0.5 end
+for _, value in ipairs(isForever and { 0, 0.1, 0.25, 0.5, 1, 5 } or { 0, 5, 10, 25, 50, 100 }) do
     table.insert(CHOICES.minLine, { value = value,
-        label = value == 0 and "Any profit" or string.format("%dg a batch", value) })
+        label = value == 0 and "Any profit"
+            or isForever and addon:FormatMoney(value * 10000) .. " a batch"
+            or string.format("%dg a batch", value) })
 end
 for _, value in ipairs({ 5, 10, 15, 20, 25 }) do
     table.insert(CHOICES.dealPercent, { value = value, label = string.format("%d%% below usual", value) })

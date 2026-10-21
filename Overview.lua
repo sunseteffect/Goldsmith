@@ -181,6 +181,15 @@ end
 -- The character you're on (each profession's own: they don't add up, so
 -- two read "450 · 800"); every character is in the hover
 local function FillConcentrationTile(tile, conc)
+    -- Forever has no concentration: the last AH scan instead
+    if addon.isForever then
+        local last = addon:GetOwnScanTime()
+        local mins = last and math.floor((time() - last) / 60)
+        tile:Set("Last AH scan", last and (mins < 60 and (mins .. " min ago") or (math.floor(mins / 60) .. " h ago")) or "-",
+            last and (mins < 60 and "text" or "muted") or "muted", last and "your own scan, this realm" or "open the AH to scan it")
+        tile.tooltip = nil
+        return
+    end
     local label = "Concentration, " .. MyName()
     if #conc.rows == 0 then
         tile:Set(label, "-", "muted", "open each profession once to load it")

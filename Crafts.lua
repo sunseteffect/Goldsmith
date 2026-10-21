@@ -3339,6 +3339,7 @@ local function Create(parent)
         addon.RefreshWindow()
     end)
     view.concSwitch:SetPoint("TOPRIGHT", 0, 0)
+    if addon.isForever then view.concSwitch:SetAlpha(0); view.concSwitch:EnableMouse(false) end
 
     -- Hover explanations for the two options (hooked, so the widgets keep
     -- their own hover colors)
