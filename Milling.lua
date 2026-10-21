@@ -223,11 +223,11 @@ local function OnBagsChanged()
         session.used = session.used + used
         session.lastMill = t
         changed = true
-        addon:QueueSalvaged(herbID, used)
     end
 
     -- Only items that appear right after herbs were used up count as output,
     -- so loot or mail picked up mid-session isn't mistaken for pigment.
+    local gains = {}
     if t - session.lastMill <= OUTPUT_WINDOW then
         for itemID, count in pairs(now) do
             local gained = count - (session.baseline[itemID] or 0)
@@ -240,12 +240,15 @@ local function OnBagsChanged()
                 out.qty = out.qty + gained
                 session.summaryOutputs[itemID] = (session.summaryOutputs[itemID] or 0) + gained
                 session.outputs[itemID] = (session.outputs[itemID] or 0) + gained
+                gains[itemID] = gained
                 changed = true
             end
         end
     end
 
     session.baseline = now
+    -- The queue counts the herbs, and keeps what came out for its notice
+    if used > 0 or next(gains) then addon:QueueSalvaged(herbID, math.max(used, 0), gains) end
 
     if changed then
         if summaryTimer then

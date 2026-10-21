@@ -211,19 +211,20 @@ end
 
 -- Counts toward the first matching entry on this character; it leaves
 -- the queue once its quantity is reached
-local function Progress(match, quantity, describe)
+local function Progress(match, quantity, describe, finished)
     local q = Queue(addon.charKey)
     if not q then return end
     for i, e in ipairs(q) do
         if match(e) then
             e.made = (e.made or 0) + (quantity or 0)
-            if e.made >= e.quantity then
+            local done = e.made >= e.quantity or (finished and finished(e))
+            if done then
                 table.remove(q, i)
                 addon:Notify("info", "Queue: %s, done.", describe(e))
                 if #q == 0 then addon:Notify("info", "Queue: everything's crafted.") end
             end
             Changed()
-            return
+            return e, done
         end
     end
 end
@@ -251,10 +252,39 @@ function addon:QueueCrafted(recipeID, quantity, itemID)
 end
 
 -- Items used up by salvaging (Milling.lua, as bags change)
-function addon:QueueSalvaged(itemID, used)
-    Progress(function(e) return e.salvageID == itemID end, used, function(e)
-        return string.format("salvaged %d %s", e.made, C_Item.GetItemNameByID(itemID) or "items")
-    end)
+-- A batch is done once what's left of it is under one cast and you hold
+-- under one cast: resourcefulness saves items, so 500 Tranquility Bloom
+-- ended with a few that can't be milled and no "done" (user, 2026-10-21)
+-- gained: what came out with them ({ [itemID] = qty }), kept on the entry
+-- for the "Mill complete" notice (CraftDone.lua). Pigment can arrive a
+-- moment after the last herbs go, so a batch just done still takes it.
+local salvageDone = {} -- [itemID] = { entry, at }
+function addon:QueueSalvaged(itemID, used, gained)
+    local record = GoldsmithDB.milling and GoldsmithDB.milling[itemID]
+    local perCast = record and record.perCast or 1
+    local e, done
+    if used > 0 then
+        e, done = Progress(function(x) return x.salvageID == itemID end, used, function(x)
+            return string.format("salvaged %d %s", x.made, C_Item.GetItemNameByID(itemID) or "items")
+        end, function(x)
+            return perCast > 1 and x.quantity - x.made < perCast
+                and (C_Item.GetItemCount(itemID) or 0) < perCast
+        end)
+    end
+    if not e then
+        local recent = salvageDone[itemID]
+        if recent and GetTime() - recent.at < 10 then e = recent.entry end
+    end
+    if e and gained then
+        e.got = e.got or {}
+        for id, qty in pairs(gained) do e.got[id] = (e.got[id] or 0) + qty end
+    end
+    if done then
+        salvageDone[itemID] = { entry = e, at = GetTime() }
+        C_Timer.After(2, function()
+            if addon.ShowSalvageDone then addon:ShowSalvageDone(itemID, e) end
+        end)
+    end
 end
 
 -- Planning
@@ -296,7 +326,11 @@ local function SalvagePlan(row, salvageRows, useOnHand, pool)
 
     local have = 0
     if useOnHand then
-        have = math.max((C_Item.GetItemCount(itemID, true, false, true, true) or 0) - (pool[itemID] or 0), 0)
+        -- Bought with Buy next and still in the mailbox counts too: a mill
+        -- batch kept asking for the 494 herbs just bought (user, 2026-10-21)
+        local held = (C_Item.GetItemCount(itemID, true, false, true, true) or 0)
+            + (addon.InMailCount and addon:InMailCount(itemID) or 0)
+        have = math.max(held - (pool[itemID] or 0), 0)
         have = math.min(have, remaining)
         pool[itemID] = (pool[itemID] or 0) + have
     end

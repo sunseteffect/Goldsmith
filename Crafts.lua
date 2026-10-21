@@ -2037,7 +2037,8 @@ local function CreatePlanScreen(parent)
         -- The bar, open or closed: what was picked, in a line
         local pickedText = (tierInfo.description or "?"):gsub("^%l", string.upper)
         local pickedNumbers = conc and tierInfo.concentrationValue
-            and string.format("%s per point", Money(tierInfo.concentrationValue)) or Money(tierInfo.cost + offset) .. " each"
+            and string.format("%s per point", Money(tierInfo.concentrationValue))
+            or Money(tierInfo.cost + offset) .. " each" .. (math.abs(offset) >= 100 and " with your stock" or "")
         mixes.picked:SetText(string.format("Picked: %s  %s", pickedText,
             addon:Colorize(string.format(tierInfo.yourPick and "(%s, your pick)"
                 or tierInfo.heldPick and "(%s, uses materials you have)"
@@ -2045,7 +2046,13 @@ local function CreatePlanScreen(parent)
                 pickedNumbers, #candidates), "muted")))
         mixes.toggle:SetText(open and "Hide" or "Compare")
 
+        -- Rows are at AH prices, so they compare the same whichever is
+        -- picked; what you hold at your cost (offset) is only in the
+        -- "Picked" line and the summary. Given to every row, gold showed
+        -- 5.90g with all silver picked, 14.82g once picked; given to the
+        -- picked row, silver went 20.22g to 11.30g (user, 2026-10-21).
         local function Fill(row, e, label, color)
+            local offset = 0
             row.mix:SetText(label)
             row.mix:SetTextColor(addon:Color(color))
             row.cost:SetText(Money(e.cost + offset) .. (e.partial and "+" or ""))

@@ -426,7 +426,9 @@ function addon.UpdateShopSection()
     local note, color = nil, "muted"
     local mailed = q and q.inMail and #q.inMail > 0 and ("In your mailbox: " .. table.concat(q.inMail, ", ") .. ".")
     if #list == 0 then
-        note = mailed and (mailed .. " Everything else is here.") or "The queue has everything it needs."
+        -- "Everything else is here" read as unclear (user, 2026-10-21)
+        note = mailed and ("Nothing left to buy. " .. mailed)
+            or "The queue has everything it needs."
     elseif not nextEntry then
         note = "Everything left was skipped. Open the AH again to try them again."
     elseif quote then

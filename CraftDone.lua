@@ -68,15 +68,21 @@ local function CreateToast()
     f.item:SetPoint("TOPLEFT", f.title, "BOTTOMLEFT", 0, -4)
     f.item:SetPoint("RIGHT", -12, 0)
 
+    -- A set width, so a wrapped line is measured wrapped: the notice was
+    -- sized before the anchors gave it one and the profit line spilled
+    -- out the bottom (user, 2026-10-21)
+    local textWidth = WIDTH - 12 - 40 - 10 - 12
     f.details = UI.Text(f, "small", "text")
     f.details:SetPoint("TOPLEFT", f.item, "BOTTOMLEFT", 0, -6)
-    f.details:SetPoint("RIGHT", -12, 0)
+    f.details:SetWidth(textWidth)
+    f.details:SetJustifyH("LEFT")
     f.details:SetWordWrap(true)
     f.details:SetSpacing(2)
 
     f.profit = UI.Text(f, "body", "text")
     f.profit:SetPoint("TOPLEFT", f.details, "BOTTOMLEFT", 0, -6)
-    f.profit:SetPoint("RIGHT", -12, 0)
+    f.profit:SetWidth(textWidth)
+    f.profit:SetJustifyH("LEFT")
 
     f.hint = UI.Text(f, "label", "dim", "RIGHT")
     f.hint:SetPoint("BOTTOMRIGHT", -8, 6)
@@ -201,12 +207,11 @@ local function Describe(b)
     return title, item, table.concat(details, "\n"), profit, price
 end
 
-local function ShowToast(b)
+local function ShowLines(icon, title, titleColor, item, details, profit)
     toast = toast or CreateToast()
-    local title, item, details, profit = Describe(b)
-    toast.icon:SetTexture(C_Item.GetItemIconByID(b.itemID) or 134400)
+    toast.icon:SetTexture(icon or 134400)
     toast.title:SetText(title)
-    toast.title:SetTextColor(addon:Color(b.done >= b.crafts and "gold" or "warning"))
+    toast.title:SetTextColor(addon:Color(titleColor))
     toast.item:SetText(item)
     toast.details:SetText(details)
     toast.profit:SetText(profit or "")
@@ -221,6 +226,48 @@ local function ShowToast(b)
     toast:Show()
     toast.pulse:Play()
     C_Timer.After(0.2, function() if toast:IsShown() then Place(toast) end end)
+end
+
+local function ShowToast(b)
+    local title, item, details, profit = Describe(b)
+    ShowLines(C_Item.GetItemIconByID(b.itemID), title, b.done >= b.crafts and "gold" or "warning",
+        item, details, profit)
+end
+
+-- A queued mill (prospect, shatter...) batch finished (Queue.lua's
+-- QueueSalvaged): the herbs used, what came out and what it's worth, the
+-- same notice crafts get (user, 2026-10-21: milling 500 Tranquility Bloom
+-- ended with only a chat line). entry: the queue entry, with made (items
+-- used) and got ({ [itemID] = qty }).
+function addon:ShowSalvageDone(itemID, entry)
+    if not entry then return end
+    local verb = addon.GetSalvageVerb and addon:GetSalvageVerb(itemID) or "Salvage"
+    local name = C_Item.GetItemNameByID(itemID) or ("item " .. itemID)
+    local item = name .. Colored("  x" .. entry.made, "gold")
+
+    local outs, worth, partial = {}, 0, false
+    for id, qty in pairs(entry.got or {}) do
+        local price = addon:GetMarketPrice(id)
+        local value = price and qty * price * (1 - AH_CUT)
+        if value then worth = worth + value else partial = true end
+        table.insert(outs, { name = C_Item.GetItemNameByID(id) or ("item " .. id), qty = qty, value = value or 0 })
+    end
+    table.sort(outs, function(a, c) return a.value > c.value end)
+    local lines = {}
+    for _, o in ipairs(outs) do
+        table.insert(lines, string.format("%d %s", o.qty, o.name)
+            .. (o.value > 0 and Colored(" (" .. Money(o.value) .. ")", "profit") or ""))
+    end
+    if #lines == 0 then lines[1] = "Nothing came out yet." end
+
+    local profit
+    local price = addon:GetMarketPrice(itemID)
+    if price and #outs > 0 then
+        local amount = worth - price * entry.made
+        profit = string.format("%s %s", partial and "Estimated profit (at most):" or "Estimated profit:",
+            Colored(addon:FormatSignedMoney(amount), addon:MoneyColor(amount)))
+    end
+    ShowLines(C_Item.GetItemIconByID(itemID), verb .. " complete", "gold", item, table.concat(lines, "\n"), profit)
 end
 
 -- Following a batch

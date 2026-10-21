@@ -990,17 +990,22 @@ function addon:PreferHeldMix(recipe, tierInfo, quantity)
     for _, slot in ipairs(recipe.reagents) do
         if slot.itemIDs and #slot.itemIDs > 1 then table.insert(qslots, slot) end
     end
+    -- What you hold and would use is scored at what it would sell for,
+    -- less the AH cut and HELD_CRAFT_MARGIN: so held wins over pennies,
+    -- not over a real saving. It used to cost only its premium over the
+    -- other quality, which made 400 held silver Powder Pigment (2.95g)
+    -- beat buying gold at 2.00g, about 300g worse (user, 2026-10-21).
+    local HELD_VALUE = (1 - AH_CUT) * (1 - HELD_CRAFT_MARGIN)
     local function SlotScore(slot, high)
         local ids, score = slot.itemIDs, 0
-        local parts = { { ids[1], slot.quantity - high, ids[#ids] }, { ids[#ids], high, ids[1] } }
+        local parts = { { ids[1], slot.quantity - high }, { ids[#ids], high } }
         for _, p in ipairs(parts) do
-            local id, units, other = p[1], p[2], p[3]
+            local id, units = p[1], p[2]
             if units > 0 then
                 local need = units * crafts
                 local price = addon:GetMarketPrice(id, true) or 0
                 local used = math.min(need, GetOnHand(id))
-                local premium = math.max(price - (addon:GetMarketPrice(other, true) or price), 0)
-                score = score + (need - used) * price + used * premium
+                score = score + (need - used) * price + used * price * HELD_VALUE
             end
         end
         return score
