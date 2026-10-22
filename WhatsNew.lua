@@ -26,15 +26,43 @@ local NEWS = {
 }
 
 local WIDTH = 420
-local box
+-- The window behind the box is darkened so the box stands out (user,
+-- 2026-10-22); clicking the dark part closes it like Got it
+local SHADE_ALPHA = 0.6
+local BORDER = 3
+local box, shade
 
 local function Build()
     local window = addon.window
+    shade = CreateFrame("Button", nil, window)
+    shade:SetAllPoints(window)
+    shade:SetFrameStrata("DIALOG")
+    shade:SetFrameLevel(1)
+    local dark = shade:CreateTexture(nil, "BACKGROUND")
+    dark:SetAllPoints()
+    dark:SetColorTexture(0, 0, 0, SHADE_ALPHA)
+    shade:SetScript("OnClick", function() box:Hide() end)
+    shade:Hide()
     box = UI.Panel(window, "highlight")
     box:SetWidth(WIDTH)
     box:SetPoint("CENTER", window, "CENTER", 0, 20)
     box:SetFrameStrata("DIALOG")
+    box:SetFrameLevel(10)
     box:EnableMouse(true)
+    box:HookScript("OnHide", function() shade:Hide() end)
+    -- A 3px gold frame just outside the box's own border
+    local edges = {
+        { "TOPLEFT", "TOPRIGHT", -BORDER, BORDER, BORDER, BORDER, nil, BORDER },
+        { "BOTTOMLEFT", "BOTTOMRIGHT", -BORDER, -BORDER, BORDER, -BORDER, nil, BORDER },
+        { "TOPLEFT", "BOTTOMLEFT", -BORDER, BORDER, -BORDER, -BORDER, BORDER, nil },
+        { "TOPRIGHT", "BOTTOMRIGHT", BORDER, BORDER, BORDER, -BORDER, BORDER, nil },
+    }
+    for _, e in ipairs(edges) do
+        local line = UI.Line(box, "borderGold")
+        line:SetPoint(e[1], box, e[1], e[3], e[4])
+        line:SetPoint(e[2], box, e[2], e[5], e[6])
+        if e[7] then line:SetWidth(e[7]) else line:SetHeight(e[8]) end
+    end
     box.title = UI.Text(box, "title", "gold")
     box.title:SetPoint("TOPLEFT", 18, -16)
     box.lines = {}
@@ -79,6 +107,7 @@ function addon:ShowNews()
         box.lines[i].body:Hide()
     end
     box:SetHeight(-y + 50)
+    shade:Show()
     box:Show()
     GoldsmithDB.newsSeen = GoldsmithDB.newsSeen or {}
     GoldsmithDB.newsSeen[news.key] = true
