@@ -2240,7 +2240,9 @@ local function CreatePlanScreen(parent)
             tooltip:AddLine(string.format("With concentration: about %d in all.", state.points), r, g, b, true)
         end
         for _, line in ipairs(state.notes) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
-        for _, line in ipairs(state.blockers) do tooltip:AddLine(line, 1, 0.6, 0.2, true) end
+        for _, line in ipairs(state.blockers) do
+            tooltip:AddLine(addon:ShoppingBlocker(line, screen.plan), 1, 0.6, 0.2, true)
+        end
     end, "ANCHOR_TOP")
 
     -- With the profession open, the window is set to match the plan whenever
@@ -2587,7 +2589,8 @@ local function CreatePlanScreen(parent)
         if #plan.buyVendor > 0 then
             local parts = {}
             for _, entry in ipairs(plan.buyVendor) do table.insert(parts, entry.quantity .. " " .. entry.name) end
-            screen.vendorLine:SetText("From a vendor: " .. table.concat(parts, ", "))
+            screen.vendorLine:SetText("Buy from a vendor first: " .. table.concat(parts, ", "))
+            screen.vendorLine:SetTextColor(addon:Color("warning"))
         else
             screen.vendorLine:SetText("")
         end

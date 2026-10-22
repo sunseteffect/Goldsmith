@@ -533,6 +533,10 @@ function addon:BlockedLabel(s)
     if station then
         return "Needs " .. station, "warning"
     elseif blocker:find("^Missing") or blocker:find("^Not enough") and not blocker:find("concentration") then
+        -- One thing short: name it, without the count ("Needs Luminant Flux"):
+        -- the step needed 19, the vendor line said 53 for the whole queue
+        local what = blocker:match("^Missing for [^:]+: (.-)%.$")
+        if what and not what:find(",") then return "Needs " .. (what:gsub("^%d+ ", "")), "warning" end
         return "Needs materials", "warning"
     elseif blocker:find("concentration") then
         return "Needs concentration", "warning"
@@ -544,6 +548,30 @@ function addon:BlockedLabel(s)
         return "In the bank", "warning"
     end
     return "Can't craft yet", "warning"
+end
+
+-- A "Missing for 10 crafts: 20 Luminant Flux." blocker in a tooltip, with
+-- vendor materials given as the plan's whole amount: the step's 20 next to
+-- the plan's 26 and the shopping line's 54 confused (user, 2026-10-22: say
+-- what the whole craft needs)
+function addon:ShoppingBlocker(line, plan)
+    local head, list = line:match("^(Missing for [^:]+): (.-)%.$")
+    local vendor = plan and plan.buyVendor
+    if not list or not vendor or #vendor == 0 then return line end
+    local fromVendor, other = {}, {}
+    for part in list:gmatch("[^,]+") do
+        part = part:gsub("^%s+", "")
+        local name = part:match("^%d+ (.+)$") or part
+        local total
+        for _, entry in ipairs(vendor) do
+            if entry.name == name then total = entry.quantity end
+        end
+        table.insert(total and fromVendor or other, total and (total .. " " .. name) or part)
+    end
+    if #fromVendor == 0 then return line end
+    local text = "Buy " .. table.concat(fromVendor, ", ") .. " from a vendor: enough for every step."
+    if #other > 0 then text = head .. ": " .. table.concat(other, ", ") .. ". " .. text end
+    return text
 end
 
 -- What the Craft next button says for the entry it's on: the step, or why
@@ -559,17 +587,25 @@ end
 
 -- The entry Craft next would work on: the first one ready to craft (or
 -- salvage) with the profession that's open, else the first that needs a
--- profession opened, else the first that's stuck (for its reason)
+-- profession opened, else the first that's stuck (for its reason). A
+-- stuck entry above those (Needs Anvil, Needs materials) beats opening
+-- another profession: Blacksmithing open, Gloaming Alloy first, and the
+-- button said Open Jewelcrafting (user, 2026-10-22: it should say why)
 function addon:QueueNextRow(q)
-    local open, stuck
+    local open, stuck, station
     for _, row in ipairs(q.rows) do
         local s = row.state
         if s then
             if s.enabled and not s.open then return row end
-            if s.enabled then open = open or row else stuck = stuck or row end
+            if s.enabled then
+                open = open or row
+            else
+                if not open and not stuck then station = row end
+                stuck = stuck or row
+            end
         end
     end
-    return open or stuck
+    return station or open or stuck
 end
 
 -- Crafting in progress (a batch still casting)
@@ -715,7 +751,9 @@ local function CreatePanel()
                 tooltip:AddLine(string.format("    %d. %s", i, step), r, g, b)
             end
             for _, line in ipairs(row.state.notes) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
-            for _, line in ipairs(row.state.blockers) do tooltip:AddLine(line, 1, 0.6, 0.2, true) end
+            for _, line in ipairs(row.state.blockers) do
+                tooltip:AddLine(addon:ShoppingBlocker(line, row.plan), 1, 0.6, 0.2, true)
+            end
         end
         tooltip:AddLine(" ")
         tooltip:AddLine(KeyText() and ("Key: " .. KeyText()) or "Set a key: Options > Keybindings > Goldsmith.",

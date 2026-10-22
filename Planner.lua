@@ -44,6 +44,11 @@ end
 -- 234 ore in the bags (user, 2026-10-16). Saves a trip to the AH, and a
 -- plan doesn't flip mid-queue over pennies.
 local HELD_CRAFT_MARGIN = 0.10
+-- For buy-or-craft itself, held materials win unless buying is a quarter
+-- cheaper: 10% wasn't enough when Goldsmith Data's update swapped the scan
+-- for TSM prices, and the plan bought 13 gold ingots with the ore for them
+-- in the bags (user, 2026-10-22: use what i have first)
+local HELD_CRAFT_PREFERENCE = 0.25
 -- Salvaging what you already hold (a salvage at least) is picked unless
 -- another way costs under this share of it, and without the work margin:
 -- 5 Hollow Grouper bought for the plan at 0.88g, once the AH showed that
@@ -53,16 +58,26 @@ local HELD_CRAFT_MARGIN = 0.10
 local HELD_SALVAGE_SHARE = 0.5
 
 -- Whether you hold enough of every material for at least one craft (any
--- quality of each)
+-- quality of each). Vendor materials don't count: you buy them on the way.
+-- Down to 1 Luminant Flux after a gold Refulgent Copper Ingot, the plan
+-- stopped counting the ore as held and bought 13 ingots for 0.15g less
+-- each than crafting them (user, 2026-10-22).
 local function HoldsMaterials(recipe)
     local reagents = recipe and recipe.reagents
     if not reagents or #reagents == 0 then return false end
+    local any = false
     for _, r in ipairs(reagents) do
-        local have = 0
-        for _, id in ipairs(r.itemIDs or {}) do have = have + GetOnHand(id) end
-        if have < (r.quantity or 1) then return false end
+        local have, vendor = 0, true
+        for _, id in ipairs(r.itemIDs or {}) do
+            have = have + GetOnHand(id)
+            if not addon:IsVendorItem(id) then vendor = false end
+        end
+        if not vendor or #(r.itemIDs or {}) == 0 then
+            if have < (r.quantity or 1) then return false end
+            any = true
+        end
     end
-    return true
+    return any
 end
 
 -- Recipe that makes an item, if one is saved
@@ -271,7 +286,7 @@ GetOptions = function(itemID, name, depth, memo, visiting)
     -- the cheapest way, not by a few silver
     -- Crafting with concentration compares with its concentration charged
     -- (compareUnit); salvage with its margin
-    -- Crafting from what you hold gets HELD_CRAFT_MARGIN off
+    -- Crafting from what you hold gets HELD_CRAFT_PREFERENCE off
     local craftHeld = options.craft and HoldsMaterials(options.craft.recipe)
     options.craftHeld = craftHeld or nil
     local millRecord = options.mill and GoldsmithDB.milling[options.mill.herbID]
@@ -281,7 +296,7 @@ GetOptions = function(itemID, name, depth, memo, visiting)
     for _, key in ipairs({ "buy", "vendor", "craft", "mill" }) do
         local option = options[key]
         local unit = option and (key == "mill" and option.unit * (1 + SALVAGE_MARGIN) or option.compareUnit or option.unit)
-        if unit and key == "craft" and craftHeld then unit = unit * (1 - HELD_CRAFT_MARGIN) end
+        if unit and key == "craft" and craftHeld then unit = unit * (1 - HELD_CRAFT_PREFERENCE) end
         -- The best way that isn't salvaging, for BuildNode's held share
         if option and key ~= "mill" and (not options.otherUnit or unit < options.otherUnit) then
             options.other, options.otherUnit = option, unit

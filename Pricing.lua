@@ -214,14 +214,16 @@ function addon:GetOwnScanTime()
 end
 
 -- Newer than Auctionator's last full scan and Goldsmith Data; with TSM,
--- only a scan from this session (TSM's app refreshes about hourly)
+-- only a scan from this session or the last hour (TSM's app refreshes
+-- about hourly). A /reload right after a scan switched to TSM and the
+-- queue wanted 13 gold ingots bought instead of crafted (user, 2026-10-22)
 function addon:OwnScanIsNewest()
     local scanned = not TourPrices() and addon:GetOwnScanTime()
     if not scanned then return false end
     if addon:HasAuctionator() and (GoldsmithDB.lastFullScan or 0) > scanned then return false end
     local data = addon:GetBlizzardDataTime()
     if data and data > scanned then return false end
-    if addon:HasTSM() and scanned < sessionStart then return false end
+    if addon:HasTSM() and scanned < sessionStart and time() - scanned > 3600 then return false end
     return true
 end
 
