@@ -625,4 +625,56 @@ SlashCmdList["GOLDSMITH"] = function(msg)
     end
 end
 
+-- Opening the mailbox: the AH gold waiting in it and what your AH
+-- purchases in it cost, two numbers in chat, not netted (user, 2026-10-22:
+-- people want to see the big number coming in). Once per opening, after
+-- the inbox has stopped updating for MAIL_SETTLE seconds: the first update
+-- had 8 of 15 sales in it (2026-10-22).
+local MAIL_SETTLE = 1.5
+local mailSummary = CreateFrame("Frame")
+local mailSummed, mailOpened, mailWait = nil, 0, 0
+local MailSummary
+mailSummary:RegisterEvent("MAIL_SHOW")
+mailSummary:RegisterEvent("MAIL_INBOX_UPDATE")
+mailSummary:RegisterEvent("MAIL_CLOSED")
+mailSummary:SetScript("OnEvent", function(_, event)
+    if event == "MAIL_SHOW" or event == "MAIL_CLOSED" then
+        mailSummed = event == "MAIL_CLOSED"
+        mailOpened = mailOpened + 1
+        return
+    end
+    if mailSummed ~= false then return end
+    mailWait = mailWait + 1
+    local opened, wait = mailOpened, mailWait
+    C_Timer.After(MAIL_SETTLE, function()
+        if opened == mailOpened and wait == mailWait and mailSummed == false then MailSummary() end
+    end)
+end)
+
+MailSummary = function()
+    mailSummed = true
+    local shown, total = GetInboxNumItems()
+    local earned, sales, spent, buys = 0, 0, 0, 0
+    for i = 1, shown or 0 do
+        local _, _, _, _, money = GetInboxHeaderInfo(i)
+        local invoiceType, _, _, bid = GetInboxInvoiceInfo(i)
+        if invoiceType == "seller" and money and money > 0 then
+            earned, sales = earned + money, sales + 1
+        elseif invoiceType == "buyer" and bid then
+            spent, buys = spent + bid, buys + 1
+        end
+    end
+    if sales == 0 and buys == 0 then return end
+    local more = total and shown and total > shown
+        and string.format(" (the first %d of %d mails; more show as you empty it)", shown, total) or ""
+    if sales > 0 then
+        addon:Notify("money", "Mailbox: |cFF33DD55+%s|r from %d AH sale%s%s", addon:FormatMoney(earned),
+            sales, sales == 1 and "" or "s", more)
+    end
+    if buys > 0 then
+        addon:Notify("money", "Mailbox: %s spent on %d AH purchase%s waiting in it", addon:FormatMoney(spent),
+            buys, buys == 1 and "" or "s")
+    end
+end
+
 _G.Goldsmith = addon

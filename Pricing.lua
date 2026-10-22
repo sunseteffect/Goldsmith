@@ -48,6 +48,52 @@ local function TourPrices()
     return addon.UsingTourData ~= nil and addon:UsingTourData()
 end
 
+-- Realm groups. Materials and most crafts (food, potions, gems, ingots:
+-- commodities) are one AH for the whole region; gear and other single
+-- items are one AH per group of connected realms. Goldsmith's own scan and
+-- searches say which group they came from, and on another group only
+-- their commodity prices are used (user, 2026-10-22: characters on two
+-- realm groups). TSM and Auctionator keep their own prices per realm.
+local realmGroup
+function addon:RealmGroup()
+    if realmGroup then return realmGroup end
+    local names = {}
+    for _, name in ipairs(GetAutoCompleteRealms and GetAutoCompleteRealms() or {}) do table.insert(names, name) end
+    if #names == 0 then
+        local own = GetNormalizedRealmName and GetNormalizedRealmName()
+        if not own then return nil end
+        names[1] = own
+    end
+    table.sort(names)
+    realmGroup = table.concat(names, ",")
+    return realmGroup
+end
+
+-- Sold on the region-wide AH: stackable items are commodities. Not known
+-- yet (item not loaded) counts as region-wide: nearly everything Goldsmith
+-- prices is a material.
+function addon:IsRegionWide(itemID)
+    local stack = itemID and select(8, C_Item.GetItemInfo(itemID))
+    if not stack then return true end
+    return stack > 1
+end
+
+-- The realm Goldsmith's last scan was made on, when that's another realm
+-- group than this character's (its gear prices aren't used here), else nil
+function addon:OwnScanElsewhere()
+    local scan = GoldsmithDB.ownScan
+    local here = addon:RealmGroup()
+    if not (scan and scan.group and here) or scan.group == here then return nil end
+    return scan.realm or scan.group:match("^[^,]+") or "another realm"
+end
+
+-- Whether a price recorded on `group` holds here
+function addon:PriceHoldsHere(group, itemID)
+    if not group then return true end
+    local here = addon:RealmGroup()
+    return not here or group == here or addon:IsRegionWide(itemID)
+end
+
 -- Auctionator's price for an item, regardless of TSM
 function addon:GetAuctionatorPrice(itemID)
     if not itemID or TourPrices() then return nil end
@@ -144,7 +190,8 @@ local function RecordSearchResults(results)
         local key = r.itemKey
         local itemID = key and key.itemID
         if itemID and (key.battlePetSpeciesID or 0) == 0 and type(r.minPrice) == "number" and r.minPrice > 0 then
-            GoldsmithDB.searchPrices[itemID] = { time = now, price = r.minPrice, quantity = r.totalQuantity }
+            GoldsmithDB.searchPrices[itemID] = { time = now, price = r.minPrice, quantity = r.totalQuantity,
+                                                 group = addon:RealmGroup() }
             recorded = true
         end
     end
@@ -155,7 +202,7 @@ end
 -- other prices (GetAHPriceInfo)
 function addon:GetSearchPrice(itemID)
     local s = not TourPrices() and GoldsmithDB.searchPrices and GoldsmithDB.searchPrices[itemID]
-    if s and time() - s.time <= ORDER_BOOK_FRESH then return s.price end
+    if s and time() - s.time <= ORDER_BOOK_FRESH and addon:PriceHoldsHere(s.group, itemID) then return s.price end
 end
 
 local function GetFreshOrderBook(itemID)
@@ -204,7 +251,7 @@ function addon:GetScanPrice(itemID)
     -- The scan turned off in Settings: its prices aren't used either
     local scan = not TourPrices() and addon:Setting("ahScan") and GoldsmithDB.ownScan
     local entry = scan and scan.prices and itemID and scan.prices[itemID]
-    if not entry then return nil end
+    if not entry or not addon:PriceHoldsHere(scan.group, itemID) then return nil end
     return entry[1], math.max(0, math.floor((time() - scan.time) / 86400))
 end
 
@@ -699,8 +746,11 @@ function addon:PlainPriceSourceText(itemID, source, age)
     end
     if source == "Scan" then
         local t = addon:GetOwnScanTime()
-        if t and date("%Y-%m-%d", t) == date("%Y-%m-%d") then return "Goldsmith scan, " .. date("%H:%M", t) end
-        return "Goldsmith scan, " .. addon:FormatAge(math.max(1, age or 1))
+        -- Made on another realm group: say where (only materials use it)
+        local elsewhere = addon:OwnScanElsewhere()
+        local from = elsewhere and (", from " .. elsewhere) or ""
+        if t and date("%Y-%m-%d", t) == date("%Y-%m-%d") then return "Goldsmith scan, " .. date("%H:%M", t) .. from end
+        return "Goldsmith scan, " .. addon:FormatAge(math.max(1, age or 1)) .. from
     end
     if source == "TSM" then return "TSM" end
     if source == "TSM market" then return "TSM market value" end
@@ -719,8 +769,8 @@ function addon:PlainPriceSourceText(itemID, source, age)
 end
 
 -- Where the price in use came from, and how old (see PriceSourceText)
-function addon:PriceAgeText(itemID)
-    local price, source, age, note = addon:GetMarketPriceInfo(itemID)
+function addon:PriceAgeText(itemID, buying)
+    local price, source, age, note = addon:GetMarketPriceInfo(itemID, buying)
     if not price then return "no price" end
     return addon:PriceSourceText(itemID, source, age, note)
 end
@@ -2603,15 +2653,20 @@ function addon:GetOwnCost(itemName, excludeItemID, exactItemID, forSale)
     return total / qty, table.concat(labels, "+"), sources
 end
 
--- Unit cost of one reagent slot, the cheapest of its qualities:
+-- Unit cost of one reagent slot, the cheapest of its qualities, for
+-- deciding what's worth crafting (the Crafts list, Do this next):
 --   - today's price (the AH, or the vendor when it's cheaper): what the
 --     materials you hold could be sold for, so what using them costs
---   - what making it yourself cost (your milling or crafts), when that's
---     cheaper: making it is a real way to get it, as in the planner
---   - what you paid, only when there's no price at all
+--   - crafting it now from today's prices, when that's cheaper
+--   - with no price today: what making it yourself cost (your milling or
+--     crafts), then what you paid
 -- What you paid used to come first, so a held Petrified Root counted at
 -- 331g here and 340g in the planner (user, 2026-10-09: one basis, today's
--- price, so Crafts, Do this next and the plan agree).
+-- price). Making it yourself used to win when cheaper too: Plant Protein
+-- at 3.1g from slabs bought last week, while it sold for 6.35g, had 11
+-- Impossibly Royal Roasts recommended that turned 1,000g of protein into
+-- 580g of roasts (user, 2026-10-22: always the best way to make gold).
+-- Plans and notices show what you paid (Planner.lua NodeCost).
 -- Returns cost, source and the item name used, or nil.
 local SlotCost
 -- The same for every character and recipe using the slot, so it's kept
@@ -2641,17 +2696,8 @@ SlotCost = function(slot)
             bestSource = source == "Vendor" and "vendor" or "AH price"
         end
     end
-    -- Making it yourself, when that's cheaper
-    for _, name in ipairs(slot.names) do
-        local milled = addon:GetMilledCost(name)
-        local crafted = addon:GetCraftedCostByName(name)
-        for _, made in ipairs({ { milled, "milled" }, { crafted, "crafted" } }) do
-            if made[1] and (not best or made[1] < best) then
-                best, bestSource, bestName, bestID = made[1], made[2], name, nil
-            end
-        end
-    end
-    -- Crafting it now from today's prices, as the plan would (Planner.lua)
+    -- Crafting it now from today's prices, when that's cheaper, as the plan
+    -- would (Planner.lua): a gold vial listed at 293g that crafts for 49g
     for i, itemID in ipairs(slot.itemIDs or {}) do
         local made = addon.CraftUnitCost and addon:CraftUnitCost(itemID, slot.names[i])
         if made and (not best or made < best) then
@@ -2661,6 +2707,17 @@ SlotCost = function(slot)
     if best then
         return best, bestSource, bestName, bestSource == "AH price" and bestID or nil
     end
+    -- No price today at all: what making it yourself cost
+    for _, name in ipairs(slot.names) do
+        local milled = addon:GetMilledCost(name)
+        local crafted = addon:GetCraftedCostByName(name)
+        for _, made in ipairs({ { milled, "milled" }, { crafted, "crafted" } }) do
+            if made[1] and (not best or made[1] < best) then
+                best, bestSource, bestName, bestID = made[1], made[2], name, nil
+            end
+        end
+    end
+    if best then return best, bestSource, bestName end
     -- No price at all: what you paid
     for _, name in ipairs(slot.names) do
         local cost, source = addon:GetOwnCost(name)

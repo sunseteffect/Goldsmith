@@ -200,9 +200,17 @@ local function Describe(b)
     local profit
     local price = addon:GetMarketPrice(b.itemID)
     if price and b.made > 0 then
-        local amount = b.made * price * (1 - AH_CUT) - b.cost
+        local revenue = b.made * price * (1 - AH_CUT)
+        local amount = revenue - b.cost
         profit = string.format("%s %s", b.partial and "Estimated profit (at most):" or "Estimated profit:",
             Colored(addon:FormatSignedMoney(amount), addon:MoneyColor(amount)))
+        -- Selling the materials today would clearly have made more: the
+        -- same 10% (and 10g) as the plan's note
+        local sellMats = not b.marketPartial and (b.market or 0) * (1 - AH_CUT) - revenue
+        if sellMats and sellMats >= math.max(100000, (b.market or 0) * 0.10) then
+            table.insert(details, Colored(string.format("Selling the materials would have made about %s more today.",
+                Money(sellMats)), "warning"))
+        end
     end
     return title, item, table.concat(details, "\n"), profit, price
 end
@@ -261,7 +269,7 @@ function addon:ShowSalvageDone(itemID, entry)
     if #lines == 0 then lines[1] = "Nothing came out yet." end
 
     local profit
-    local price = addon:GetMarketPrice(itemID)
+    local price = addon:GetMarketPrice(itemID, true)
     if price and #outs > 0 then
         local amount = worth - price * entry.made
         profit = string.format("%s %s", partial and "Estimated profit (at most):" or "Estimated profit:",
@@ -329,8 +337,8 @@ end
 
 -- One craft finished (Pricing.lua's craft result, after its lot is saved)
 -- used: what the craft used up ({ [itemID] = quantity }), priced here at
--- today's prices like the planner (the lot's own cost is what yours cost
--- you, so the notice and the plan disagreed, 2026-10-09)
+-- the lot's cost (what yours cost you), as the plan now counts held
+-- materials; today's prices for the "selling them" line (2026-10-22)
 function addon:CraftBatchResult(recipeID, recipe, resultData, lot, used)
     local b = batch
     if not (b and recipeID == b.recipeID and resultData) then return end
@@ -347,20 +355,25 @@ function addon:CraftBatchResult(recipeID, recipe, resultData, lot, used)
         local id = ret.itemID or (type(ret.reagent) == "table" and ret.reagent.itemID)
         if id and ret.quantity then b.saved[id] = (b.saved[id] or 0) + ret.quantity end
     end
-    if used then
-        for id, qty in pairs(used) do
-            if qty > 0 then
-                local price = addon:GetMarketPrice(id)
-                if price then
-                    b.cost = b.cost + price * qty
-                else
-                    b.partial = true
-                end
-            end
+    -- Profit on what yours cost you (the lot), like the plan; today's
+    -- prices for what selling the materials instead would have made
+    -- (user, 2026-10-22: 11 Impossibly Royal Roasts said -496g, the
+    -- protein having doubled since it was made)
+    local market, marketPartial = 0, false
+    for id, qty in pairs(used or {}) do
+        if qty > 0 then
+            local price = addon:GetMarketPrice(id)
+            if price then market = market + price * qty else marketPartial = true end
         end
-    elseif lot then
-        b.cost = b.cost + (lot.unitCost or 0) * (lot.qty or 0)
+    end
+    b.market = (b.market or 0) + market
+    b.marketPartial = b.marketPartial or marketPartial or not used
+    if lot and lot.unitCost then
+        b.cost = b.cost + lot.unitCost * (lot.qty or 0)
         b.partial = b.partial or lot.partial
+    elseif used then
+        b.cost = b.cost + market
+        b.partial = b.partial or marketPartial
     else
         b.partial = true
     end

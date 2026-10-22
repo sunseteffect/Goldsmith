@@ -575,7 +575,7 @@ local METHOD_LABELS = {
     { key = "buy",    method = "Buy",    label = "Buy on the AH" },
     { key = "craft",  method = "Craft",  label = "Craft it" },
     { key = "mill",   method = "Mill",   label = "Mill it" },
-    { key = "vendor", method = "Vendor", label = "Vendor" },
+    { key = "vendor", method = "Vendor", label = "Buy from vendor" },
 }
 
 local PLAN_COLUMNS = {
@@ -724,10 +724,12 @@ local function FillPlanRow(row, node)
             cells.source:SetText((best.verb or best.method) .. (node.options.override and "*" or ""))
             cells.source:SetTextColor(addon:Color(METHOD_COLORS[best.method] or "text"))
         end
-        cells.each:SetText(Money(best.unit))
+        -- What you hold at what you paid (NodeCost, Planner.lua)
+        local unit = node.paidTotal and node.need > 0 and node.paidTotal / node.need or best.unit
+        cells.each:SetText(Money(unit))
         -- Priced on what's expected to be used up (node.use, the craft's own
         -- materials), so the totals add up to the craft's cost
-        cells.total:SetText(Money(best.unit * (node.use or node.need)))
+        cells.total:SetText(Money(unit * (node.use or node.need)))
     else
         cells.source:SetText("no price")
         cells.source:SetTextColor(addon:Color("loss"))
@@ -802,6 +804,11 @@ local function PlanTooltip(tooltip, node)
     end
     if node.have > 0 then
         Line(tooltip, "You have", tostring(Whole(node.have)))
+        -- What the ones you hold cost you, which the row's each counts
+        -- (Planner.lua NodeCost): 11.29g each over the AH's 11.30g needed
+        -- saying why (user, 2026-10-22)
+        local own = addon:GetOwnCost(node.name, nil, node.itemID)
+        if own then Line(tooltip, "Yours cost you", Money(own) .. " each") end
         Line(tooltip, "To get", tostring(Whole(node.toGet)))
     end
     tooltip:AddLine(" ")
@@ -2513,6 +2520,18 @@ local function CreatePlanScreen(parent)
             screen.profit.value:SetText(Signed(plan.profit))
             screen.profit.value:SetTextColor(addon:Color(addon:MoneyColor(plan.profit)))
             screen.profit.note:SetText(plan.margin and (Roi(plan.margin) .. " ROI") or "")
+            screen.profit.note:SetTextColor(addon:Color("muted"))
+            -- Profit counts what you hold at what you paid (Planner.lua);
+            -- when selling those materials today would make clearly more
+            -- than the craft, say so (user, 2026-10-22: "whatever makes me
+            -- the most gold, within a threshold"; cheaper materials since
+            -- don't matter, you use what you have)
+            local sellMats = plan.marketCost and plan.marketCost * (1 - AH_CUT) - plan.revenue
+            if sellMats and sellMats >= math.max(100000, plan.marketCost * 0.10) then
+                screen.profit.note:SetText(string.format("Selling the materials instead makes about %s more today",
+                    Money(sellMats)))
+                screen.profit.note:SetTextColor(addon:Color("warning"))
+            end
         else
             screen.sells.value:SetText("-")
             screen.sells.value:SetTextColor(addon:Color("dim"))
@@ -2944,7 +2963,8 @@ local function CreateSalvageScreen(parent)
         if unit then
             screen.cost.value:SetText(Money(plan.cost))
             screen.cost.value:SetTextColor(addon:Color("text"))
-            screen.cost.note:SetText(string.format("%s each, AH price %s", Money(unit), addon:PriceAgeText(t.itemID)))
+            -- Where the buying price came from (not the selling checks)
+            screen.cost.note:SetText(string.format("%s each, AH price %s", Money(unit), addon:PriceAgeText(t.itemID, true)))
             screen.cost.note:SetTextColor(addon:Color("muted"))
         else
             screen.cost.value:SetText("-")
@@ -2980,12 +3000,13 @@ local function CreateSalvageScreen(parent)
             local text
             if #plan.outputs == 1 then
                 local o = items[2]
-                text = string.format("%sing makes %s for about %s each, vs %s each to buy: %s is %.0f%% cheaper.",
-                    t.verb, MaterialName(o.itemID, o.name), Money(o.millUnit), Money(o.unit),
-                    cheaper and verb .. "ing" or "buying", pct)
+                -- Gerund: "Salvageing" (2026-10-22)
+                text = string.format("%s makes %s for about %s each, vs %s each to buy: %s is %.0f%% cheaper.",
+                    Gerund(t.verb), MaterialName(o.itemID, o.name), Money(o.millUnit), Money(o.unit),
+                    cheaper and Gerund(verb) or "buying", pct)
             else
                 text = string.format("Buying what comes out would cost about %s, vs %s to %s it: %s is %.0f%% cheaper.",
-                    Money(value), Money(plan.cost), verb, cheaper and verb .. "ing" or "buying", pct)
+                    Money(value), Money(plan.cost), verb, cheaper and Gerund(verb) or "buying", pct)
             end
             screen.compareLine:SetText(text)
             screen.compareLine:SetTextColor(addon:Color(cheaper and "profit" or "warning"))

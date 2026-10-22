@@ -581,7 +581,11 @@ function addon:GetSalvageRows(prof, opts)
             local resourcefulness = (mine and mine.last.resourcefulness)
                 or (similar and similar.resourcefulness) or 0
             local inputPerCast = perCast * (1 - resourcefulness / 100 * procSave)
-            local unitPrice = addon:GetMarketPrice(itemID)
+            -- What buying them costs: without the sale-average cap for selling,
+            -- which priced Malleable Root at 6.13g (TSM sale average) while
+            -- the AH asked 19.34g, and Buy next found 1,321g more than the
+            -- queue planned (2026-10-22)
+            local unitPrice = addon:GetMarketPrice(itemID, true)
             local value, partial = 0, false
             for _, o in ipairs(outputs) do
                 o.unit = addon:GetMarketPrice(o.itemID)
@@ -609,6 +613,19 @@ function addon:GetSalvageRows(prof, opts)
             elseif sample < SOLID_INPUTS then
                 whyNot = string.format("Yields from only %d %s salvaged so far, a rough guess until about %d.",
                     sample, inputName, SOLID_INPUTS)
+            end
+            -- "Worth a to-do at" as for crafts (WhyNotRecommended): the batch
+            -- is the salvage plan's, what you last set or 100 (user,
+            -- 2026-10-22: salvage the same logic)
+            local minLine = (addon:Setting("minLine") or 0) * 10000
+            if not whyNot and minLine > 0 and info.profit and info.profit > 0 then
+                local ui2 = GoldsmithDB.ui2
+                local batch = ui2 and ui2.salvageBatch and ui2.salvageBatch[itemID] or 100
+                local total = info.profit * batch / math.max(perCast, 1)
+                if total < minLine then
+                    whyNot = string.format("A batch of %d %s makes about %s, under your %s (Settings > Worth a to-do at).",
+                        batch, inputName, addon:FormatMoney(total), addon:FormatMoney(minLine))
+                end
             end
 
             if not opts.profitableOnly

@@ -66,7 +66,40 @@ local function SoldAtProfit(recipe, row)
     return got ~= nil and row.cost ~= nil and got >= row.cost
 end
 
+local WhyNotBase
+
+-- How many to make in one batch of an item: SuggestedQuantity on the
+-- region's sales, at most SLOW_MAX_BATCH of a slow seller. Returns make
+-- and why.
+function addon:SuggestedBatch(recipe, itemID)
+    local demand, source = addon:GetDemand(itemID, recipe.outputName)
+    local make, makeReason = addon:SuggestedQuantity(recipe.outputName,
+        source == "TSM region" and demand or nil)
+    if not addon:HasTSM() and addon:GetSellLevel(itemID) == addon.SELL_LEVEL.slow
+        and make > SLOW_MAX_BATCH then
+        make = SLOW_MAX_BATCH
+        makeReason = makeReason .. string.format(", at most %d: it sells slowly", SLOW_MAX_BATCH)
+    end
+    return make, makeReason
+end
+
+-- Also "Worth a to-do at": a batch has to make that much in all, on the
+-- Crafts list too, not only the to-dos (user, 2026-10-22: Spellfire Filet
+-- at +0.31g was recommended with the setting at 5g)
 function addon:WhyNotRecommended(recipe, row, shownExpansions)
+    local why = WhyNotBase(recipe, row, shownExpansions)
+    if why then return why end
+    local minLine = (addon:Setting("minLine") or 0) * 10000
+    if minLine > 0 and row.profit and row.profit > 0 then
+        local make = addon:SuggestedBatch(recipe, row.itemID or recipe.outputItemID)
+        if row.profit * make < minLine then
+            return string.format("A batch of %d makes about %s, under your %s (Settings > Worth a to-do at).",
+                make, addon:FormatMoney(row.profit * make), addon:FormatMoney(minLine))
+        end
+    end
+end
+
+WhyNotBase = function(recipe, row, shownExpansions)
     if addon:IsIgnored(recipe.outputItemID) then
         return "You're ignoring this item. Right-click it to stop, or Settings > Ignored items."
     end
@@ -587,17 +620,9 @@ function addon:GetBestCrafts(prof, count)
                     local have = itemID and addon:GetHeld(itemID, row.tier) or 0
                     if have == 0 then
                         -- Region sales only: your own are what the batch
-                        -- size follows already
-                        local demand, source = addon:GetDemand(itemID, recipe.outputName)
-                        local make, makeReason = addon:SuggestedQuantity(recipe.outputName,
-                            source == "TSM region" and demand or nil)
-                        -- A slow seller (Goldsmith Data, without TSM): a
-                        -- couple at a time
-                        if not addon:HasTSM() and addon:GetSellLevel(itemID) == addon.SELL_LEVEL.slow
-                            and make > SLOW_MAX_BATCH then
-                            make = SLOW_MAX_BATCH
-                            makeReason = makeReason .. string.format(", at most %d: it sells slowly", SLOW_MAX_BATCH)
-                        end
+                        -- size follows already; a slow seller a couple at
+                        -- a time (SuggestedBatch)
+                        local make, makeReason = addon:SuggestedBatch(recipe, itemID)
                         -- The whole batch must make "Worth a to-do at"
                         if row.profit * make >= (addon:Setting("minLine") or 0) * 10000 then
                             table.insert(list, {

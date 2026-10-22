@@ -124,7 +124,15 @@ local function PriceSourceText()
     end
     -- Goldsmith's own scan (Scan.lua), when it's the newest price there is
     local own = addon:GetOwnScanTime()
+    -- A scan from another realm group: its material prices hold (one AH
+    -- for the region), its gear prices don't, so say so in orange (user,
+    -- 2026-10-22)
+    local elsewhere = addon:OwnScanElsewhere()
     if source == "auto" and addon:OwnScanIsNewest() then
+        if elsewhere then
+            return "Prices: Goldsmith scan " .. When(own) .. "\nfrom " .. elsewhere .. ": materials only",
+                "warning"
+        end
         return "Prices: Goldsmith scan " .. When(own),
             date("%Y-%m-%d", own) == date("%Y-%m-%d") and "muted" or "warning"
     end
@@ -146,7 +154,8 @@ local function PriceSourceText()
         return "Prices: Goldsmith Data " .. When(updated),
             days >= DATA_STALE_DAYS and "warning" or "muted"
     elseif own then
-        return "Prices: Goldsmith scan " .. When(own), "warning"
+        return "Prices: Goldsmith scan " .. When(own) .. (elsewhere and ("\nfrom " .. elsewhere .. ": materials only") or ""),
+            "warning"
     elseif addon:HasAuctionator() then
         return "Prices: no Auctionator scan yet", "warning"
     end
@@ -506,6 +515,14 @@ function addon:CreateWindow()
             tooltip:AddLine("From Goldsmith Data (the region's prices, updated daily) and your AH searches.", 0.8, 0.8, 0.8, true)
             local r, g, b = addon:Color("gold")
             tooltip:AddLine("Tip: with Auctionator, one scan refreshes every price.", r, g, b, true)
+        end
+        -- The scan from another realm group (the label says "materials only")
+        local elsewhere = addon:OwnScanElsewhere()
+        if elsewhere then
+            local r, g, b = addon:Color("warning")
+            tooltip:AddLine(" ")
+            tooltip:AddLine(string.format("Your last Goldsmith scan was on %s, another group of realms. Materials, food, potions and gems are one AH for the whole region, so their prices from it hold here. Gear isn't: it uses TSM or Auctionator here until you scan this AH.",
+                elsewhere), r, g, b, true)
         end
     end, "ANCHOR_BOTTOM")
 

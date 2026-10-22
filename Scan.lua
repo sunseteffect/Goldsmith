@@ -79,7 +79,8 @@ local function Finish(prices, auctions, method)
         return
     end
     GoldsmithDB.ownScan = {
-        time = time(), method = method, auctions = auctions, items = items,
+        time = time(), method = method, auctions = auctions, items = items, group = addon:RealmGroup(),
+        realm = GetRealmName(),
         seconds = time() - run.started, borrowed = run.borrowed or nil, prices = prices,
     }
     run = nil
@@ -215,9 +216,10 @@ local function FinishPages()
     -- priced all of Winged Stalk (about 10g; user, 2026-10-19). An item
     -- under half its last fair price keeps that price (the lowest stays
     -- as p[2]); the next full scan says whether it really dropped.
-    local last = GoldsmithDB.ownScan and GoldsmithDB.ownScan.prices
+    local lastScan = GoldsmithDB.ownScan
+    local last = lastScan and lastScan.prices
     for itemID, p in pairs(prices) do
-        local before = last and last[itemID]
+        local before = last and addon:PriceHoldsHere(lastScan.group, itemID) and last[itemID]
         if before and before[1] and p[1] < before[1] * LOW_KEEP then p[1] = before[1] end
     end
     -- How many pages it took, for the next page scan's percent

@@ -173,14 +173,15 @@ GetOptions = function(itemID, name, depth, memo, visiting)
     if memo[itemID] then return memo[itemID] end
     local options = {}
 
-    -- Vendor: a recorded vendor price. Buying on the AH is only offered
-    -- when it's cheaper than the vendor.
+    -- Vendor: a recorded vendor price. The AH is picked when it's cheaper
+    -- than the vendor, and is always there to choose (right-click): cooking
+    -- in a raid, with no vendor but the AH on a mount (user, 2026-10-22)
     local vendorPrice = addon:GetVendorPrice(itemID)
     local ahPrice = addon:GetAHPrice(itemID, true)
     if vendorPrice then
         options.vendor = { method = "Vendor", unit = vendorPrice, detail = "Vendor price" }
     end
-    if ahPrice and (not vendorPrice or ahPrice < vendorPrice) then
+    if ahPrice then
         options.buy = { method = "Buy", unit = ahPrice, ageText = addon:AHPriceAgeText(itemID, true) }
     end
     if not vendorPrice and not ahPrice and name then
@@ -293,7 +294,8 @@ GetOptions = function(itemID, name, depth, memo, visiting)
     local millHeld = millRecord and GetOnHand(options.mill.herbID) >= math.max(millRecord.perCast or 1, 1)
     options.millHeld = millHeld or nil
     local cheapestUnit
-    for _, key in ipairs({ "buy", "vendor", "craft", "mill" }) do
+    -- Vendor first, so it wins a tie with the AH
+    for _, key in ipairs({ "vendor", "buy", "craft", "mill" }) do
         local option = options[key]
         local unit = option and (key == "mill" and option.unit * (1 + SALVAGE_MARGIN) or option.compareUnit or option.unit)
         if unit and key == "craft" and craftHeld then unit = unit * (1 - HELD_CRAFT_PREFERENCE) end
@@ -663,10 +665,57 @@ local function ToSortedList(map)
     return list
 end
 
+-- What `units` you hold of an item cost you (GetOwnCost: what you paid,
+-- what your own milling or crafts cost, gathered ones at today's price),
+-- the same basis as a craft's lot and the Craft complete notice;
+-- `fallback` (today's price) when Goldsmith never saw how you got it.
+local function HeldCost(itemID, name, units, fallback)
+    if units <= 0 then return 0 end
+    local own = addon:GetOwnCost(name, nil, itemID)
+    return units * (own or fallback)
+end
+
+-- A row's cost for all it needs, with what you hold at what you paid
+-- (user, 2026-10-22: "in the real world you usually go off of what you
+-- paid"; the plan lost 75g of profit when TSM's prices replaced the scan,
+-- for materials bought an hour before). What you still get is at today's
+-- price; a craft from held materials passes their paid share up (gold
+-- ingots from ore you bought). Buy or craft is still picked on today's
+-- prices (GetOptions). Sets node.paidTotal.
+local function NodeCost(node)
+    local best = node.best
+    if not best then return nil end
+    local goldUnits = node.gold and node.gold.units or 0
+    local cost = HeldCost(node.itemID, node.name, node.have - goldUnits, best.unit)
+    if goldUnits > 0 then cost = cost + HeldCost(node.gold.itemID, node.name, goldUnits, best.unit) end
+    if node.toGet > 0 then
+        local made = best.split and node.craftItems or node.toGet
+        local bought = best.split and best.split.buyItems or 0
+        local madeUnit = best.split and node.options.best and node.options.best.unit or best.unit
+        local factor = 1
+        if #node.children > 0 then
+            local market, paid = 0, 0
+            for _, child in ipairs(node.children) do
+                local childCost = NodeCost(child)
+                if childCost and child.best then
+                    market = market + child.best.unit * child.need
+                    paid = paid + childCost
+                end
+            end
+            if market > 0 then factor = paid / market end
+        end
+        cost = cost + made * madeUnit * factor
+        if bought > 0 then cost = cost + bought * best.split.other.unit end
+    end
+    node.paidTotal = cost
+    return cost
+end
+
 -- Plan for making `quantity` of a recipe's item. Returns:
 --   nodes     - top-level material rows (each with children)
---   cost      - cost of all materials at the cheapest options, whether
---               you'd buy them or already have them (the craft's true cost)
+--   cost      - cost of all materials: what you hold at what you paid,
+--               the rest at the cheapest way today (NodeCost)
+--   marketCost - the same, all at today's prices
 --   complete  - false if some material has no price at all
 --   buyAH     - { itemID, name, quantity, unit } to buy on the AH
 --   buyVendor - same, for vendor items
@@ -723,7 +772,9 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
             node.finishing, node.finishingChoice = s.finishing, s.finishing and plan.finishing
             table.insert(plan.nodes, node)
             if node.best then
-                plan.cost = plan.cost + node.best.unit * node.use
+                plan.marketCost = (plan.marketCost or 0) + node.best.unit * node.use
+                local total = NodeCost(node)
+                plan.cost = plan.cost + (node.need > 0 and total * node.use / node.need or 0)
             else
                 plan.complete = false
             end
@@ -753,7 +804,7 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
         return false
     end
     if plan.complete and cheapestComplete and AnyChoice(plan.nodes) then
-        plan.choiceExtra = plan.cost - cheapestCost
+        plan.choiceExtra = (plan.marketCost or plan.cost) - cheapestCost
     end
 
     local ah, vendor = {}, {}
