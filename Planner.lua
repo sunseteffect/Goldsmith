@@ -1165,10 +1165,28 @@ function addon:PreferHeldMix(recipe, tierInfo, quantity)
         return math.min(crafts, math.floor(current / full))
     end
     local function Earns(e) return (e.profit or 0) * (e.outputPerCraft or outputPerCraft) * Startable(e) end
+    -- Whether you hold every quality material a mix needs for all crafts
+    local function Holds(e)
+        for _, slot in ipairs(qslots) do
+            local high = addon:ScenarioHighUnits(e.scenario, slot)
+            local ids = slot.itemIDs
+            if GetOnHand(ids[1]) < (slot.quantity - high) * crafts or GetOnHand(ids[#ids]) < high * crafts then
+                return false
+            end
+        end
+        return true
+    end
+    -- Not when you hold the picked mix and the other needs buying: the
+    -- crafts it can't start yet wait for concentration to come back. 2
+    -- Refreshing Serum at 115 a craft, 212 after a Light's Potential, swapped
+    -- to a mix with 6 gold Sanguithorn (108g) after the shopping was done
+    -- (user, 2026-10-22)
+    local holdsPick = current and Startable(tierInfo) < crafts and Holds(tierInfo)
     if current and Startable(tierInfo) < crafts then
         local fit
         for _, e in ipairs(same) do
-            if Startable(e) == crafts and Earns(e) > Earns(tierInfo) and (not fit or Earns(e) > Earns(fit)) then
+            if Startable(e) == crafts and Earns(e) > Earns(tierInfo) and (not fit or Earns(e) > Earns(fit))
+                and not (holdsPick and not Holds(e)) then
                 fit = e
             end
         end
