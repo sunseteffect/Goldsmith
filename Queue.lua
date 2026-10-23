@@ -526,9 +526,15 @@ function addon:BlockedLabel(s)
     local blocker = s.blockers and s.blockers[1] or ""
     -- Short on concentration beats a missing station: walking to the
     -- table wouldn't let it craft (user, 2026-10-16)
+    -- Then a missing station over materials, so the queue panel and the
+    -- Queue tab say the same (user, 2026-10-22: the panel said Needs
+    -- materials, the tab Needs Alchemist's Lab Bench)
+    local station
     for _, b in ipairs(s.blockers or {}) do
-        if b:find("concentration") then blocker = b break end
+        if b:find("concentration") then blocker, station = b, nil break end
+        if not station and b:find("^Needs .+ nearby") then station = b end
     end
+    blocker = station or blocker
     local station = blocker:match("^Needs (.+) nearby")
     if station then
         return "Needs " .. station, "warning"
@@ -810,7 +816,9 @@ local function UpdatePanel()
             line.text:SetText(string.format("%dx %s", r.remaining, addon:QueueRowName(r)))
             line.text:SetTextColor(addon:Color(r == row and "gold" or "text"))
             local status, color = addon:QueueRowStatus(r, q)
-            line.status:SetText(status)
+            -- The button below says it for the row it's on, and the long
+            -- ones cut the name short (user, 2026-10-22)
+            line.status:SetText(r == row and "" or status)
             line.status:SetTextColor(addon:Color(color))
             line:Show()
         else
