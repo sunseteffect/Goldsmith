@@ -7,12 +7,12 @@ Most players don't want to study the auction house. Goldsmith gives you a short 
 ## What it does
 - **Do this next:** the best crafts right now, where to spend concentration, cooldowns ready to use, salvage worth doing, and materials selling cheap. How many to make follows how fast your own batches sell: more when they sell out quickly, fewer when they slow down. Suggestions are kept to solid bets: a craft has to make a profit *and* sell.
 - **Crafts:** every recipe your characters know, costed with each character's own stats (multicraft, resourcefulness, ingenuity) and the cheapest mix of material qualities for each tier, with and without concentration. Show Recommended, Profitable, All crafts, or Not learned yet (recipes you haven't learned, with what they'd earn and where to learn them). Hide gear, search, or ignore items you never want to see. Each craft shows how well it sells: Sells, Slow or Hardly sells.
-- **Planner:** for any craft, whether to buy, craft, mill or prospect each material (right-click one to choose another way, for that plan only), and a Craft button that walks you through each step. Shopping lists cover the unlucky case, so one trip is always enough.
+- **Planner:** for any craft, whether to buy, craft, mill or prospect each material (right-click one to choose another way, or which item to salvage for it, for that plan only), and a Craft button that walks you through each step. What to craft is picked on today's prices; the plan's profit is on what your materials cost you. Shopping lists cover the unlucky case, so one trip is always enough.
 - **Queue:** queue crafts on each character and shop for all of them at once; right-click a craft in Overview or Characters to queue it in one click. Then press Craft next (or its key binding) to work through them: mill, make materials, then craft.
 - **Shopping:** Goldsmith scans the AH itself for every price. **Buy next** buys your queue's materials one item at a time right from the AH, and warns you when the AH asks more than the plan counted on. The vendor panel buys the exact vendor materials in one click. The shopping list can also go to Auctionator.
-- **Salvage:** milling, prospecting and crushing as profit rows, from the yields you actually get. The planner shows whether salvaging beats buying.
+- **Salvage:** milling, prospecting, crushing and recycling as profit rows, from the yields you actually get. The planner shows whether salvaging beats buying.
 - **Characters:** a to-do list for each alt, with their professions, concentration and craft cooldowns. Cooldowns that are ready and worth making show up in Do this next.
-- **Items and History:** prices and price history, your stock across bags, banks and the warband bank, every sale, purchase and deposit with real profit after the AH cut, and your total gold over time with where it is.
+- **Items and History:** prices and price history, your stock across bags, banks and the warband bank, every sale, purchase and deposit with real profit after the AH cut, and your total gold over time with where it is. Opening your mailbox sums up the AH sales and purchases waiting in it.
 - **Stats:** lifetime numbers to compare with friends: a Goldsmith title earned by profit, best sale, best day, profit streaks, biggest mailbox haul, multicraft procs, your most profitable professions and characters, and how often Goldsmith's suggestions held up. Share in chat to brag.
 - **Hovers that explain themselves:** hovers stay short, just the numbers. Hold Ctrl over one to see what each number means and how it's worked out.
 
@@ -45,6 +45,7 @@ You can also set keys for opening Goldsmith and for Craft next in the game's Key
 ## Good to know
 - Goldsmith never crafts, buys or posts on its own. Every craft and every purchase is one press of a button or key.
 - Posting your crafts on the AH is up to you (TSM or Auctionator do that well).
+- Characters on more than one realm group: material prices from your AH scan count everywhere in your region (one AH for the whole region), gear prices only on the realms they came from.
 
 ## Support and feedback
 - Found a bug or have an idea? [Leave a comment on CurseForge](https://www.curseforge.com/wow/addons/goldsmith-crafting-profit-planner/comments), or [open an issue on GitHub](https://github.com/sunseteffect/Goldsmith/issues) if you use it. In game, Settings > Support and feedback has both links and a Copy bug report button that gathers the details for you.

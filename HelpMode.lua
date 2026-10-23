@@ -126,13 +126,13 @@ TAB_PARTS.crafts = function(list)
             "Plans this quality with concentration, using the mix of material qualities that earns the most.",
             plan.useConc)
         Add(list, "Materials",
-            "Each material and where it comes from: your bags, a vendor, the AH, or crafting it first. Right-click one to change that, for this plan and its queue entry.",
+            "Each material and where it comes from: your bags, a vendor, the AH, or crafting it first. Right-click one to change that, or to pick which item to salvage for it, for this plan and its queue entry.",
             plan.list)
         Add(list, "Material qualities",
             "The mix of material qualities. Goldsmith picks the best one for this quality and lists the top three to compare. Click one to use it instead, or click the bar to hide or show them.",
             plan.mixes)
         Add(list, "Cost and profit",
-            "What it all costs, what it sells for and the profit, worked out from your own crafting stats. Hover a number for how.",
+            "What it all costs (what your materials cost you), what it sells for and the profit, worked out from your own crafting stats. Hover a number for how.",
             plan.shop:GetParent())
         Add(list, "Shopping list",
             "With Auctionator, sends everything you need to buy to its Shopping tab at the AH. Items come off it as you buy them.",
@@ -143,7 +143,7 @@ TAB_PARTS.crafts = function(list)
             plan.queue)
     elseif view.salvage and view.salvage:IsShown() then
         Add(list, "Salvage plan",
-            "Milling, prospecting or crushing: how many to do, what it costs, and what comes out, from your own results.",
+            "Milling, prospecting, crushing or recycling: how many to do, what it costs, and what comes out, from your own results.",
             view.salvage)
     else
         Add(list, "Show",
