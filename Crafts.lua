@@ -1440,10 +1440,25 @@ local function MillStepState(node, state)
 end
 
 -- A queued salvage batch (Queue.lua): salvage `count` more of an item
+-- With the profession closed, the button opens it at the salvage recipe
+-- you last used on the item (the game only lists salvage recipes while
+-- it's open), as a craft's button opens its recipe; it was a greyed-out
+-- "Open Inscription" (user, 2026-10-23)
 function addon.SalvageState(itemID, name, count, verb)
     local node = { toGet = count, best = { herbID = itemID, herbName = name, perHerb = 1, verb = verb } }
-    local state = { label = verb, blockers = {}, notes = {} }
-    return MillStepState(node, state)
+    local state = MillStepState(node, { label = verb, blockers = {}, notes = {} })
+    local record = GoldsmithDB.milling[itemID]
+    local profession = record and record.profession or "Inscription"
+    if not ProfessionOpen({ profession = profession }) and C_TradeSkillUI.OpenRecipe then
+        local recipeID = addon.KnownSalvageRecipe and addon.KnownSalvageRecipe(itemID, profession)
+        if recipeID then
+            state.label, state.enabled, state.open, state.openRecipeID = "Open " .. profession, true, true, recipeID
+            state.blockers = {}
+            table.insert(state.notes, string.format("Opens %s to %s %s. The game only salvages with the profession open.",
+                profession, (verb or "salvage"):lower(), name))
+        end
+    end
+    return state
 end
 
 -- A craft step: make the material, using the qualities the plan picked
@@ -1668,7 +1683,8 @@ local function PerformCraftState(state, recipe, onOpened)
     if not (state and state.enabled) then return end
     if state.open then
         if C_TradeSkillUI.OpenRecipe then
-            C_TradeSkillUI.OpenRecipe(recipe.recipeID)
+            -- A salvage batch opens at its salvage recipe (SalvageState)
+            C_TradeSkillUI.OpenRecipe(state.openRecipeID or recipe.recipeID)
             if onOpened then UpdateWhenOpen(recipe, onOpened) end
         else
             print("|cFF00FF00[Goldsmith]|r Open " .. recipe.profession .. ", then click Craft.")
@@ -2762,6 +2778,8 @@ local function KnownSalvageRecipe(itemID, profession)
     local run = own or same or any
     return run and run.recipeID
 end
+-- For a queued salvage batch's button (SalvageState, above)
+addon.KnownSalvageRecipe = KnownSalvageRecipe
 
 local function CreateSalvageScreen(parent)
     local ui = GoldsmithDB.ui2
