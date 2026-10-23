@@ -2659,6 +2659,13 @@ local function CreatePlanScreen(parent)
         end
         screen.warnings = warnings
         local state = CraftState(p, tierInfo, plan)
+        -- A crafting order for this recipe in your queue: no crafting it
+        -- here by accident, using the order's materials for one of your
+        -- own (user, 2026-10-23). Steps before it (bars) still craft.
+        if state.final and p.charKey == addon.charKey and addon:QueuedOrderFor(p.recipe.recipeID) then
+            state = { enabled = false, notes = {}, orderBlocked = true,
+                blockers = { "A crafting order for this is in your queue. Craft it in the game's crafting orders window, or take the order off the queue to craft one here." } }
+        end
         -- On cooldown goes first, where it can't be missed
         local lines = {}
         if state.onCooldown then table.insert(lines, UNCONFIRMED_ICON .. state.onCooldown) end

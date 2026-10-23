@@ -140,6 +140,15 @@ local function RowTooltip(tooltip, item)
     if item.entry.salvageID then return SalvageTooltip(tooltip, item) end
     tooltip:AddLine(ItemText(item), 1, 1, 1)
     addon:AddItemDescription(tooltip, item.recipe and item.recipe.outputItemID)
+    local order = item.entry.orderID and item.entry
+    if order then
+        tooltip:AddDoubleLine("Crafting order", order.customer or "", 0.8, 0.8, 0.8, 1, 1, 1)
+        if order.expires then
+            tooltip:AddDoubleLine("Expires in", SecondsToTime(math.max(order.expires - time(), 0), true),
+                0.8, 0.8, 0.8, 1, 1, 1)
+        end
+        addon:Explain(tooltip, "Goldsmith shops for your part of the materials (not the customer's). Craft it in the game's crafting orders window; it leaves the queue once crafted. Profit is the commission and rewards less your materials.")
+    end
     local plan = item.plan
     local made = item.entry.made or 0
     tooltip:AddDoubleLine("To make", made > 0 and string.format("%d more (%d of %d made)", item.remaining, made,

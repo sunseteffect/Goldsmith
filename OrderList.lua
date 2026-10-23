@@ -5,8 +5,11 @@ local UI = addon.UI
 --
 -- In place of the Patron Name column (user, 2026-10-18: "patron name is
 -- completely useless"), with Goldsmith's own labels over it:
---   - Known: a check when you know the recipe (the game forgets the "not
---     learned" filter)
+--   - Status: what you can do with it (user, 2026-10-23, it was Known):
+--     a check when you know it and hold all your part of the materials, a
+--     bag when you're short (right-click queues it, so Buy next shops for
+--     it), Goldsmith's logo once it's in the queue, a cross when you don't
+--     know the recipe. Right-click a queued one to take it off.
 --   - Rewards: the rewards' icons (items, then currencies such as Artisan's
 --     Moxie)
 --   - Profit: to the gold, as the opened order counts it
@@ -24,6 +27,54 @@ local ICON = 14
 local MAX_REWARDS = 3
 local ICON_GAP = 3
 local CHECK = "Interface\\RaidFrame\\ReadyCheck-Ready"
+local CROSS = "Interface\\RaidFrame\\ReadyCheck-NotReady"
+local BAG = "Interface\\Icons\\INV_Misc_Bag_10"
+local QUEUED = "Interface\\AddOns\\Goldsmith\\Media\\Logo"
+
+-- How many you have of a material, any quality of it in the recipe:
+-- bags, banks, warband bank and the mailbox (Buy next's purchases)
+local function Held(itemID, recipeID)
+    local ids = { itemID }
+    local recipe = GoldsmithDB.recipes[recipeID]
+    for _, slot in ipairs(recipe and recipe.reagents or {}) do
+        for _, id in ipairs(slot.itemIDs or {}) do
+            if id == itemID then ids = slot.itemIDs break end
+        end
+    end
+    local have = 0
+    for _, id in ipairs(ids) do
+        have = have + (C_Item.GetItemCount(id, true, false, true, true) or 0)
+            + (addon.InMailCount and addon:InMailCount(id) or 0)
+    end
+    return have
+end
+
+-- Your part of an order's materials you don't have: { "2 Sin'dorei Armor
+-- Banding", ... }. Counted at any quality, as the list can't know which
+-- one the order will use.
+local function Missing(p, order)
+    local missing = {}
+    for _, m in ipairs(p.mats or {}) do
+        local short = (m.qty or 0) - Held(m.itemID, order.spellID)
+        if short > 0 then
+            table.insert(missing, short .. " " .. (C_Item.GetItemNameByID(m.itemID) or ("item " .. m.itemID)))
+        end
+    end
+    return missing
+end
+
+-- The status icon, kept up to date as bags and the queue change
+local function SetStatus(line, order)
+    local p = line.preview
+    line.order = order
+    line.queued = addon:FindOrderEntry(order.orderID) ~= nil
+    line.missing = p.learned and Missing(p, order) or {}
+    -- Ready beats queued: a queued order bought for showed the logo, not
+    -- the check (user, 2026-10-23)
+    local texture = (not p.learned and CROSS) or (#line.missing == 0 and CHECK) or (line.queued and QUEUED) or BAG
+    if line.check:GetTexture() ~= texture then line.check:SetTexture(texture) end
+    line.check:Show()
+end
 
 -- The columns in the Patron Name column: Known at its left, Profit at its
 -- right (kept off the Commission column, user, 2026-10-18), Rewards
@@ -63,8 +114,15 @@ local function Tooltip(tooltip, line)
     local p = line.preview
     if not p then return end
     tooltip:AddLine("Goldsmith: this order", addon:Color("gold"))
-    tooltip:AddLine(p.learned and "You know this recipe." or "You haven't learned this recipe.",
-        addon:Color(p.learned and "text" or "warning"))
+    if not p.learned then
+        tooltip:AddLine("You haven't learned this recipe.", addon:Color("warning"))
+    elseif line.missing and #line.missing > 0 then
+        tooltip:AddLine((line.queued and "In your queue. Still needs " or "Needs ")
+            .. table.concat(line.missing, ", "), addon:Color("warning"))
+    else
+        tooltip:AddLine("You have your part of the materials" .. (line.queued and ": craft it in the order." or "."),
+            addon:Color("profit"))
+    end
     tooltip:AddLine(" ")
     tooltip:AddDoubleLine("Your materials", (#p.mats == 0 and "none")
         or ((p.complete and "" or "at least ") .. Money(p.cost)), 1, 1, 1, 1, 1, 1)
@@ -85,6 +143,11 @@ local function Tooltip(tooltip, line)
     if line.patron then tooltip:AddLine("Patron: " .. line.patron, 0.6, 0.6, 0.6) end
     addon:Explain(tooltip, "Your materials count at their lowest quality, at what yours cost you or today's price. "
         .. "Open the order to see the cost at the qualities you pick.")
+    if p.learned and line.queued then
+        addon:RightClickHint(tooltip, "Right-click to take it off the queue", true)
+    elseif p.learned and line.missing and #line.missing > 0 then
+        addon:RightClickHint(tooltip, "Right-click to queue it, so Buy next shops for what's missing", true)
+    end
 end
 
 local list, box, labels
@@ -127,7 +190,7 @@ local function CreateLabels()
     for _, key in ipairs({ "known", "rewards", "profit" }) do
         labels[key] = labels:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     end
-    labels.known:SetText("Known")
+    labels.known:SetText("Status")
     labels.rewards:SetText("Rewards")
     labels.profit:SetText("Profit")
 end
@@ -178,10 +241,32 @@ local function CreateLine(row)
         line.icons[i] = icon
     end
     UI.SetTooltip(line, Tooltip)
-    -- A click opens the order, as its row does
-    line:SetScript("OnClick", function()
-        if row.Click then pcall(row.Click, row) end
+    -- A click opens the order, as its row does; right-click queues it,
+    -- or takes it off the queue
+    line:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    line:SetScript("OnClick", function(self, button)
+        if button ~= "RightButton" then
+            if row.Click then pcall(row.Click, row) end
+            return
+        end
+        local p, order = self.preview, self.order
+        if not (p and order) then return end
+        if not p.learned then
+            addon:Notify("info", "You haven't learned this recipe.")
+        elseif self.queued then
+            local entry = addon:FindOrderEntry(order.orderID)
+            if entry then addon:RemoveQueueEntry(addon.charKey, entry) end
+            addon:Notify("info", "Took the order off the queue.")
+        elseif #(self.missing or {}) == 0 then
+            addon:Notify("info", "You already have your part of the materials: open the order and craft it.")
+        else
+            addon:AddOrderToQueue(order, p)
+        end
+        SetStatus(self, order)
+        if GameTooltip:IsOwned(self) and UI.RedrawTooltip then UI.RedrawTooltip(self) end
     end)
+    -- Only on Goldsmith's columns: right-clicking the rest of the row is
+    -- the game's Set Favorite menu (user, 2026-10-23: both at once was weird)
     row.goldsmithLine = line
     return line
 end
@@ -231,7 +316,7 @@ local function Fill(line, p, order)
             icon.count:SetText(r.count > 1 and r.count or "")
         end
     end
-    line.check:SetShown(p.learned)
+    SetStatus(line, order)
     if line.at then PlaceLine(line, line.at) end
 end
 
@@ -380,6 +465,7 @@ local function Update(force)
     for _, r in ipairs(rows) do
         FillRow(r.row, r.order, force)
         local line = r.row.goldsmithLine
+        if line and line.preview then SetStatus(line, r.order) end
         if line and line.preview then profitText = math.max(profitText, line.profit:GetUnboundedStringWidth()) end
     end
     local at = Layout(colRight - colLeft, labels.known:GetUnboundedStringWidth(), profitText)

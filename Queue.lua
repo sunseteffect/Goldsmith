@@ -18,7 +18,11 @@ local UI = addon.UI
 --
 -- Saved in GoldsmithDB.queues[charKey] = list of { recipeID, quantity,
 -- made, tier, concentrate, added } for crafts, or { salvageID, quantity
--- (items to salvage), made, added } for salvage batches.
+-- (items to salvage), made, added } for salvage batches. A crafting order
+-- (patron orders: user, 2026-10-23, "queue up all the mats i need") is a
+-- craft with orderID, provided ({ [itemID] = qty } the customer gives),
+-- customer, commission, rewardsValue and expires: shopping only, crafted
+-- in the game's order window, and off the queue once crafted.
 -- The panel's position: GoldsmithDB.ui2.queuePanel = { x, y } from the
 -- profession window's top left (nil: under it, right edges lined up).
 
@@ -82,7 +86,7 @@ end
 -- different mix"). Entries without one pick their mix as they're planned.
 local function Same(e, recipeID, tier, concentrate, salvageID, mix)
     if salvageID then return e.salvageID == salvageID end
-    return e.recipeID ~= nil and e.recipeID == recipeID and e.tier == tier
+    return e.recipeID ~= nil and e.recipeID == recipeID and e.tier == tier and not e.orderID
         and (e.concentrate == true) == (concentrate == true) and e.mix == mix
 end
 
@@ -183,6 +187,85 @@ function addon:AskSalvageBatch(charKey, itemID, name, verb)
         { charKey = charKey, itemID = itemID, name = name, verb = verb or "Salvage", quantity = quantity })
 end
 
+-- A crafting order from the game's order window (OrderCost.lua's Add to
+-- queue): preview is its GetOrderPreview (provided, commission, rewards)
+function addon:AddOrderToQueue(order, preview)
+    local recipeID = type(order) == "table" and order.spellID
+    local recipe = recipeID and GoldsmithDB.recipes[recipeID]
+    if not recipe then
+        addon:Notify("info", "Goldsmith hasn't read this recipe yet. Find it in your profession window once, then try again.")
+        return
+    end
+    if addon:FindOrderEntry(order.orderID) then
+        addon:Notify("info", "That order is already in the queue.")
+        return
+    end
+    local expires = tonumber(order.expirationTime)
+    table.insert(Queue(addon.charKey, true), {
+        orderID = order.orderID, recipeID = recipeID, quantity = 1, made = 0,
+        -- An order that asks for a quality: planned to reach it
+        tier = (order.minQuality or 0) > 1 and order.minQuality or nil, concentrate = false,
+        provided = preview and preview.provided or {}, customer = order.customerName,
+        commission = preview and preview.commission or 0, rewardsValue = preview and preview.rewardsValue or 0,
+        expires = expires and expires > time() and expires or nil, added = time(),
+    })
+    Changed()
+    addon:Notify("info", "Added the order for %s to %s's queue. Buy next shops for it; craft it in the order window.",
+        recipe.outputName, CharName(addon.charKey))
+end
+
+-- A crafting order for this recipe in this character's queue, or nil
+function addon:QueuedOrderFor(recipeID)
+    for _, e in ipairs(Queue(addon.charKey) or {}) do
+        if e.orderID and e.recipeID == recipeID then return e end
+    end
+end
+
+-- This character's queue entry for a crafting order, or nil
+function addon:FindOrderEntry(orderID)
+    if not orderID then return nil end
+    for _, e in ipairs(Queue(addon.charKey) or {}) do
+        if e.orderID == orderID then return e end
+    end
+end
+
+local function RemoveOrder(orderID, why)
+    local q = Queue(addon.charKey)
+    for i, e in ipairs(q or {}) do
+        if e.orderID == orderID then
+            table.remove(q, i)
+            local recipe = GoldsmithDB.recipes[e.recipeID]
+            addon:Notify("info", "Queue: the order for %s, %s.", recipe and recipe.outputName or "an item", why)
+            Changed()
+            return
+        end
+    end
+end
+
+-- An order's recipe without what the customer provides: those slots
+-- (or that much of them) aren't yours to buy
+local function OrderRecipe(recipe, provided)
+    if not (provided and next(provided)) then return recipe end
+    local copy, left = {}, {}
+    for k, v in pairs(recipe) do copy[k] = v end
+    for id, qty in pairs(provided) do left[id] = qty end
+    copy.reagents = {}
+    for _, slot in ipairs(recipe.reagents or {}) do
+        local qty = slot.quantity or 0
+        for _, id in ipairs(slot.itemIDs or {}) do
+            local take = math.min(left[id] or 0, qty)
+            if take > 0 then left[id], qty = left[id] - take, qty - take end
+        end
+        if qty > 0 then
+            local s = {}
+            for k, v in pairs(slot) do s[k] = v end
+            s.quantity = qty
+            table.insert(copy.reagents, s)
+        end
+    end
+    return copy
+end
+
 function addon:RemoveQueueEntry(charKey, entry)
     local q = Queue(charKey) or {}
     for i, e in ipairs(q) do
@@ -244,7 +327,7 @@ function addon:QueueCrafted(recipeID, quantity, itemID)
         end
     end
     Progress(function(e)
-        return e.recipeID == recipeID and (not e.tier or not madeTier or e.tier == madeTier)
+        return e.recipeID == recipeID and not e.orderID and (not e.tier or not madeTier or e.tier == madeTier)
     end, quantity, function(e)
         local recipe = GoldsmithDB.recipes[recipeID]
         return string.format("made %d %s", e.made, recipe and recipe.outputName or "items")
@@ -385,7 +468,18 @@ function addon:BuildQueue(charKey)
                 listName = "Goldsmith: Queue (" .. CharName(charKey) .. ")", listKey = "queue:" .. charKey }
     local ah, vendor = {}, {}
     local salvageRows
-    for _, e in ipairs(Queue(charKey) or {}) do
+    -- Orders past their time are gone from the game too
+    local entries = Queue(charKey) or {}
+    for i = #entries, 1, -1 do
+        local e = entries[i]
+        if e.orderID and e.expires and e.expires <= time() then
+            table.remove(entries, i)
+            local recipe = GoldsmithDB.recipes[e.recipeID]
+            addon:Notify("info", "Queue: the order for %s expired, so it's off the queue.",
+                recipe and recipe.outputName or "an item")
+        end
+    end
+    for _, e in ipairs(entries) do
         local row = { entry = e, remaining = math.max(e.quantity - (e.made or 0), 0) }
         local plan
         if e.salvageID and row.remaining > 0 then
@@ -401,8 +495,25 @@ function addon:BuildQueue(charKey)
             row.recipe = e.recipeID and GoldsmithDB.recipes[e.recipeID]
             if row.recipe and row.remaining > 0 then
                 row.p = { recipe = row.recipe, charKey = charKey, tier = e.tier, concentrate = e.concentrate }
-                row.tierInfo = addon:WithCharacter(charKey, addon.FindTierInfo, row.p)
-                if e.tier and not row.tierInfo then
+                if e.orderID and e.tier then
+                    -- An order's quality is a minimum: the lowest quality at
+                    -- or above it that can be planned. Exactly 2 of 5 for a
+                    -- Toolbox had no way to make it, so the entry had no
+                    -- plan and Buy next bought nothing for it (user,
+                    -- 2026-10-23). None readable: the plain recipe, rather
+                    -- than shop for nothing.
+                    local c = GoldsmithDB.characters[charKey]
+                    local td = c and c.tierData and c.tierData[e.recipeID]
+                    for tier = e.tier, math.max(td and td.qualities and #td.qualities or 0, e.tier) do
+                        row.p.tier = tier
+                        row.tierInfo = addon:WithCharacter(charKey, addon.FindTierInfo, row.p)
+                        if row.tierInfo then break end
+                    end
+                    if not row.tierInfo then row.p.tier = nil end
+                else
+                    row.tierInfo = addon:WithCharacter(charKey, addon.FindTierInfo, row.p)
+                end
+                if row.p.tier and not row.tierInfo then
                     -- The queued quality isn't among the recipe's ways to make
                     -- it right now (after a relog, before the profession's
                     -- data is read). Planning without a tier showed a silver
@@ -423,9 +534,30 @@ function addon:BuildQueue(charKey)
                         row.tierInfo = set or addon:WithCharacter(charKey, addon.ChooseMix, addon, row.recipe,
                             row.tierInfo, row.remaining)
                     end
+                    local planRecipe = e.orderID and OrderRecipe(row.recipe, e.provided) or row.recipe
                     plan = addon:WithChoices(e.choices, addon.WithCharacter, addon, charKey, addon.BuildPlan, addon,
-                        row.recipe, row.remaining, useOnHand, row.tierInfo, pool)
+                        planRecipe, row.remaining, useOnHand, row.tierInfo, pool)
                     if mine then row.state = addon.GetCraftState(row.p, row.tierInfo, plan) end
+                    if e.orderID and plan then
+                        -- What the order pays, not what the item sells for
+                        plan.revenue = (e.commission or 0) + (e.rewardsValue or 0)
+                        plan.profit = plan.revenue - plan.cost
+                        -- The craft itself happens in the game's order
+                        -- window; steps before it (materials to make) don't
+                        local s = row.state
+                        if s and s.final then
+                            local missing = {}
+                            for _, list in ipairs({ plan.buyAH or {}, plan.buyVendor or {} }) do
+                                for _, item in ipairs(list) do
+                                    table.insert(missing, item.quantity .. " " .. (item.name or ("item " .. item.itemID)))
+                                end
+                            end
+                            row.state = { enabled = false, notes = {}, orderReady = #missing == 0,
+                                blockers = { #missing > 0
+                                    and string.format("Missing for the order: %s.", table.concat(missing, ", "))
+                                    or "Everything's ready: craft it in the crafting orders window." } }
+                        end
+                    end
                 end
                 if row.tierMissing then q.complete = false end
             end
@@ -504,6 +636,7 @@ function addon:QueueRowName(row)
     end
     -- A set mix says which, so it doesn't read as a repeat
     local mix = row.entry.mix and ("  " .. addon:MixIcon(row.entry.mix)) or ""
+    if row.entry.orderID then mix = mix .. " (order)" end
     return icon .. name .. mix
 end
 
@@ -523,6 +656,8 @@ end
 -- Lab Bench"): the queue's statuses and the plan's Craft button (user,
 -- 2026-10-18: the plan's button still said "Craft 1")
 function addon:BlockedLabel(s)
+    if s.orderReady then return "Craft in order window", "profit" end
+    if s.orderBlocked then return "Queued as an order", "warning" end
     local blocker = s.blockers and s.blockers[1] or ""
     -- Short on concentration beats a missing station: walking to the
     -- table wouldn't let it craft (user, 2026-10-16)
@@ -916,6 +1051,27 @@ C_Timer.NewTicker(1, function()
     local state = panel and panel.row and panel.row.state
     if panel and panel:IsShown() and panel.nearby and addon.StationsMet(state and state.nearbyRecipes) then
         UpdateSoon()
+    end
+end)
+
+-- A queued order crafted in the game's order window leaves the queue: the
+-- craft is sent with its order ID, and the result (or the order being
+-- completed) takes it off
+local craftingOrder
+hooksecurefunc(C_TradeSkillUI, "CraftRecipe", function(_, _, _, _, orderID)
+    craftingOrder = type(orderID) == "number" and orderID > 0 and orderID or nil
+end)
+local orderEvents = CreateFrame("Frame")
+orderEvents:RegisterEvent("TRADE_SKILL_ITEM_CRAFTED_RESULT")
+pcall(orderEvents.RegisterEvent, orderEvents, "CRAFTINGORDERS_FULFILL_ORDER_RESPONSE")
+orderEvents:SetScript("OnEvent", function(_, event, result, orderID)
+    if event == "TRADE_SKILL_ITEM_CRAFTED_RESULT" then
+        if craftingOrder then
+            RemoveOrder(craftingOrder, "crafted")
+            craftingOrder = nil
+        end
+    elseif result == 0 and orderID then
+        RemoveOrder(orderID, "done")
     end
 end)
 

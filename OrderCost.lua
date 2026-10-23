@@ -94,6 +94,7 @@ local ORDER = {
     end,
     form = function(view) return view.OrderDetails and view.OrderDetails.SchematicForm end,
     preview = function(view, tx) return addon:GetOrderPreview(view.order, tx) end,
+    queueOrder = true,
     lines = function(p)
         local cost = #p.mats == 0 and "none" or ((p.complete and "" or "at least ") .. Money(p.cost))
         local profit = p.commission + p.rewardsValue - p.cost
@@ -218,6 +219,25 @@ local function Create(page, form)
     -- A note under the two, on orders only (ORDER.lines)
     holder.line3 = UI.Text(holder, "small", "text")
     holder.line3:SetPoint("TOPLEFT", holder.line2, "BOTTOMLEFT", 0, -4)
+    -- Orders: put it in the queue, so Buy next shops for your part of the
+    -- materials (user, 2026-10-23: queue up the mats for patron orders)
+    if page.def.queueOrder then
+        holder.queue = UI.Button(holder, "Add to queue", 120, 22, function()
+            local view = page.def.view()
+            if view and view.order and page.preview then
+                addon:AddOrderToQueue(view.order, page.preview)
+                addon:UpdateCraftCostLines()
+            end
+        end)
+        holder.queue:SetPoint("TOPLEFT", holder.line2, "BOTTOMLEFT", 0, -8)
+        holder.line3:ClearAllPoints()
+        holder.line3:SetPoint("TOPLEFT", holder.queue, "BOTTOMLEFT", 0, -6)
+        UI.SetTooltip(holder.queue, function(tooltip)
+            tooltip:AddLine("Add to queue", 1, 1, 1)
+            tooltip:AddLine("Puts this order in the queue so Buy next and the vendor panel shop for your part of the materials. Craft it here in the order window as usual; it leaves the queue once crafted.",
+                0.8, 0.8, 0.8, true)
+        end)
+    end
     holder:EnableMouse(true)
     UI.SetTooltip(holder, function(tooltip)
         local p = page.preview
@@ -325,6 +345,18 @@ local function Update(page)
     holder.line2:SetText(second)
     holder.line3:SetText(third or "")
     holder.line3:SetShown(third ~= nil)
+    if holder.queue then
+        local queued = view.order and addon:FindOrderEntry(view.order.orderID)
+        -- Nothing to shop for when you hold all your part (user, 2026-10-23)
+        local held = true
+        for _, m in ipairs(page.preview.mats or {}) do
+            if (C_Item.GetItemCount(m.itemID, true, false, true, true) or 0) < (m.qty or 0) then held = false break end
+        end
+        holder.queue:SetShown(queued ~= nil or not held)
+        holder.queue:SetLabel(queued and "In the queue" or "Add to queue")
+        holder.queue:SetEnabled(not queued)
+        holder.queue:SetAlpha(queued and 0.5 or 1)
+    end
     if not Place(holder, form) then
         holder:Hide()
         return
