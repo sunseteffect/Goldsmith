@@ -1181,7 +1181,8 @@ local function StalePrices(plan)
     local function Check(itemID)
         if not itemID or seen[itemID] then return end
         seen[itemID] = true
-        if addon:GetVendorPrice(itemID) then return end
+        -- Soulbound materials (Stabilized Derivate) never have an AH price
+        if addon:GetVendorPrice(itemID) or addon:CanAuction(itemID) == false then return end
         local price, source, age = addon:GetAHPriceInfo(itemID)
         if not price or addon:IsPriceOld(source, age) then
             table.insert(stale, { itemID = itemID })
