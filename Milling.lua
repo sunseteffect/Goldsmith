@@ -181,6 +181,8 @@ local function OnCraftSalvage(recipeID, numCasts, itemTarget, craftingReagents, 
 
     -- A salvage recipe's quantity is how many items one cast uses up
     local okS, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+    -- What else it takes, for picking another item to salvage in a plan
+    addon:SalvageInputs(recipeID)
 
     session = {
         herbID = herbID,
@@ -412,6 +414,35 @@ function addon:GetSalvageVerb(itemID)
         end
     end
     return SalvageVerb(recipeID, profession)
+end
+
+-- Salvage recipes you've used on an item (from salvage runs), as a set
+function addon:SalvageRecipesFor(itemID)
+    local set = {}
+    for _, run in ipairs(SalvageRuns()) do
+        if run.itemID == itemID and run.recipeID then set[run.recipeID] = true end
+    end
+    return set
+end
+
+-- Items a salvage recipe takes (the potions Recycle takes), from the game,
+-- kept in GoldsmithDB.salvageInputs: the game may only answer with the
+-- profession open. Asked once a session, or again while it's open.
+local askedInputs = {}
+function addon:SalvageInputs(recipeID)
+    GoldsmithDB.salvageInputs = GoldsmithDB.salvageInputs or {}
+    local open = ProfessionsFrame and ProfessionsFrame:IsShown()
+    if askedInputs[recipeID] ~= true and (not askedInputs[recipeID] or open)
+        and C_TradeSkillUI.GetSalvagableItemIDs then
+        local ok, ids = pcall(C_TradeSkillUI.GetSalvagableItemIDs, recipeID)
+        if ok and type(ids) == "table" and #ids > 0 then
+            askedInputs[recipeID] = true
+            GoldsmithDB.salvageInputs[recipeID] = CopyTable(ids)
+        else
+            askedInputs[recipeID] = "none"
+        end
+    end
+    return GoldsmithDB.salvageInputs[recipeID] or {}
 end
 
 -- Salvage runs added up per item and character:

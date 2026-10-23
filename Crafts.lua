@@ -859,6 +859,9 @@ local function PlanTooltip(tooltip, node)
     elseif o.mill then
         millDetail = string.format("%.2f per %s\nat its AH price", o.mill.perHerb, o.mill.herbName)
     end
+    if o.mill and o.mill.estimateFrom then
+        millDetail = millDetail .. string.format("\nestimate: the yield of %s,\nuntil you've salvaged this one", o.mill.estimateFrom)
+    end
     Option(o.mill, (o.mill and o.mill.verb or "Mill") .. " it", millDetail)
     if not node.best then Note(tooltip, "  No price found. Scan the AH with Auctionator.", "loss") end
 
@@ -930,7 +933,38 @@ local function PlanMenu(node, screen)
                 root:CreateRadio(text,
                     function() return o.override == m.method or (o.override == nil and isCheapest) end,
                     function()
-                        screen:Choices(true)[node.itemID] = (not isCheapest) and m.method or nil
+                        local choices = screen:Choices(true)
+                        choices[node.itemID] = (not isCheapest) and m.method or nil
+                        if choices.salvageFrom then choices.salvageFrom[node.itemID] = nil end
+                        screen:ChoicesChanged()
+                    end)
+            end
+        end
+        -- Which item to salvage for it: what you've salvaged, and others in
+        -- your bags the same spell takes (user, 2026-10-22: recycle the
+        -- potions I don't care about)
+        local list = o.millList
+        if list and (#list > 1 or not o.mill) then
+            local verb = (o.mill or list[1]).verb or "Salvage"
+            local sub = root:CreateButton(verb .. " which item")
+            for _, m in ipairs(list) do
+                local tags = { m.noPrice and "no price" or (Money(m.unit) .. " each") }
+                if m.held > 0 then table.insert(tags, "you have " .. m.held) end
+                if m.estimateFrom then table.insert(tags, "estimate") end
+                -- Its quality icon: two Silvermoon Health Potions looked the same
+                local tier, tierCount = addon:GetItemTier(m.herbID)
+                if not tier and C_TradeSkillUI.GetItemCraftedQualityByItemInfo then
+                    local ok, t = pcall(C_TradeSkillUI.GetItemCraftedQualityByItemInfo, m.herbID)
+                    if ok and t and t > 0 then tier, tierCount = t, 2 end
+                end
+                local icon = tier and (" " .. addon:TierIconText(tier, tierCount)) or ""
+                sub:CreateRadio(m.herbName .. icon .. " (" .. table.concat(tags, ", ") .. ")",
+                    function() return o.override == "Mill" and o.mill ~= nil and o.mill.herbID == m.herbID end,
+                    function()
+                        local choices = screen:Choices(true)
+                        choices[node.itemID] = "Mill"
+                        choices.salvageFrom = choices.salvageFrom or {}
+                        choices.salvageFrom[node.itemID] = m.herbID
                         screen:ChoicesChanged()
                     end)
             end
@@ -1361,7 +1395,7 @@ local function MillStepState(node, state)
     local verb = node.best.verb or "Mill"
     local lower = verb:lower()
     local record = GoldsmithDB.milling[herbID]
-    local profession = record and record.profession or "Inscription"
+    local profession = node.best.profession or record and record.profession or "Inscription"
     if not ProfessionOpen({ profession = profession }) then
         table.insert(state.blockers, string.format("Open %s to %s %s first.", profession, lower, herbName))
         return state

@@ -244,42 +244,97 @@ GetOptions = function(itemID, name, depth, memo, visiting)
     -- MIN_SALVAGE_CASTS times: fewer is luck, not a rate (3 gems crushed
     -- into 1 gemdust planned crushing at a loss, 2026-10-09). Records from
     -- before perCast was kept count as no casts: herbs aren't casts.
+    -- Every item you could salvage for it also goes in options.millList,
+    -- for the right-click menu (user, 2026-10-22: recycle the potions in my
+    -- bags for Stabilized Derivate, even if it costs more): ones you've
+    -- salvaged, and ones in your bags the same salvage takes, at the yield
+    -- of what you've salvaged with it (estimateFrom). Only proven ones are
+    -- picked on their own.
+    local millList, listed = {}, {}
+    local function MillOption(herbID, herbName, record, out, verb, estimateFrom)
+        -- What it costs you: today's price, else what you paid or made it
+        -- for; none (a bound potion in the bags) counts as free
+        local herbCost = addon:GetMarketPrice(herbID, true) or addon:GetAverageCost(herbName)
+            or addon:GetOwnCost(herbName, nil, herbID)
+        -- Split the herb's cost across its pigments by AH value
+        local sumValue, sumQty, allPriced, ownValue = 0, 0, true, nil
+        for outID, o in pairs(record.outputs) do
+            sumQty = sumQty + o.qty
+            local p = addon:GetMarketPrice(outID)
+            if p then
+                sumValue = sumValue + p * o.qty
+                if outID == itemID then ownValue = p * o.qty end
+            else
+                allPriced = false
+            end
+        end
+        local share = (allPriced and sumValue > 0) and (ownValue / sumValue) or (out.qty / sumQty)
+        local unit = (herbCost or 0) * record.milled * share / out.qty
+        local option = {
+            -- One you hold gets HELD_CRAFT_MARGIN off when picking: two
+            -- plant parts about the same price swapped back and forth as
+            -- AH searches came in, and Buy next could buy one, then ask
+            -- for the other with the first in the bags (user, 2026-10-19)
+            rank = GetOnHand(herbID) > 0 and unit * (1 - HELD_CRAFT_MARGIN) or unit,
+            -- verb: how it's salvaged ("Prospect" for ore)
+            method = "Mill", unit = unit, verb = verb,
+            herbID = herbID, herbName = herbName,
+            perHerb = out.qty / record.milled,
+            perCast = record.perCast, profession = record.profession,
+            share = share, held = GetOnHand(herbID),
+            noPrice = herbCost == nil or nil, estimateFrom = estimateFrom,
+        }
+        listed[herbID] = true
+        table.insert(millList, option)
+        return option
+    end
     for herbID, record in pairs(GoldsmithDB.milling) do
         local out = record.outputs[itemID]
         local casts = record.perCast and record.milled / math.max(record.perCast, 1) or 0
-        if out and out.qty > 0 and record.milled > 0 and casts >= MIN_SALVAGE_CASTS then
-            local herbCost = addon:GetMarketPrice(herbID, true) or addon:GetAverageCost(record.name)
-            if herbCost then
-                -- Split the herb's cost across its pigments by AH value
-                local sumValue, sumQty, allPriced, ownValue = 0, 0, true, nil
-                for outID, o in pairs(record.outputs) do
-                    sumQty = sumQty + o.qty
-                    local p = addon:GetMarketPrice(outID)
-                    if p then
-                        sumValue = sumValue + p * o.qty
-                        if outID == itemID then ownValue = p * o.qty end
-                    else
-                        allPriced = false
+        if out and out.qty > 0 and record.milled > 0 then
+            local option = MillOption(herbID, record.name, record, out, addon:GetSalvageVerb(herbID))
+            if casts >= MIN_SALVAGE_CASTS and not option.noPrice
+                and (not options.mill or option.rank < options.mill.rank) then
+                options.mill = option
+            end
+        end
+    end
+    -- Others in your bags the same salvage spell takes, at the yield of
+    -- the one you've salvaged most with it
+    local proven = {}
+    for _, option in ipairs(millList) do table.insert(proven, option) end
+    table.sort(proven, function(a, b)
+        return GoldsmithDB.milling[a.herbID].milled > GoldsmithDB.milling[b.herbID].milled
+    end)
+    for _, known in ipairs(proven) do
+        local record = GoldsmithDB.milling[known.herbID]
+        local perCast = math.max(record.perCast or 1, 1)
+        for recipeID in pairs(addon:SalvageRecipesFor(known.herbID)) do
+            for _, inputID in ipairs(addon:SalvageInputs(recipeID)) do
+                -- Salvaged before without giving this: that's real data
+                if not listed[inputID] and not GoldsmithDB.milling[inputID] and GetOnHand(inputID) >= perCast then
+                    local name = C_Item.GetItemNameByID(inputID)
+                    if name then
+                        MillOption(inputID, name, record, record.outputs[itemID], known.verb, known.herbName)
+                    elseif C_Item.RequestLoadItemDataByID then
+                        C_Item.RequestLoadItemDataByID(inputID)
                     end
                 end
-                local share = (allPriced and sumValue > 0) and (ownValue / sumValue) or (out.qty / sumQty)
-                local unit = herbCost * record.milled * share / out.qty
-                -- One you hold gets HELD_CRAFT_MARGIN off when picking: two
-                -- plant parts about the same price swapped back and forth as
-                -- AH searches came in, and Buy next could buy one, then ask
-                -- for the other with the first in the bags (user, 2026-10-19)
-                local rank = GetOnHand(herbID) > 0 and unit * (1 - HELD_CRAFT_MARGIN) or unit
-                if not options.mill or rank < options.mill.rank then
-                    options.mill = {
-                        rank = rank,
-                        -- verb: how it's salvaged ("Prospect" for ore)
-                        method = "Mill", unit = unit, verb = addon:GetSalvageVerb(herbID),
-                        herbID = herbID, herbName = record.name,
-                        perHerb = out.qty / record.milled,
-                        share = share,
-                    }
-                end
             end
+        end
+    end
+    -- Cheapest first (user, 2026-10-22); no price at the bottom
+    table.sort(millList, function(a, b)
+        if (a.noPrice or false) ~= (b.noPrice or false) then return not a.noPrice end
+        return a.unit < b.unit
+    end)
+    options.millList = #millList > 0 and millList or nil
+    -- Your pick of which item to salvage (right-click menu; see WithChoices)
+    local choices = not memo.ignoreOverrides and addon.planChoices
+    local fromID = choices and choices[itemID] == "Mill" and choices.salvageFrom and choices.salvageFrom[itemID]
+    if fromID then
+        for _, option in ipairs(millList) do
+            if option.herbID == fromID then options.mill = option end
         end
     end
 
@@ -290,8 +345,7 @@ GetOptions = function(itemID, name, depth, memo, visiting)
     -- Crafting from what you hold gets HELD_CRAFT_PREFERENCE off
     local craftHeld = options.craft and HoldsMaterials(options.craft.recipe)
     options.craftHeld = craftHeld or nil
-    local millRecord = options.mill and GoldsmithDB.milling[options.mill.herbID]
-    local millHeld = millRecord and GetOnHand(options.mill.herbID) >= math.max(millRecord.perCast or 1, 1)
+    local millHeld = options.mill and GetOnHand(options.mill.herbID) >= math.max(options.mill.perCast or 1, 1)
     options.millHeld = millHeld or nil
     local cheapestUnit
     -- Vendor first, so it wins a tie with the AH
@@ -564,8 +618,7 @@ local function BuildNode(itemID, name, need, depth, ctx, quality, gold)
     if options.millHeld and node.best == options.mill and not options.override
         and node.toGet > 0 and options.other then
         local mill = options.mill
-        local record = GoldsmithDB.milling[mill.herbID]
-        local perCast = record and record.perCast and record.perCast > 1 and record.perCast or 1
+        local perCast = mill.perCast and mill.perCast > 1 and mill.perCast or 1
         local herbs = SalvageCasts(node.toGet, mill.perHerb * perCast) * perCast
         local share = herbs > 0 and math.min(GetOnHand(mill.herbID) / herbs, 1) or 1
         if mill.unit * (1 - (1 - HELD_SALVAGE_SHARE) * share) >= options.otherUnit then
@@ -603,8 +656,7 @@ local function BuildNode(itemID, name, need, depth, ctx, quality, gold)
         -- it (user, 2026-10-05: never shop twice): 23 Cellular Slab sized on
         -- the 3.35 average gave 63 Plant Protein, 2.74 each, 12 short
         -- (2026-10-19). Cost stays on the average (the parent's unit).
-        local record = GoldsmithDB.milling[best.herbID]
-        local perCast = record and record.perCast and record.perCast > 1 and record.perCast or 1
+        local perCast = best.perCast and best.perCast > 1 and best.perCast or 1
         local casts = SalvageCasts(node.toGet, best.perHerb * perCast)
         -- Each mill uses a fixed number of herbs (10 in Midnight), so you
         -- need whole mills' worth
