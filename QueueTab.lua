@@ -20,13 +20,20 @@ local CharName = function(key) return addon.QueueCharName(key) end
 
 local COLUMNS = {
     { key = "item", label = "Item" },
-    { key = "make", label = "Make", width = 56, justify = "RIGHT" },
-    { key = "crafts", label = "Crafts", width = 52, justify = "RIGHT" },
-    { key = "conc", label = "Conc", width = 52, gap = 16 },
-    { key = "cost", label = "Cost", width = 84, justify = "RIGHT" },
-    { key = "profit", label = "Profit", width = 84, justify = "RIGHT" },
-    -- Wide enough for "needs Scribe's Drafting Table" (user, 2026-10-16)
-    { key = "next", label = "Next", width = 230, gap = 24 },
+    -- Kept to what they show, so long names fit (user, 2026-10-23: "Sun-
+    -- Blessed Blacksmith's T..."); the item takes the rest
+    { key = "make", label = "Make", width = 44, justify = "RIGHT" },
+    { key = "crafts", label = "Crafts", width = 48, justify = "RIGHT" },
+    -- Centered between Crafts and the cost's figures (user, 2026-10-23):
+    -- the gap before it makes up for the space at the left of the
+    -- right-aligned costs
+    -- Wide enough for the icon and "1,364" (40 cut it off, 2026-10-23)
+    { key = "conc", label = "Conc", width = 56, gap = 6, justify = "CENTER" },
+    -- Room for "978.66g" and "12,345g" (big amounts drop the silver)
+    { key = "cost", label = "Cost", width = 64, justify = "RIGHT" },
+    { key = "profit", label = "Profit", width = 76, justify = "RIGHT" },
+    -- Wide enough for "Needs Scribe's Drafting Table" (user, 2026-10-16)
+    { key = "next", label = "Next", width = 205, gap = 16 },
 }
 
 local view
