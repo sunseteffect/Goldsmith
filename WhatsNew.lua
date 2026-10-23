@@ -14,13 +14,14 @@ local UI = addon.UI
 -- this is marked seen. /gsm news shows it again.
 local NEWS = {
     {
-        key = "2.6",
-        title = "What's new in Goldsmith 2.6",
+        key = "2.6.3",
+        title = "What's new in Goldsmith 2.6.3",
         items = {
-            { "Buy next", "At the AH, Goldsmith's panel scans every price and buys what your queue needs, one item per click. Queue a few crafts and try it." },
-            { "Vendor materials in one click", "At a vendor, the Goldsmith panel buys the exact amounts your queue needs." },
-            { "Queue from anywhere", "Right-click a craft in Do this next or on the Characters tab to queue it." },
-            { "Choices stay with the plan", "Right-clicking a material to buy, craft or salvage it now applies to that plan and its queue entry only." },
+            { "Recommendations on today's prices", "What to craft is decided on what materials are worth today, not what you paid. Recommended keeps to easy crafts worth your time." },
+            { "What your materials cost you", "Plans, the queue and Craft complete show profit on what you paid. An orange note says when selling the materials would make more." },
+            { "Pick what to salvage", "Right-click a milled, prospected or recycled material in a plan to choose which item to salvage for it, like the potions in your bags." },
+            { "Vendor items on the AH", "When the AH sells a vendor material for less, the plan buys it there." },
+            { "Mailbox totals", "Open your mailbox for one line with your AH sales and the purchases waiting in it." },
         },
     },
 }
