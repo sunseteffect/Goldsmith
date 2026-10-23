@@ -2447,6 +2447,7 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTe
             lot.values[id] = UnitValue(id)
         end
     end
+    if addon.RecordMaterialUse then addon:RecordMaterialUse(lot.used) end
     local stats = recipe.recipeID and addon.char.recipeStats[recipe.recipeID]
     lot.char = addon.charKey
     if stats then lot.mc, lot.res = stats.multicraft, stats.resourcefulness end

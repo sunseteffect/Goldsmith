@@ -170,7 +170,7 @@ TAB_PARTS.queue = function(list)
     Add(list, "Whose queue", "Each character has their own queue. Switch between them here.", view.who)
     Add(list, "Queue", "Crafts lined up to make, added from a plan or by right-clicking a craft.", view.list)
     Add(list, "Shopping list",
-        "With Auctionator, one shopping list for everything in this character's queue (the one picked in Whose queue). Items come off it as you buy them. Or press Buy next in Goldsmith's panel beside the AH, and use the panel beside a vendor for vendor materials.",
+        "With Auctionator, one shopping list for everything in this character's queue (the one picked in Whose queue). Items come off it as you buy them. Or press Buy next in Goldsmith's panel by the AH, and use the panel beside a vendor for vendor materials.",
         view.shop)
     Add(list, "Craft next", "Does the next step of the queue: one click per craft.", view.craft)
 end
@@ -214,7 +214,7 @@ TAB_PARTS.items = function(list)
     Add(list, "Find an item", "Search any item: its page has prices, costs and everything you've done with it.",
         view.searchBox)
     Add(list, "In my bags", "Lists what you hold, on every character.", view.inBags)
-    Add(list, "Cheap materials", "Materials well below their usual price right now.", view.cheap)
+    Add(list, "Cheap materials", "Materials well below their usual price right now, and how many of each your crafts use a week.", view.cheap)
     local boards = view.boards or {}
     if Shown(boards[1]) then
         Add(list, "Leaderboards",

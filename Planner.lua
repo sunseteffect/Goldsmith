@@ -408,6 +408,62 @@ function addon:CraftUnitCost(itemID, name)
     return cached or nil
 end
 
+-- The cheapest way to make an item yourself: crafting it, priced by the
+-- plan its crafter would get (MAKE_SAMPLE of it, without concentration,
+-- nothing from your bags), or salvaging (with SALVAGE_MARGIN on top,
+-- salvaging being work). Returns the unit cost and its verb ("Craft",
+-- "Mill", "Prospect"...), or nil. For Cheap materials: Sienna Ink at
+-- 19.28g was "Buy 65" while its plan crafts it for about 12g, milling the
+-- pigments (user, 2026-10-23). Not GetOptions' craft option: worked out
+-- inside CraftUnitCost's guard, that priced the pigments as bought and the
+-- ink came out dearer than the AH. Kept until data changes.
+local MAKE_SAMPLE = 10
+local makeUnitCache = addon:NewCache()
+
+local function PlanUnitCost(itemID, name)
+    local recipe = FindRecipeForItem(itemID, name)
+    local charKey = recipe and addon:GetCrafter(recipe.recipeID)
+    if not charKey then return nil end
+    local c = GoldsmithDB.characters[charKey]
+    local td = c and c.tierData and c.tierData[recipe.recipeID]
+    local tier
+    for t, out in pairs(td and td.outputs or {}) do
+        if out.itemID == itemID then tier = t end
+    end
+    -- A quality this crafter's data doesn't list: not theirs to make
+    if td and not tier then return nil end
+    local p = { recipe = recipe, charKey = charKey, tier = tier, concentrate = false }
+    local tierInfo = addon:WithCharacter(charKey, addon.FindTierInfo, p)
+    if tier and not tierInfo then return nil end
+    local plan = addon:WithChoices({}, addon.WithCharacter, addon, charKey, addon.BuildPlan, addon,
+        recipe, MAKE_SAMPLE, false, tierInfo, {})
+    if plan and plan.complete and (plan.expectedOutput or 0) > 0 then
+        return plan.cost / plan.expectedOutput
+    end
+end
+
+function addon:MakeUnitCost(itemID, name)
+    if addon.craftUnitBusy or not itemID then return nil end
+    local store = makeUnitCache:Get()
+    local cached = store[itemID]
+    if cached == nil then
+        cached = false
+        local unit = PlanUnitCost(itemID, name)
+        if unit then cached = { unit = unit, way = "Craft" } end
+        store.memo = store.memo or {}
+        addon.craftUnitBusy = true
+        local options = GetOptions(itemID, name, 1, store.memo, {})
+        addon.craftUnitBusy = false
+        local mill = options.mill
+        if mill and mill.unit then
+            local unit = mill.unit * (1 + SALVAGE_MARGIN)
+            if not cached or unit < cached.unit then cached = { unit = unit, way = mill.verb or "Mill" } end
+        end
+        store[itemID] = cached
+    end
+    if cached then return cached.unit, cached.way end
+end
+
 -- Your choices of how to get items ("Buy", "Craft", "Mill", "Vendor" by
 -- itemID; none = the cheapest way) for the plans fn builds. They belong to
 -- one plan, and to its queue entry once queued (entry.choices), and end

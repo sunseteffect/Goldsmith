@@ -75,6 +75,7 @@ function addon:RecordPurchase()
     addon:Notify("money", "Bought %s x%d for %.2fg (%.2fg each%s)",
         p.name, p.quantity, spent / 10000, (spent / p.quantity) / 10000, plannedText)
     addon:ShoppingListBought(p.itemID, p.quantity)
+    if addon.QueueBought then addon:QueueBought(p.itemID, p.quantity) end
 
     if addon.Refresh then
         addon.Refresh()

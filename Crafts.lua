@@ -69,7 +69,12 @@ local CONC_COLUMNS = {
 local TIER_ICON_LIST = 18
 local function ItemText(item, iconSize)
     local tier = item.tier and (addon:TierIconText(item.tier, item.info.tierCount, iconSize) .. " ") or ""
-    if not item.tier and not item.salvage then
+    if item.salvage then
+        -- The quality of what's salvaged: gold and silver Mana Lily were two
+        -- "Mill 10 Mana Lily" rows (user, 2026-10-23)
+        local t, count = addon:GetItemTier(item.salvage.inputID)
+        tier = t and (addon:TierIconText(t, count, iconSize) .. " ") or ""
+    elseif not item.tier then
         -- A refine: the one quality it makes
         local fixed, fixedCount = addon:FixedTier(item.recipe)
         tier = fixed and (addon:TierIconText(fixed, fixedCount, iconSize) .. " ") or ""

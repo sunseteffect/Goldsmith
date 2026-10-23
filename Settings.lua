@@ -706,12 +706,12 @@ local HELP = {
     -- The row's hover: each box's name in gold, then what it does
     ahScanRow = {
         "Auction House scan",
-        "|cffe8c25aOn:|r a panel beside the AH window with Scan the AH and Buy next. Off: no scans.",
+        "|cffe8c25aOn:|r a panel by the AH window with Scan the AH and Buy next. Off: no scans.",
         "|cffe8c25aAuto scan:|r scans when you open the AH and the last scan is over an hour old.",
     },
     ahScan = {
         "On",
-        "A panel beside the AH window with Scan the AH and Buy next.",
+        "A panel by the AH window with Scan the AH and Buy next.",
         "Off: no panel and no scans. Prices come from Auctionator, TSM and Goldsmith Data.",
     },
     autoScan = {
@@ -936,7 +936,7 @@ function addon:CreateSettingsPanel(parent)
     function rows.showMinimap:Update() self.control:SetChecked(addon:Setting("showMinimap")) end
 
     -- Two boxes: the scan at all, and scanning when you open the AH
-    rows.autoScan = Row(panel, "ahScanRow", "Auction House scan", "Goldsmith's own scan and Buy next, in a panel beside the AH.")
+    rows.autoScan = Row(panel, "ahScanRow", "Auction House scan", "Goldsmith's own scan and Buy next, in a panel by the AH.")
     rows.autoScan.on = UI.Checkbox(rows.autoScan, "On", function(checked)
         addon:SetSetting("ahScan", checked)
         if addon.UpdateScanPanel then addon.UpdateScanPanel() end

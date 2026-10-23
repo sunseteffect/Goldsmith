@@ -109,6 +109,21 @@ local function SalvageTooltip(tooltip, item)
     addon:ClickHint(tooltip, "Click to open its plan (change how many there). Right-click to move or remove it.")
 end
 
+-- A stock-up's hover: what's left to buy and what it costs now
+local function StockTooltip(tooltip, item)
+    local made = item.entry.made or 0
+    tooltip:AddLine(ItemText(item), 1, 1, 1)
+    tooltip:AddDoubleLine("To buy", made > 0 and string.format("%d more (%d of %d bought)", item.remaining, made,
+        item.entry.quantity) or tostring(item.remaining), 0.8, 0.8, 0.8, 1, 1, 1)
+    local plan = item.plan
+    if plan and plan.complete then
+        tooltip:AddDoubleLine("About", Money(plan.cost), 0.8, 0.8, 0.8, 1, 1, 1)
+    end
+    addon:Explain(tooltip, "Stocking up on a cheap material (from Items > Cheap materials). Buy next buys it on top of what your crafts need; it leaves the queue once that many are bought. It isn't in the queue's cost or profit: it's for crafts later.")
+    tooltip:AddLine(" ")
+    addon:ClickHint(tooltip, "Click to open its page. Right-click to move or remove it.")
+end
+
 local function FillRow(row, item)
     local c = row.cells
     c.item:SetText(ItemText(item))
@@ -119,7 +134,14 @@ local function FillRow(row, item)
     c.conc:SetText(full and ConcText(full) or "")
     -- Orange past what the character has (Refresh)
     c.conc:SetTextColor(addon:Color(item.concShort and "warning" or "conc"))
-    if plan then
+    if plan and plan.stock then
+        -- No crafts or profit: it's shopping
+        c.crafts:SetText("-")
+        c.cost:SetText(plan.complete and Money(plan.cost) or "-")
+        c.cost:SetTextColor(addon:Color("muted"))
+        c.profit:SetText("-")
+        c.profit:SetTextColor(addon:Color("dim"))
+    elseif plan then
         c.crafts:SetText(tostring(plan.crafts))
         c.cost:SetText(Money(plan.cost) .. (plan.complete and "" or "+"))
         if plan.profit then
@@ -144,6 +166,7 @@ local function FillRow(row, item)
 end
 
 local function RowTooltip(tooltip, item)
+    if item.entry.stockID then return StockTooltip(tooltip, item) end
     if item.entry.salvageID then return SalvageTooltip(tooltip, item) end
     tooltip:AddLine(ItemText(item), 1, 1, 1)
     addon:AddItemDescription(tooltip, item.recipe and item.recipe.outputItemID)
@@ -213,6 +236,11 @@ local function RowMenu(item)
     local key = view.q.charKey
     MenuUtil.CreateContextMenu(UIParent, function(_, root)
         root:CreateTitle(item.recipe and item.recipe.outputName or "Queued craft")
+        if item.entry.stockID then
+            root:CreateButton("Change how many", function()
+                addon:AskStockUp(key, item.entry.stockID, item.stockName, item.entry.quantity)
+            end)
+        end
         root:CreateButton("Move up", function() addon:MoveQueueEntry(key, item.entry, -1) end)
         root:CreateButton("Move down", function() addon:MoveQueueEntry(key, item.entry, 1) end)
         root:CreateButton("Remove", function() addon:RemoveQueueEntry(key, item.entry) end)
@@ -262,6 +290,8 @@ local function Create(parent)
         onClick = function(item, button)
             if button == "RightButton" then
                 if MenuUtil and MenuUtil.CreateContextMenu then RowMenu(item) end
+            elseif item.entry.stockID then
+                addon:OpenItem(item.stockName, item.entry.stockID)
             elseif item.entry.salvageID then
                 addon:OpenSalvagePlan(item.entry.salvageID, view.q.charKey, item.remaining, "queue")
             elseif item.recipe then
@@ -467,7 +497,14 @@ local function Refresh(v)
     v.list:SetItems(q.rows)
 
     local empty = #q.rows == 0
-    v.cost.value:SetText(empty and "-" or (Money(q.cost) .. (q.complete and "" or "+")))
+    -- Only stock-ups: they're shopping, not in the cost or profit, so
+    -- "0.00g" read as broken
+    local crafts = false
+    for _, row in ipairs(q.rows) do
+        if not row.entry.stockID then crafts = true break end
+    end
+    local noTotals = empty or not crafts
+    v.cost.value:SetText(noTotals and "-" or (Money(q.cost) .. (q.complete and "" or "+")))
     local parts, short = {}, false
     for _, prof in ipairs(order) do
         local over = have[prof] and byProf[prof] > have[prof]
@@ -477,9 +514,9 @@ local function Refresh(v)
     end
     v.cost.note:SetText(#parts > 0 and ("needs " .. table.concat(parts, " + ") .. " concentration") or "")
     v.cost.note:SetTextColor(addon:Color(short and "warning" or "muted"))
-    v.sells.value:SetText(empty and "-" or Money(q.revenue))
-    v.profit.value:SetText(empty and "-" or Signed(q.profit))
-    v.profit.value:SetTextColor(addon:Color(empty and "dim" or addon:MoneyColor(q.profit)))
+    v.sells.value:SetText(noTotals and "-" or Money(q.revenue))
+    v.profit.value:SetText(noTotals and "-" or Signed(q.profit))
+    v.profit.value:SetTextColor(addon:Color(noTotals and "dim" or addon:MoneyColor(q.profit)))
 
     if empty then
         v.spendLine:SetText("")

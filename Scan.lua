@@ -42,6 +42,7 @@ local PANEL_WIDTH = 280
 local run       -- the scan in progress: { phase, method, started, ... }
 local ahOpen = false
 local panel
+local flipFrame   -- the flips list under the panel (below)
 local UpdatePanel -- below
 
 -- Gear only on retail: one item ID there covers every item level and
@@ -371,13 +372,31 @@ local function When(ts)
     return string.format("%d day%s ago", days, days == 1 and "" or "s")
 end
 
+-- Where you dragged it, else under the AH window, left edges lined up,
+-- below its tabs; beside it (top right) only when that doesn't fit below,
+-- with the flips list too (user, 2026-10-23: "I don't like it on the
+-- right"). Placed again as it grows (UpdatePanel).
+local TAB_DROP = 34
 local function PlacePanel()
     panel:ClearAllPoints()
+    local ah = AuctionHouseFrame
     local pos = GoldsmithDB.ui2.scanPanel
     if pos then
-        panel:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPLEFT", pos.x, pos.y)
+        panel:SetPoint("TOPLEFT", ah, "TOPLEFT", pos.x, pos.y)
+        return
+    end
+    local drop = TAB_DROP
+    local tab = _G.AuctionHouseFrameBuyTab
+    if tab and tab:GetBottom() and ah:GetBottom() then
+        drop = math.max(ah:GetBottom() - tab:GetBottom() + 4, 4)
+    end
+    -- The panel is the AH's child, so both measure in the same scale
+    local need = panel:GetHeight() + (flipFrame and flipFrame:IsShown() and (flipFrame:GetHeight() + 4) or 0)
+    local room = (ah:GetBottom() or 0) - drop
+    if need <= room then
+        panel:SetPoint("TOPLEFT", ah, "BOTTOMLEFT", 0, -drop)
     else
-        panel:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPRIGHT", 4, 0)
+        panel:SetPoint("TOPLEFT", ah, "TOPRIGHT", 4, 0)
     end
 end
 
@@ -403,6 +422,12 @@ local function CreatePanel()
     -- its buttons, then its border and close button, showed through)
     UI.RaiseAbove(panel, AuctionHouseFrame)
     panel:SetSize(PANEL_WIDTH, 104)
+    -- Once: a spot dragged to before the panel moved under the AH is
+    -- forgotten, so the new place shows (user, 2026-10-23)
+    if not GoldsmithDB.ui2.scanPanelUnder then
+        GoldsmithDB.ui2.scanPanel = nil
+        GoldsmithDB.ui2.scanPanelUnder = true
+    end
     UI.Style(panel, "panel", "borderGold")
     panel:EnableMouse(true)
     panel:SetMovable(true)
@@ -419,7 +444,7 @@ local function CreatePanel()
         if button == "RightButton" and MenuUtil and MenuUtil.CreateContextMenu then
             MenuUtil.CreateContextMenu(panel, function(_, root)
                 root:CreateTitle("Goldsmith")
-                root:CreateButton("Put it back beside the AH", function()
+                root:CreateButton("Put it back by the AH", function()
                     GoldsmithDB.ui2.scanPanel = nil
                     PlacePanel()
                 end)
@@ -489,6 +514,8 @@ UpdatePanel = function()
     panel.button:SetEnabled(run == nil)
     panel.button:SetAlpha(run == nil and 1 or 0.7)
     panel:SetHeight(104 + (addon.UpdateShopSection and addon.UpdateShopSection() or 0))
+    -- Taller with Buy next's list: below the AH may no longer fit
+    if not GoldsmithDB.ui2.scanPanel then PlacePanel() end
     panel:Show()
 end
 addon.UpdateScanPanel = function() UpdatePanel() end
@@ -502,7 +529,6 @@ addon.UpdateScanPanel = function() UpdatePanel() end
 
 local FLIP_ROWS = 8
 local FLIP_ROW_HEIGHT = 18
-local flipFrame
 local flipList = {}
 local flipMethod
 
@@ -590,6 +616,7 @@ local function ShowFlips()
     end
     flipFrame:SetHeight(50 + shown * FLIP_ROW_HEIGHT)
     flipFrame:Show()
+    if not GoldsmithDB.ui2.scanPanel then PlacePanel() end
 end
 
 local function RankFlips(listings)

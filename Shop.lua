@@ -61,7 +61,9 @@ end
 local function Gap()
     if not quote then return end
     local extra = quote.total - (quote.planCost or quote.total)
-    local profitThen = q and q.complete and q.profit and (q.profit - extra) or nil
+    -- A stock-up isn't in the queue's profit, so its price doesn't change it
+    local stock = q and q.stockOnly and q.stockOnly[quote.itemID]
+    local profitThen = not stock and q and q.complete and q.profit and (q.profit - extra) or nil
     return extra, extra > 0, profitThen
 end
 
@@ -77,7 +79,9 @@ local function BuyWithoutAsking(qt, total)
     if extra <= 0 then return true end
     local share = (addon:Setting("buyOver") or 0) / 100
     if share <= 0 then return false end
-    local profit = q and q.complete and q.profit
+    -- A stock-up: only its own cost counts (it isn't in the queue's profit)
+    local stock = q and q.stockOnly and q.stockOnly[qt.itemID]
+    local profit = not stock and q and q.complete and q.profit or nil
     if profit and profit - extra < 0 then return false end
     return extra <= qt.planCost * share or (profit and profit > 0 and extra <= profit * share) or false
 end
@@ -466,7 +470,10 @@ function addon.UpdateShopSection()
         last.text:SetTextColor(addon:Color("muted"))
         last.status:SetText("")
     end
-    local y = 22 + shown * LINE_HEIGHT
+    -- From the top: the button (and its key), the note, then the list.
+    -- The button used to be under the list and moved up each time an item
+    -- was bought (user, 2026-10-23: "so that it doesn't move on you")
+    local y = 22
 
     -- The note: nothing to buy, the price against the plan, or what's next
     local note, color = nil, "muted"
@@ -502,18 +509,6 @@ function addon.UpdateShopSection()
         for _, e in ipairs(vendorList) do table.insert(names, string.format("%dx %s", e.quantity, e.name)) end
         note = (note and (note .. " ") or "") .. "From a vendor: " .. table.concat(names, ", ") .. "."
     end
-    if note then
-        section.note:ClearAllPoints()
-        section.note:SetPoint("TOPLEFT", 10, -(y + 4))
-        section.note:SetPoint("RIGHT", -10, 0)
-        section.note:SetText(note)
-        section.note:SetTextColor(addon:Color(color))
-        section.note:Show()
-        y = y + 8 + section.note:GetStringHeight()
-    else
-        section.note:Hide()
-    end
-
     -- The button: ask for a price, confirm it, or why it can't
     local label, enabled = "Buy next", nextEntry ~= nil
     if buying then
@@ -532,21 +527,42 @@ function addon.UpdateShopSection()
     local warn = quote and select(2, Gap())
     section.button.label:SetTextColor(addon:Color(warn and "warning" or "gold"))
     section.button:ClearAllPoints()
-    section.button:SetPoint("TOPLEFT", 10, -(y + 6))
-    y = y + 6 + 28
     if nextEntry then
+        section.button:SetPoint("TOPLEFT", 10, -(y + 4))
+        y = y + 4 + 28
         section.hint:SetText(KeyText() and ("or press " .. KeyText()) or "set a key in Keybindings > Goldsmith")
         section.hint:ClearAllPoints()
         section.hint:SetPoint("TOPLEFT", 10, -(y + 4))
         section.hint:SetPoint("RIGHT", -10, 0)
         section.hint:Show()
         y = y + 4 + 14
+        section.button:Show()
     else
         section.button:Hide()
         section.hint:Hide()
-        y = y - 34
     end
-    if nextEntry then section.button:Show() end
+
+    if note then
+        section.note:ClearAllPoints()
+        section.note:SetPoint("TOPLEFT", 10, -(y + 4))
+        section.note:SetPoint("RIGHT", -10, 0)
+        section.note:SetText(note)
+        section.note:SetTextColor(addon:Color(color))
+        section.note:Show()
+        y = y + 8 + section.note:GetStringHeight()
+    else
+        section.note:Hide()
+    end
+
+    -- The list, under all of that
+    if shown > 0 then y = y + 6 end
+    for i = 1, shown do
+        local line = section.lines[i]
+        line:ClearAllPoints()
+        line:SetPoint("TOPLEFT", 10, -(y + (i - 1) * LINE_HEIGHT))
+        line:SetPoint("RIGHT", section, "RIGHT", -10, 0)
+    end
+    y = y + shown * LINE_HEIGHT
     section:SetHeight(y + 10)
     section:Show()
     return y + 10

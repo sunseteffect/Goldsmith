@@ -305,15 +305,28 @@ local STOCK_COLUMNS = {
 -- the Overview's "Cheap materials today"
 local CHEAP_COLUMNS = {
     { key = "item", label = "Item" },
-    { key = "discount", label = "Vs usual", width = 70, justify = "RIGHT" },
-    { key = "price", label = "Price now", width = 90, justify = "RIGHT" },
-    { key = "usual", label = "Usually", width = 90, justify = "RIGHT" },
-    { key = "have", label = "You have", width = 70, justify = "RIGHT" },
-    { key = "usedIn", label = "Used in", width = 150, gap = 24 },
+    -- Narrow enough to leave the name room: with the trend and buy columns
+    -- "Void-Temp..." showed twice (user, 2026-10-23)
+    { key = "discount", label = "Vs usual", width = 64, justify = "RIGHT" },
+    { key = "price", label = "Price now", width = 72, justify = "RIGHT" },
+    { key = "usual", label = "Usually", width = 72, justify = "RIGHT" },
+    { key = "have", label = "You have", width = 60, justify = "RIGHT" },
+    { key = "use", label = "You use", width = 60, justify = "RIGHT" },
+    -- Its last 30 days as a small line, to tell a dip from a slide at a
+    -- glance (user, 2026-10-23)
+    { key = "trend", label = "Trend", width = 64, gap = 10, make = function(row) return UI.Sparkline(row) end },
+    { key = "buy", label = "Buy", width = 44, justify = "RIGHT" },
+    { key = "usedIn", label = "Used in", width = 112, gap = 16 },
 }
 
--- Cheap materials, each with what you hold (every character) and the
--- recipes it goes into
+local TREND_WORDS = { falling = "Falling", rising = "Rising", steady = "Steady" }
+local TREND_COLORS = { falling = "warning", rising = "profit", steady = "line" }
+local TREND_DAYS = 30
+
+local SOLID_SALVAGE = 200
+
+-- Cheap materials you could use, each with what you hold (every
+-- character), what you use and buy, and the recipes it goes into
 local function GetCheapMaterials(prof)
     local threshold = -addon:Setting("dealPercent") / 100
     local items = {}
@@ -323,25 +336,62 @@ local function GetCheapMaterials(prof)
             -- A copy: GetDeals' list is cached and shared
             local d = {}
             for k, v in pairs(deal) do d[k] = v end
-            d.have = addon:GetHeld(d.itemID)
+            -- The saved count of every character's bags, or the live one
+            -- for this character if it's more: the saved one catches up a
+            -- moment after the bags change, so items just taken from the
+            -- mail were in neither and Buy asked for them again (user,
+            -- 2026-10-23)
+            d.have = math.max(addon:GetHeld(d.itemID), C_Item.GetItemCount(d.itemID, true, false, true, true) or 0)
+            d.bought, d.boughtDays, d.boughtPerWeek = addon:GetRecentBuys(d.itemID, d.name)
+            d.mail = addon.InMailCount and addon:InMailCount(d.itemID) or 0
+            d.used, d.usedDays, d.perWeek = addon:GetRecentUse(d.itemID)
             d.recipes = addon:GetRecipesUsing(d.itemID)
             d.profitable = 0
             for _, r in ipairs(d.recipes) do
                 if r.profit and r.profit > 0 then d.profitable = d.profitable + 1 end
             end
             d.milled = GoldsmithDB.milling[d.itemID] ~= nil
-            table.insert(items, d)
+            d.milledBy = d.milled and GoldsmithDB.milling[d.itemID].profession
+            d.series = {}
+            for _, p in ipairs(addon:GetPriceSeries(d.itemID, TREND_DAYS)) do table.insert(d.series, p.value) end
+            d.makeUnit, d.makeWay = addon:MakeUnitCost(d.itemID, d.name)
+            d.buy, d.buyWeeks, d.buyRate = addon:StockUpAmount(d)
+            if not d.buy then d.buyWhy = d.buyWeeks end
+            -- What buying it all costs: the listings walked with a fresh
+            -- search, else today's price for each (user, 2026-10-23)
+            if d.buy then
+                local live = addon:GetLiveBuyCost(d.itemID, d.buy)
+                d.buyCost = (live or d.now) * d.buy
+            end
+            -- Only what's yours to use: a recipe one of your characters
+            -- makes, something you salvage for real (SOLID_SALVAGE+ of it,
+            -- as Milling.lua trusts yields from), or that you've used or
+            -- bought. Smuggler's Enchanted Edge was listed for a
+            -- Leatherworking recipe none of them knows, Felberry Figs for
+            -- 10 salvaged once as a test (user, 2026-10-23)
+            local salvaged = d.milled and (GoldsmithDB.milling[d.itemID].milled or 0) >= SOLID_SALVAGE
+            -- Nor what you'd make for less than even today's price: no deal
+            -- for you (Sienna Ink, about 12g to make against 19.28g; user,
+            -- 2026-10-23)
+            local makeCheaper = d.makeUnit and d.makeUnit < d.now
+            if not makeCheaper and (#d.recipes > 0 or salvaged or d.used > 0 or d.bought > 0) then
+                table.insert(items, d)
+            end
         end
     end
     return items
 end
+
+local SALVAGE_WORDS = { Inscription = "Milling", Jewelcrafting = "Prospecting" }
 
 local function UsedInText(item)
     if #item.recipes > 0 then
         return string.format("%d profitable of %d", item.profitable, #item.recipes),
             item.profitable > 0 and "profit" or "muted"
     end
-    if item.milled then return "Milling", "muted" end
+    -- Herbs mill and ore prospects; fish and the like salvage (Felberry
+    -- Figs read "Milling", user 2026-10-23)
+    if item.milled then return SALVAGE_WORDS[item.milledBy] or "Salvage", "muted" end
     return "-", "dim"
 end
 
@@ -353,8 +403,21 @@ local function FillCheapRow(row, item)
     c.price:SetText(Money(item.now))
     c.usual:SetText(Money(item.usual))
     c.usual:SetTextColor(addon:Color("muted"))
-    c.have:SetText(item.have > 0 and tostring(item.have) or "-")
-    c.have:SetTextColor(addon:Color(item.have > 0 and "text" or "dim"))
+    -- Bought and still in the mailbox counts (user, 2026-10-23: "they are
+    -- in the mail still"); the hover says how much is there
+    local held = item.have + item.mail
+    c.have:SetText(held > 0 and tostring(held) or "-")
+    c.have:SetTextColor(addon:Color(held > 0 and "text" or "dim"))
+    -- What you bought when no use is recorded yet (the tally started
+    -- 2026-10-23 with only a few days of crafts), dimmer
+    -- Use only: what you bought isn't what you go through (stock-ups
+    -- would count)
+    local rate, rateColor = addon:FormatBuyRate(item.perWeek)
+    c.use:SetText(rate)
+    c.use:SetTextColor(addon:Color(rateColor))
+    c.trend:SetValues(item.series, TREND_COLORS[item.trend] or "muted")
+    c.buy:SetText(item.buy and tostring(item.buy) or "-")
+    c.buy:SetTextColor(addon:Color(item.buy and "gold" or "dim"))
     local text, color = UsedInText(item)
     c.usedIn:SetText(text)
     c.usedIn:SetTextColor(addon:Color(color))
@@ -365,19 +428,77 @@ local CHEAP_RECIPES_SHOWN = 8
 local function CheapTooltip(tooltip, item)
     tooltip:AddLine(ItemText(item.name, item.itemID), 1, 1, 1)
     addon:AddItemDescription(tooltip, item.itemID)
-    tooltip:AddDoubleLine("Price now", Money(item.now), 0.8, 0.8, 0.8, 0.37, 0.81, 0.48)
+    -- Where the price is from and how old: a TSM price hours old read 1.00g
+    -- for Void-Tempered Leather, and a search minutes later found 1.36g
+    -- (user, 2026-10-23). Orange when it's old enough to doubt.
+    local _, source, age = addon:GetAHPriceInfo(item.itemID, true)
+    local old = source and addon:IsPriceOld(source, age)
+    tooltip:AddDoubleLine("Price now", string.format("%s (%s)", Money(item.now), addon:AHPriceAgeText(item.itemID, true)),
+        0.8, 0.8, 0.8, addon:Color(old and "warning" or "profit"))
+    -- TSM's age isn't known: when your own scan saw something else, show
+    -- both, so a stale number is plain to see
+    local scanned = source ~= "Scan" and addon:GetScanPrice(item.itemID)
+    local differs = scanned and item.now > 0 and math.abs(scanned - item.now) / item.now > 0.05
+    if differs then
+        local t = addon:GetOwnScanTime()
+        tooltip:AddDoubleLine("Your Goldsmith scan", string.format("%s (%s)", Money(scanned),
+            t and (date("%Y-%m-%d", t) == date("%Y-%m-%d") and date("%H:%M", t) or addon:FormatAge(math.max(1, math.floor((time() - t) / 86400)))) or "?"),
+            0.8, 0.8, 0.8, addon:Color("warning"))
+    end
+    if old or differs then
+        tooltip:AddLine("The prices may be out of date: scan or search the AH before buying.", addon:Color("warning"))
+    end
     -- Goldsmith Data's usual price (under 5 days of your own) has no days or
     -- range (Theme.lua error on a fresh install, user 2026-10-15)
     if item.regional then
         tooltip:AddDoubleLine("Usually", string.format("%s (region, last 7 days)", Money(item.usual)),
             0.8, 0.8, 0.8, 1, 1, 1)
     else
-        tooltip:AddDoubleLine("Usually", string.format("%s (median of %d days)", Money(item.usual), item.days),
+        tooltip:AddDoubleLine("Usually", string.format("%s (%s)", Money(item.usual),
+            item.recent and string.format("last %d days", item.shortDays) or string.format("last %d days", item.days)),
             0.8, 0.8, 0.8, 1, 1, 1)
-        tooltip:AddDoubleLine("Range", string.format("%s - %s", Money(item.low), Money(item.high)),
+        addon:Explain(tooltip, item.recent
+            and "The middle of its daily prices over the last week, not counting today. Vs usual is today's price against it."
+            or "The middle of its daily prices over the last 30 days, until a week has 3 days of prices.")
+        if item.trend then
+            local r, g, b = addon:Color(TREND_COLORS[item.trend])
+            tooltip:AddDoubleLine("Trend", string.format("%s (%s a month back, %+.0f%%)", TREND_WORDS[item.trend],
+                Money(item.longUsual), item.move * 100), 0.8, 0.8, 0.8, r, g, b)
+            addon:Explain(tooltip, "The last week's middle price against the last 30 days'. Falling: it's sliding, not dipping, so next week is likely cheaper; Goldsmith only tops you up to a week of it. Rising: stocking up now beats buying later.")
+        end
+        tooltip:AddDoubleLine("Range", string.format("%s - %s (30 days)", Money(item.low), Money(item.high)),
             0.8, 0.8, 0.8, 1, 1, 1)
     end
-    tooltip:AddDoubleLine("You have", tostring(item.have), 0.8, 0.8, 0.8, 1, 1, 1)
+    tooltip:AddDoubleLine("You have", item.mail > 0 and string.format("%d (%d in the mailbox)", item.have + item.mail, item.mail)
+        or tostring(item.have), 0.8, 0.8, 0.8, 1, 1, 1)
+    -- What making it costs, when you can (crafting or salvaging)
+    if item.makeUnit then
+        local cheaper = item.makeUnit < item.now
+        tooltip:AddDoubleLine("To " .. (item.makeWay or "make"):lower(), string.format("%s each%s", Money(item.makeUnit),
+            cheaper and ", cheaper than buying" or ""), 0.8, 0.8, 0.8, addon:Color(cheaper and "profit" or "text"))
+    end
+    -- Used: by your crafts and salvages, however you got it
+    local function Recent(label, qty, days, perWeek)
+        if qty > 0 then
+            tooltip:AddDoubleLine(label, string.format("%d in the last %d days (%s)", qty, days,
+                (addon:FormatBuyRate(perWeek))), 0.8, 0.8, 0.8, 1, 1, 1)
+        else
+            tooltip:AddDoubleLine(label, string.format("none in the last %d days", days), 0.8, 0.8, 0.8, 0.6, 0.6, 0.6)
+        end
+    end
+    Recent("You used", item.used, item.usedDays, item.perWeek)
+    local since = GoldsmithDB.materialUse and GoldsmithDB.materialUse.since
+    addon:Explain(tooltip, string.format("Used up by your crafts and salvages, however you got it (bought or made). Counted since %s.",
+        since and date("%b %d", since) or "today"))
+    Recent("You bought", item.bought, item.boughtDays, item.boughtPerWeek)
+    if item.buy then
+        tooltip:AddDoubleLine("Buy", string.format("%d for about %s (%d week%s of use)", item.buy, Money(item.buyCost),
+            item.buyWeeks, item.buyWeeks == 1 and "" or "s"), 0.8, 0.8, 0.8, addon:Color("gold"))
+        addon:Explain(tooltip, string.format("%s for %d week%s, less what you have and what's in the mailbox. More weeks the deeper the discount (2, 3 at 35%% off, 4 at 50%%); 1 while it's falling.",
+            addon:FormatBuyRate(item.buyRate), item.buyWeeks, item.buyWeeks == 1 and "" or "s"))
+    elseif item.buyWhy then
+        tooltip:AddDoubleLine("Buy", "none: " .. item.buyWhy, 0.8, 0.8, 0.8, 0.6, 0.6, 0.6)
+    end
     if #item.recipes > 0 then
         tooltip:AddLine(" ")
         tooltip:AddLine("Used in crafts that sell (profit each, no concentration; sold per day, sale rate)", 1, 0.82, 0, true)
@@ -400,10 +521,28 @@ local function CheapTooltip(tooltip, item)
             tooltip:AddLine(string.format("and %d more", #item.recipes - CHEAP_RECIPES_SHOWN), 0.6, 0.6, 0.6)
         end
     elseif item.milled then
-        addon:Explain(tooltip, "A herb you mill into pigments.", 0.6, 0.6, 0.6, true)
+        addon:Explain(tooltip, "Something you salvage (mill, prospect, and so on) for what comes out.", 0.6, 0.6, 0.6, true)
     end
     addon:ClickHint(tooltip, "Click to open its page: price history and more.")
+    addon:RightClickHint(tooltip, "Right-click to stock up: Buy next buys it at the AH.")
     addon:ShiftClickHint(tooltip, "Shift-click to search the AH for it (or link it in chat)")
+end
+
+-- Right-click on a cheap material: queue a stock-up for Buy next
+local function CheapMenu(item)
+    if not (MenuUtil and MenuUtil.CreateContextMenu) then return end
+    local name = item.name
+    MenuUtil.CreateContextMenu(UIParent, function(_, root)
+        root:CreateTitle(name)
+        if item.buy then
+            root:CreateButton(string.format("Stock up: buy %d (about %s)", item.buy, Money(item.buyCost)), function()
+                addon:AddStockToQueue(addon.charKey, item.itemID, item.buy, name)
+            end)
+        end
+        root:CreateButton("Stock up: how many...", function()
+            addon:AskStockUp(addon.charKey, item.itemID, name, item.buy or math.max(math.ceil(item.buyRate or 1), 1))
+        end)
+    end)
 end
 
 -- Sold per day and sale rate for list rows, looked up once per refresh
@@ -455,7 +594,10 @@ local SORTS = {
         discount = { firstDescending = false, value = function(i) return i.diff end },
         price    = { firstDescending = true,  value = function(i) return i.now end },
         usual    = { firstDescending = true,  value = function(i) return i.usual end },
-        have     = { firstDescending = true,  value = function(i) return i.have > 0 and i.have or nil end },
+        have     = { firstDescending = true,  value = function(i) return (i.have + (i.mail or 0)) > 0 and (i.have + (i.mail or 0)) or nil end },
+        use      = { firstDescending = true,  value = function(i) return i.perWeek > 0 and i.perWeek or nil end },
+        buy      = { firstDescending = true,  value = function(i) return i.buy end },
+        trend    = { firstDescending = false, value = function(i) return i.move end },
         usedIn   = { firstDescending = true,  value = function(i) return #i.recipes > 0 and i.profitable or nil end },
     },
 }
@@ -805,7 +947,7 @@ local function CreatePage(parent)
                 addon:Explain(tooltip, string.format("Goldsmith Data's price for your region over the last 7 days, until you have %d days of your own (%d so far).",
                     5, d.historyDays or 0), 0.6, 0.6, 0.6, true)
             else
-                addon:Explain(tooltip, "The middle of the prices saved each day the AH is scanned, not counting today.", 0.6, 0.6, 0.6, true)
+                addon:Explain(tooltip, "The middle of the daily prices over the last week, not counting today (the last 30 days until a week has 3). Each day's price is the middle of that day's scans.", 0.6, 0.6, 0.6, true)
             end
             if insight and not insight.regional then
                 tooltip:AddDoubleLine("Lowest", Money(insight.low), 0.8, 0.8, 0.8, 1, 1, 1)
@@ -1081,7 +1223,7 @@ local function Create(parent)
     view.cheap:SetPoint("LEFT", view.inBags, "RIGHT", 16, 0)
     UI.SetTooltip(view.cheap, function(tooltip)
         tooltip:AddLine("Cheap materials", 1, 1, 1)
-        addon:Explain(tooltip, string.format("Materials %d%% or more below their usual price (Settings > Cheap materials), what you have, and the crafts they go into.",
+        addon:Explain(tooltip, string.format("Materials %d%% or more below their usual price (Settings > Cheap materials), what you have, how many your crafts use a week, its last 30 days as a line, how many to stock up on (right-click to queue it for Buy next) and the crafts they go into.",
             addon:Setting("dealPercent")), 0.6, 0.6, 0.6, true)
     end)
     view.note = UI.Text(landing, "label", "dim", "RIGHT")
@@ -1118,7 +1260,11 @@ local function Create(parent)
             end
         end,
         -- Shift-click searches the AH for it, as on the item's page
-        onClick = function(item)
+        onClick = function(item, button)
+            if button == "RightButton" then
+                if view.listMode == "cheap" then CheapMenu(item) end
+                return
+            end
             if IsShiftKeyDown() and addon:ShiftClickItem(item.itemID, item.name) then return end
             addon:OpenItem(item.name, item.itemID)
         end,
@@ -1209,7 +1355,7 @@ local function Refresh(v, state)
         v.list:SetEmptyText(search ~= "" and "No cheap material matches."
             or string.format("No materials are %d%% or more below their usual price right now.", addon:Setting("dealPercent")))
         v.list:SetColumnsAndItems(CHEAP_COLUMNS, items)
-        v.footer:SetText(string.format("%s %d%%+ below usual. Usual = median price over the saved days (AH scans).",
+        v.footer:SetText(string.format("%s %d%%+ below usual. Usual = median price over the last 7 days.",
             Plural(#items, "material"), addon:Setting("dealPercent")))
         v.note:SetText(state.profession ~= "All" and ("Only " .. state.profession) or "")
     elseif inBags then
@@ -1284,11 +1430,13 @@ local function Legend(v)
             { "shift", "an item in your bags: look it up here" },
         }
     elseif v.showingList then
-        return {
+        local legend = {
             { "click", "an item: its page" },
             { "click", "a column: sort" },
             { "hover", ": details" },
         }
+        if v.listMode == "cheap" then table.insert(legend, 2, { "right", "a material: stock up" }) end
+        return legend
     end
     return {
         { "click", "an item: its page" },

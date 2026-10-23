@@ -76,7 +76,45 @@ end
 -- chart, usual prices and Cheap materials. Each day's first login also
 -- saves the AH price Goldsmith shows (RecordDailyHistory), so all of that
 -- works without Auctionator too.
+-- A day's price is the middle of that day's scans (Goldsmith's and
+-- Auctionator's), not the last one: prices drift through the day, so the
+-- last scan said more about when you played than about the day (user,
+-- 2026-10-23: "how do we evaluate the single snapshot of the day?"). The
+-- scans so far today are kept in GoldsmithDB.priceReadings = { day,
+-- items = { [itemID] = { prices } } }, the last MAX_READINGS each; a new
+-- day starts it over. The login price (often TSM's, an average of its own)
+-- only stands in until today's first scan.
 local HISTORY_DAYS = 60
+local MAX_READINGS = 8
+
+local function Median(list)
+    if #list == 0 then return nil end
+    local sorted = {}
+    for i, v in ipairs(list) do sorted[i] = v end
+    table.sort(sorted)
+    local mid = math.floor(#sorted / 2)
+    return (#sorted % 2 == 1) and sorted[mid + 1] or (sorted[mid] + sorted[mid + 1]) / 2
+end
+addon.Median = Median
+
+local function TodaysReadings(today)
+    local r = GoldsmithDB.priceReadings
+    if not r or r.day ~= today then
+        r = { day = today, items = {} }
+        GoldsmithDB.priceReadings = r
+    end
+    return r.items
+end
+
+local function AddReading(history, itemID, today, price)
+    local items = TodaysReadings(today)
+    local list = items[itemID] or {}
+    items[itemID] = list
+    table.insert(list, price)
+    if #list > MAX_READINGS then table.remove(list, 1) end
+    history[itemID] = history[itemID] or {}
+    history[itemID][today] = Median(list)
+end
 
 -- Every material and crafted item Goldsmith knows: { [itemID] = name or true }
 local function HistoryItems()
@@ -126,7 +164,8 @@ function addon:RecordDailyHistory()
     local added = 0
     for itemID in pairs(HistoryItems()) do
         if type(itemID) == "number" and not (history[itemID] and history[itemID][day]) then
-            local price = addon:GetAHPrice(itemID)
+            -- The listed price, as scans save (not capped for selling)
+            local price = addon:GetAHPrice(itemID, true)
             if price and price > 0 then
                 history[itemID] = history[itemID] or {}
                 history[itemID][day] = price
@@ -155,12 +194,14 @@ function addon:RecordPriceHistory(isFullScan)
         -- Only prices Auctionator saw today, so old prices aren't saved as new
         local price = addon:GetAuctionatorPrice(itemID)
         if price and addon:GetAuctionatorAge(itemID) == 0 then
-            history[itemID] = history[itemID] or {}
-            history[itemID][today] = price
+            -- A new reading only when it saw something: a search passes on
+            -- every price it didn't look at, unchanged, and counting those
+            -- again would outweigh the day's other scans
             local last = seen[itemID]
-            if isFullScan or not last or last[2] ~= price then
-                seen[itemID] = { now, price }
-            end
+            local new = isFullScan or not last or last[2] ~= price
+            local readings = TodaysReadings(today)
+            if new or not readings[itemID] then AddReading(history, itemID, today, price) end
+            if new then seen[itemID] = { now, price } end
         end
     end
 
@@ -182,8 +223,7 @@ function addon:RecordScanHistory()
     for itemID in pairs(HistoryItems()) do
         local price = type(itemID) == "number" and addon:GetScanPrice(itemID)
         if price and price > 0 then
-            history[itemID] = history[itemID] or {}
-            history[itemID][today] = price
+            AddReading(history, itemID, today, price)
             added = added + 1
         end
     end
@@ -195,14 +235,22 @@ end
 -- Stock-up insights
 --
 -- Today's price compared with the item's usual price: the median of its
--- saved daily prices, not counting today. Needs INSIGHT_MIN_DAYS days of
--- history first. Until then, Goldsmith Data's usual price for the region
+-- daily prices over the last SHORT_DAYS, not counting today (the last
+-- LONG_DAYS while fewer than SHORT_MIN of those are saved). It was every
+-- saved day, so Petrified Root, down from 340g to 70g over ten days, read
+-- 74% below a usual of 310g (user, 2026-10-23). Trend: that recent median
+-- against the LONG_DAYS one, "falling" or "rising" past TREND_MOVE, else
+-- "steady"; a falling price isn't a deal to stock up on, since next week
+-- is likely cheaper again. Needs INSIGHT_MIN_DAYS days of history first. Until then, Goldsmith Data's usual price for the region
 -- (its last 7 days, same price rule), so a fresh install has Cheap
 -- materials on day one instead of "needs 5 days" (user's laptop,
 -- 2026-10-15). Returns { now, usual, diff (-0.18 = 18% below usual),
 -- days, low, high } or nil, plus the number of days of your own history.
 -- A regional one has regional = true and no days, low or high.
 local INSIGHT_MIN_DAYS = 5
+local SHORT_DAYS, SHORT_MIN = 7, 3
+local LONG_DAYS, LONG_MIN = 30, 10
+local TREND_MOVE = 0.15
 
 -- Goldsmith Data's usual price (7th number), or nil
 local function RegionalUsual(itemID)
@@ -213,7 +261,7 @@ end
 
 local function RegionalInsight(itemID, ownDays)
     local usual = RegionalUsual(itemID)
-    local now = usual and addon:GetMarketPrice(itemID)
+    local now = usual and addon:GetMarketPrice(itemID, true)
     if not now or usual <= 0 then return nil, ownDays end
     return { now = now, usual = usual, diff = (now - usual) / usual, regional = true }, ownDays
 end
@@ -222,23 +270,218 @@ function addon:GetPriceInsight(itemID)
     local days = GoldsmithDB.priceHistory[itemID]
     if not days then return RegionalInsight(itemID, 0) end
     local today = date("%Y-%m-%d")
-    local prices = {}
+    local shortFrom = date("%Y-%m-%d", time() - SHORT_DAYS * 86400)
+    local longFrom = date("%Y-%m-%d", time() - LONG_DAYS * 86400)
+    local short, long = {}, {}
+    local low, high = math.huge, 0
     for day, price in pairs(days) do
-        if day ~= today then
-            table.insert(prices, price)
+        if day ~= today and day >= longFrom then
+            table.insert(long, price)
+            low, high = math.min(low, price), math.max(high, price)
+            if day >= shortFrom then table.insert(short, price) end
         end
     end
-    if #prices < INSIGHT_MIN_DAYS then return RegionalInsight(itemID, #prices) end
-    table.sort(prices)
-    local mid = math.floor(#prices / 2)
-    local usual = (#prices % 2 == 1) and prices[mid + 1] or (prices[mid] + prices[mid + 1]) / 2
+    if #long < INSIGHT_MIN_DAYS then return RegionalInsight(itemID, #long) end
+    local longUsual = Median(long)
+    local recent = #short >= SHORT_MIN
+    local usual = recent and Median(short) or longUsual
+    local trend, move
+    if recent and #long >= LONG_MIN and longUsual > 0 then
+        move = (usual - longUsual) / longUsual
+        trend = (move <= -TREND_MOVE and "falling") or (move >= TREND_MOVE and "rising") or "steady"
+    end
 
-    local now = addon:GetMarketPrice(itemID)
-    if not now or usual <= 0 then return nil, #prices end
+    -- What it costs to buy, as the saved prices are: the price for selling
+    -- is capped at TSM's sale average, so Malleable Root listed at 15g read
+    -- 6.25g, "44% below usual", while it was rising (user, 2026-10-23)
+    local now = addon:GetMarketPrice(itemID, true)
+    if not now or usual <= 0 then return nil, #long end
     return {
         now = now, usual = usual, diff = (now - usual) / usual,
-        days = #prices, low = prices[1], high = prices[#prices],
-    }, #prices
+        days = recent and #short or #long, recent = recent, shortDays = SHORT_DAYS,
+        longUsual = longUsual, longDays = #long, trend = trend, move = move,
+        low = low, high = high,
+    }, #long
+end
+
+-- Saved daily prices over the last `days` (today too), oldest first: for
+-- the Cheap materials trend line
+function addon:GetPriceSeries(itemID, days)
+    local saved = GoldsmithDB.priceHistory[itemID]
+    if not saved then return {} end
+    local from = date("%Y-%m-%d", time() - (days or LONG_DAYS) * 86400)
+    local list = {}
+    for day, price in pairs(saved) do
+        if day >= from then table.insert(list, { day = day, value = price }) end
+    end
+    table.sort(list, function(a, b) return a.day < b.day end)
+    return list
+end
+
+-- How many to stock up on, for Cheap materials: a few weeks of what your
+-- crafts and salvages used, less what you hold and have queued to stock.
+-- More weeks the deeper the discount: 2 under 35% off, 3 under 50%, else 4.
+-- A falling price only tops up to a week (it's likely cheaper next week);
+-- without a trend yet, at most 2. Nothing under a week's use of 1, and
+-- nothing that's cheaper to make (item.makeUnit, MakeUnitCost).
+-- Returns amount, weeks, rate a week; or nil and why.
+local STOCK_WEEKS = { { 0.5, 4 }, { 0.35, 3 }, { 0, 2 } }
+function addon:StockUpAmount(item)
+    -- Cheaper to make than to buy, even at today's price: nothing to stock
+    if item.makeUnit and item.now and item.makeUnit < item.now then
+        return nil, string.format("cheaper to %s (%s each)", (item.makeWay or "make"):lower(), addon:FormatMoney(item.makeUnit))
+    end
+    -- What you use, never what you buy: a stock-up bought raised a bought
+    -- rate and asked for more, "to infinity" (user, 2026-10-23)
+    local rate = item.perWeek or 0
+    if rate <= 0 then return nil, "no use recorded yet" end
+    if rate < 1 then return nil, "you use too few for a stock" end
+    local weeks
+    for _, w in ipairs(STOCK_WEEKS) do
+        if -item.diff >= w[1] then weeks = w[2] break end
+    end
+    if item.trend == "falling" then
+        weeks = 1
+    elseif not item.trend then
+        weeks = math.min(weeks, 2)
+    end
+    -- Bought and still in the mailbox counts as held
+    local queued = addon.QueuedStock and addon:QueuedStock(item.itemID) or 0
+    local mail = addon.InMailCount and addon:InMailCount(item.itemID) or 0
+    local amount = math.ceil(rate * weeks) - (item.have or 0) - mail - queued
+    if amount < 1 then
+        return nil, item.trend == "falling" and "falling: you have a week's worth" or "you have enough"
+    end
+    -- Round numbers past 20 (as you'd type them)
+    if amount > 20 then amount = math.ceil(amount / 5) * 5 end
+    return amount, weeks, rate
+end
+
+-- How much of a material you've bought lately (every character): the
+-- amount over the last BUY_DAYS, the days that covers (fewer when your
+-- history is younger, at least a week), and that as a weekly rate. So
+-- Cheap materials can say whether it's something you go through (user,
+-- 2026-10-23: "I don't know how often I actually use those materials").
+-- Purchases saved before item IDs were kept match by name, so both
+-- qualities of a material count them.
+local BUY_DAYS = 30
+function addon:GetRecentBuys(itemID, name)
+    local idx = addon.ledger:index()
+    local all = addon.ledger:getAll()
+    local now = time()
+    local since = now - BUY_DAYS * 86400
+    local first = all[1] and all[1].timestamp or now
+    local days = math.max(math.min(BUY_DAYS, (now - first) / 86400), 7)
+    local qty = 0
+    for _, e in ipairs(idx.purchasesByID[itemID] or {}) do
+        if (e.timestamp or 0) >= since then qty = qty + (e.quantity or 0) end
+    end
+    for _, e in ipairs(name and idx.purchases[name] or {}) do
+        if not e.itemID and (e.timestamp or 0) >= since then qty = qty + (e.quantity or 0) end
+    end
+    return qty, math.floor(days + 0.5), qty / days * 7
+end
+
+-- Materials you use up
+--
+-- What your crafts and salvages used, by item and day, so Cheap materials
+-- can say how much you go through: bought or made yourself (an ingot you
+-- smelt because it's cheaper counts too; user, 2026-10-23). In
+-- GoldsmithDB.materialUse = { since = time, days = { [day] = { [itemID] =
+-- qty } } }, day = time() / 86400, the last USE_KEEP_DAYS. Crafts add what
+-- they used after resourcefulness, your share on orders (Pricing.lua);
+-- salvage adds what it used up (Milling.lua).
+local USE_KEEP_DAYS = 60
+local USE_MIN_DAYS = 7
+local CRAFT_LOT_LIMIT, ORDER_CRAFT_LIMIT, SALVAGE_RUN_LIMIT = 30, 100, 500
+
+local function UseStore()
+    GoldsmithDB.materialUse = GoldsmithDB.materialUse or { since = time(), days = {} }
+    return GoldsmithDB.materialUse
+end
+
+local function AddUse(store, when, itemID, qty)
+    if not itemID or not qty or qty <= 0 then return end
+    local day = math.floor(when / 86400)
+    store.days[day] = store.days[day] or {}
+    store.days[day][itemID] = (store.days[day][itemID] or 0) + qty
+end
+
+-- used = { [itemID] = qty }, as a craft lot keeps it
+function addon:RecordMaterialUse(used)
+    local store = UseStore()
+    local now = time()
+    for itemID, qty in pairs(used or {}) do AddUse(store, now, itemID, qty) end
+    local oldest = math.floor(now / 86400) - USE_KEEP_DAYS
+    for day in pairs(store.days) do
+        if day < oldest then store.days[day] = nil end
+    end
+end
+
+-- The first time: filled from the crafts and salvages already saved, back
+-- as far as all of them reach. Each item keeps only its last 30 crafts, so
+-- one crafted often (Refulgent Copper Ingot: 2 days' worth) sets how far
+-- back that is; older ones would leave its materials short.
+local function SeedMaterialUse()
+    if GoldsmithDB.materialUse then return end
+    local now = time()
+    local start = now - BUY_DAYS * 86400
+    local function Covers(list, limit)
+        if #list >= limit and list[1].time then start = math.max(start, list[1].time) end
+        for _, lot in ipairs(list) do
+            -- Saved before materials were kept
+            if not lot.used and lot.time then start = math.max(start, lot.time + 1) end
+        end
+    end
+    for _, lots in pairs(GoldsmithDB.craftLots or {}) do Covers(lots, CRAFT_LOT_LIMIT) end
+    Covers(GoldsmithDB.orderCrafts or {}, ORDER_CRAFT_LIMIT)
+    local runs = GoldsmithDB.salvageRuns or {}
+    if #runs >= SALVAGE_RUN_LIMIT and runs[1].time then start = math.max(start, runs[1].time) end
+
+    local store = { since = start, days = {} }
+    local function AddLots(list)
+        for _, lot in ipairs(list) do
+            if lot.used and (lot.time or 0) >= start then
+                for itemID, qty in pairs(lot.used) do AddUse(store, lot.time, itemID, qty) end
+            end
+        end
+    end
+    for _, lots in pairs(GoldsmithDB.craftLots or {}) do AddLots(lots) end
+    AddLots(GoldsmithDB.orderCrafts or {})
+    for _, run in ipairs(runs) do
+        if (run.time or 0) >= start then AddUse(store, run.time, run.itemID, run.used) end
+    end
+    GoldsmithDB.materialUse = store
+end
+
+-- How much of a material your crafts and salvages used lately: the amount
+-- over the last BUY_DAYS, the days that covers (fewer while the tally is
+-- young) and that as a weekly rate, over at least USE_MIN_DAYS: 2 Dawn
+-- Crystals used in the tally's first 2 days read 6.5 a week and "Buy 7"
+-- (user, 2026-10-23)
+function addon:GetRecentUse(itemID)
+    local store = UseStore()
+    local now = time()
+    local from = math.floor((now - BUY_DAYS * 86400) / 86400)
+    local qty = 0
+    for day, items in pairs(store.days) do
+        if day >= from and items[itemID] then qty = qty + items[itemID] end
+    end
+    local days = math.min(BUY_DAYS, (now - (store.since or now)) / 86400)
+    return qty, math.max(math.floor(days + 0.5), 1), qty / math.max(days, USE_MIN_DAYS) * 7
+end
+
+-- Whether any use is recorded (a fresh install has none yet)
+function addon:UsedAnythingLately()
+    local store = GoldsmithDB.materialUse
+    return store ~= nil and next(store.days) ~= nil
+end
+
+-- "25/wk", "<1/wk" or "-", and its color, for a GetRecentBuys weekly rate
+function addon:FormatBuyRate(perWeek)
+    if not perWeek or perWeek <= 0 then return "-", "dim" end
+    if perWeek < 1 then return "<1/wk", "muted" end
+    return addon:FormatDemand(perWeek) .. "/wk", "text"
 end
 
 -- Materials with enough history, for the Deals tab, and the earliest date
@@ -292,6 +535,7 @@ end
 function addon:InitializeStock()
     GoldsmithDB.priceHistory = GoldsmithDB.priceHistory or {}
     GoldsmithDB.priceSeen = GoldsmithDB.priceSeen or {}
+    SeedMaterialUse()
     -- After login settles (recipes and tier data are in by then)
     C_Timer.After(20, function() addon:RecordDailyHistory() end)
 end

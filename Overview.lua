@@ -468,7 +468,7 @@ local function SalvageAction(prof)
         detail = table.concat(parts, "\n"),
         tooltip = function(tooltip)
             tooltip:AddLine("Worth salvaging", 1, 1, 1)
-            addon:Explain(tooltip, "Milling, prospecting and crushing that pays: yields measured from 200+ of your own salvages, every output priced, and a 20%+ ROI (or your Worth crafting at setting, if higher). Profit is per salvage, after the AH cut on what comes out.",
+            addon:Explain(tooltip, "Milling, prospecting and crushing that pays: yields measured from 200+ of your own salvages, every output priced, a 20%+ ROI (or your Worth crafting at setting, if higher) and 1g+ profit a salvage. Profit is per salvage, after the AH cut on what comes out.",
                 0.6, 0.6, 0.6, true)
             for _, r in ipairs(rows) do
                 tooltip:AddDoubleLine(r.recipe.outputName .. OnWho(r.charKey),
@@ -488,10 +488,31 @@ end
 -- How far below usual counts as cheap is a setting (dealPercent)
 local function DealsAction(prof)
     local deals, earliest, minDays = addon:GetDeals(prof)
-    local cheap = {}
+    local cheap, all = {}, {}
     local threshold = -addon:Setting("dealPercent") / 100
+    -- Not what you'd make for less than today's price (as on the Items list)
     for _, d in ipairs(deals) do
-        if d.diff <= threshold then table.insert(cheap, d) end
+        if d.diff <= threshold then
+            local make = addon:MakeUnitCost(d.itemID, d.name)
+            if not (make and d.now and make < d.now) then table.insert(all, d) end
+        end
+    end
+    -- Only what you use: a cheap material you never use is no deal, and
+    -- what you buy isn't what you use (stock-ups would count; user,
+    -- 2026-10-23). The Items list still has the rest. Everything while no
+    -- use is recorded at all (a fresh install).
+    local perWeek = {}
+    for _, d in ipairs(all) do
+        local _, _, rate = addon:GetRecentUse(d.itemID)
+        if rate > 0 then
+            perWeek[d] = rate
+            table.insert(cheap, d)
+        end
+    end
+    local buys = #cheap > 0
+    if not buys then
+        if addon:UsedAnythingLately() and #all > 0 then return nil end
+        cheap = all
     end
     if #deals == 0 then
         return {
@@ -514,11 +535,12 @@ local function DealsAction(prof)
         detail = table.concat(parts, "   ") .. " vs usual",
         tooltip = function(tooltip)
             tooltip:AddLine("Cheap materials today", 1, 1, 1)
-            addon:Explain(tooltip, string.format("%d%% or more below their usual price (Settings > Cheap materials)",
-                addon:Setting("dealPercent")), 0.6, 0.6, 0.6, true)
+            addon:Explain(tooltip, string.format("%d%% or more below their usual price (Settings > Cheap materials)%s",
+                addon:Setting("dealPercent"), buys and ", only ones your crafts used in the last 30 days" or ""), 0.6, 0.6, 0.6, true)
             for i = 1, math.min(#cheap, 8) do
                 local d = cheap[i]
-                tooltip:AddDoubleLine(ItemText(d.itemID, d.name), string.format("%.0f%%  %s (usually %s)", d.diff * 100, Money(d.now), Money(d.usual)),
+                local rate = perWeek[d] and ("  · you use " .. (addon:FormatBuyRate(perWeek[d]))) or ""
+                tooltip:AddDoubleLine(ItemText(d.itemID, d.name), string.format("%.0f%%  %s (usually %s)%s", d.diff * 100, Money(d.now), Money(d.usual), rate),
                     0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
             end
             addon:ClickHint(tooltip, "Click to see them on the Items tab: what you have, what they're used in, price history.")

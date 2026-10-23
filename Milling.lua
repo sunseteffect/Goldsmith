@@ -225,6 +225,7 @@ local function OnBagsChanged()
         session.summaryMilled = session.summaryMilled + used
         session.used = session.used + used
         session.lastMill = t
+        addon:RecordMaterialUse({ [herbID] = used })
         changed = true
     end
 
@@ -373,6 +374,10 @@ local SALVAGE_AH_CUT = 0.05
 -- SOLID_INPUTS+ items, every output priced, and at least this ROI (or the
 -- Worth crafting at setting, if higher), since yields swing from run to run
 local SALVAGE_MIN_ROI = 20
+-- ...and at least this much gold a salvage: each one is a click, so a
+-- good ROI on cheap inputs isn't worth the time (user, 2026-10-23: Hollow
+-- Grouper at +0.26g a salvage, 27g for 100 clicks)
+local SALVAGE_MIN_PROFIT = 10000
 
 -- Share of one salvage's input a resourcefulness proc saves
 local function ProcSave()
@@ -617,6 +622,13 @@ function addon:GetSalvageRows(prof, opts)
             -- the AH asked 19.34g, and Buy next found 1,321g more than the
             -- queue planned (2026-10-22)
             local unitPrice = addon:GetMarketPrice(itemID, true)
+            -- With a fresh search, what the batch really costs: the
+            -- listings walked for all of it (user, 2026-10-23: 14.38g a
+            -- Malleable Root with only 31 listed at the lowest price)
+            local ui2 = GoldsmithDB.ui2
+            local batchSize = ui2 and ui2.salvageBatch and ui2.salvageBatch[itemID] or 100
+            local live = unitPrice and addon:GetLiveBuyCost(itemID, batchSize)
+            if live and live > unitPrice then unitPrice = live end
             local value, partial = 0, false
             for _, o in ipairs(outputs) do
                 o.unit = addon:GetMarketPrice(o.itemID)
@@ -657,6 +669,10 @@ function addon:GetSalvageRows(prof, opts)
                     whyNot = string.format("A batch of %d %s makes about %s, under your %s (Settings > Worth a to-do at).",
                         batch, inputName, addon:FormatMoney(total), addon:FormatMoney(minLine))
                 end
+            end
+            if not whyNot and info.profit and info.profit > 0 and info.profit < SALVAGE_MIN_PROFIT then
+                whyNot = string.format("About %s a salvage, under %s: 100 clicks would make only %s.",
+                    addon:FormatMoney(info.profit), addon:FormatMoney(SALVAGE_MIN_PROFIT), addon:FormatMoney(info.profit * 100))
             end
 
             if not opts.profitableOnly

@@ -102,14 +102,24 @@ end
 -- text says which was last: "Auctionator full scan at 11:51", or "AH search
 -- at 11:13" over "Full scan 2 days ago" (its own line rather than a ragged
 -- wrap, user 2026-10-16). Also true if the full scan was today.
+-- Goldsmith's own scan counts as a full scan too, when it's newer: "Full
+-- scan 2 days ago" showed after several Goldsmith scans that day (user,
+-- 2026-10-23)
 local function AuctionatorText(scan)
     local full = GoldsmithDB.lastFullScan
+    local own = addon.GetOwnScanTime and addon:GetOwnScanTime()
     local fresh = full and date("%Y-%m-%d", full) == date("%Y-%m-%d")
     if full and scan - full < 60 then
         return "Prices: Auctionator full scan " .. When(full), fresh
     end
-    return "Prices: AH search " .. When(scan)
-        .. (full and ("\nFull scan " .. When(full)) or "\nNo full scan yet"), fresh
+    local second
+    if own and (not full or own > full) then
+        second = "\nGoldsmith scan " .. When(own)
+        fresh = date("%Y-%m-%d", own) == date("%Y-%m-%d")
+    else
+        second = full and ("\nFull scan " .. When(full)) or "\nNo full scan yet"
+    end
+    return "Prices: AH search " .. When(scan) .. second, fresh
 end
 
 local function PriceSourceText()
@@ -509,10 +519,21 @@ function addon:CreateWindow()
     priceHover:EnableMouse(true)
     UI.SetTooltip(priceHover, function(tooltip)
         tooltip:AddLine("AH prices", 1, 1, 1)
-        if addon:HasAuctionator() then
-            tooltip:AddLine("From Auctionator's scans, Goldsmith Data (the region's prices, updated daily) and your AH searches.", 0.8, 0.8, 0.8, true)
-        else
-            tooltip:AddLine("From Goldsmith Data (the region's prices, updated daily) and your AH searches.", 0.8, 0.8, 0.8, true)
+        -- Every source there is, so the label above ("TSM", "Goldsmith
+        -- scan") is always among them (user, 2026-10-23: the label said
+        -- TSM, the hover didn't mention it)
+        local sources = {}
+        if addon:Setting("ahScan") then table.insert(sources, "Goldsmith's AH scans") end
+        if addon:HasAuctionator() then table.insert(sources, "Auctionator's scans") end
+        if addon:HasTSM() then table.insert(sources, "TSM") end
+        table.insert(sources, "Goldsmith Data (the region's prices, updated daily)")
+        table.insert(sources, "your AH searches")
+        local list = #sources > 1 and (table.concat(sources, ", ", 1, #sources - 1) .. " and " .. sources[#sources]) or sources[1]
+        tooltip:AddLine("From " .. list .. ". The label above says which one prices use now.", 0.8, 0.8, 0.8, true)
+        if addon:HasTSM() then
+            addon:Explain(tooltip, "TSM's prices come from the TSM app and Goldsmith can't tell how old they are. After a reload, TSM is used over a Goldsmith scan more than an hour old: scan again (or search) for the freshest prices.")
+        end
+        if not addon:HasAuctionator() then
             local r, g, b = addon:Color("gold")
             tooltip:AddLine("Tip: with Auctionator, one scan refreshes every price.", r, g, b, true)
         end

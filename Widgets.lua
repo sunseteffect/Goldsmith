@@ -806,6 +806,62 @@ function UI.LineChart(parent)
     return chart
 end
 
+-- A small line of values with no axes or hovers, for a list cell (Cheap
+-- materials' trend): spark:SetValues(values, colorName). It doesn't take
+-- the mouse, so the row's hover and clicks work through it. Has the
+-- methods a list cell needs (SetText and SetTextColor do nothing).
+local SPARK_HEIGHT = 14
+function UI.Sparkline(parent)
+    local spark = CreateFrame("Frame", nil, parent)
+    spark:SetHeight(SPARK_HEIGHT)
+    spark.lines = {}
+    spark.text = UI.Text(spark, "label")
+    spark.text:Hide()
+    spark.dot = spark:CreateTexture(nil, "OVERLAY")
+    spark.dot:SetSize(3, 3)
+    function spark:SetText() end
+    function spark:SetTextColor() end
+
+    function spark:Draw()
+        local values = spark.values or {}
+        local w, h = spark:GetWidth(), spark:GetHeight()
+        HideFrom(spark.lines, 1)
+        spark.dot:Hide()
+        local n = #values
+        if n < 2 or w <= 0 or h <= 0 then return end
+        local minV, maxV = math.huge, -math.huge
+        for _, v in ipairs(values) do minV, maxV = math.min(minV, v), math.max(maxV, v) end
+        local range = maxV - minV
+        local function Y(v) return range > 0 and ((v - minV) / range * (h - 2) + 1) or h / 2 end
+        local function X(i) return (i - 1) * w / (n - 1) end
+        local r, g, b = addon:Color(spark.color or "muted")
+        for i = 2, n do
+            local line = spark.lines[i - 1]
+            if not line then
+                line = spark:CreateLine(nil, "ARTWORK")
+                line:SetThickness(1.5)
+                spark.lines[i - 1] = line
+            end
+            line:SetColorTexture(r, g, b)
+            line:SetStartPoint("BOTTOMLEFT", spark, X(i - 1), Y(values[i - 1]))
+            line:SetEndPoint("BOTTOMLEFT", spark, X(i), Y(values[i]))
+            line:Show()
+        end
+        -- Today's end, so it reads which way it's heading
+        spark.dot:SetColorTexture(r, g, b)
+        spark.dot:ClearAllPoints()
+        spark.dot:SetPoint("CENTER", spark, "BOTTOMLEFT", X(n), Y(values[n]))
+        spark.dot:Show()
+    end
+
+    function spark:SetValues(values, color)
+        spark.values, spark.color = values, color
+        spark:Draw()
+    end
+    spark:SetScript("OnSizeChanged", function() spark:Draw() end)
+    return spark
+end
+
 -- An on/off switch with a label, for view options that are remembered
 -- (e.g. Crafts' Concentration). switch:SetOn(on) shows the state;
 -- onToggle(newState) runs when it's clicked.
@@ -948,7 +1004,9 @@ end
 
 -- A scrolling list with a header row.
 --
--- columns = { { key, label, width (nil: takes the space left), justify } };
+-- columns = { { key, label, width (nil: takes the space left), justify,
+-- make (optional: makes the row's cell, e.g. a UI.Sparkline, instead of a
+-- text) } };
 -- list:SetColumns changes them (e.g. Crafts' concentration columns).
 -- Only the rows that fit on screen exist; scrolling shows other items in
 -- them. opts:
@@ -1119,7 +1177,9 @@ function UI.List(parent, opts)
             local item = list.items[list.offset + i]
             if item then
                 row.data = item
-                PlaceCells(row, row.cells, layout, function() return UI.Text(row, "body") end)
+                PlaceCells(row, row.cells, layout, function(col)
+                    return col.make and col.make(row) or UI.Text(row, "body")
+                end)
                 for _, cell in pairs(row.cells) do
                     cell:SetText("")
                     cell:SetTextColor(addon:Color("text"))

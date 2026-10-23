@@ -23,6 +23,10 @@ local UI = addon.UI
 -- craft with orderID, provided ({ [itemID] = qty } the customer gives),
 -- customer, commission, rewardsValue and expires: shopping only, crafted
 -- in the game's order window, and off the queue once crafted.
+-- A stock-up ({ stockID = the material, quantity, made = bought so far,
+-- added }, from Cheap materials: user, 2026-10-23) is shopping only: Buy
+-- next buys it on top of what the crafts need, and it's off the queue once
+-- that many are bought.
 -- The panel's position: GoldsmithDB.ui2.queuePanel = { x, y } from the
 -- profession window's top left (nil: under it, right edges lined up).
 
@@ -139,6 +143,99 @@ function addon:AddSalvageToQueue(charKey, itemID, quantity)
     GoldsmithDB.ui2.salvageBatch[itemID] = quantity
     Changed()
     return e ~= nil
+end
+
+-- Stocking up on a material: buys `quantity` of it (set again if it's
+-- already queued)
+function addon:FindStockEntry(charKey, itemID)
+    for _, e in ipairs(Queue(charKey) or {}) do
+        if e.stockID == itemID then return e end
+    end
+end
+
+function addon:AddStockToQueue(charKey, itemID, quantity, name)
+    local e = addon:FindStockEntry(charKey, itemID)
+    if e then
+        e.quantity, e.made = quantity, 0
+    else
+        table.insert(Queue(charKey, true), { stockID = itemID, quantity = quantity, made = 0, name = name, added = time() })
+    end
+    Changed()
+    addon:Notify("info", "%s stocking up on %d %s in %s's queue. Buy next buys it at the AH.",
+        e and "Set" or "Added", quantity, name or "items", CharName(charKey))
+    return e ~= nil
+end
+
+-- Asks how many to stock up on (suggested: `quantity`), then queues it
+-- (the salvage popup's PopupBox is further down)
+local function StockBox(popup)
+    return popup.GetEditBox and popup:GetEditBox() or popup.editBox
+end
+
+-- What buying n of it costs: the listings walked with a fresh search, else
+-- today's price for each
+local function StockCost(itemID, n)
+    if not n or n <= 0 then return nil end
+    local unit = addon:GetLiveBuyCost(itemID, n) or addon:GetMarketPrice(itemID, true)
+    return unit and unit * n
+end
+
+-- The question with what the amount typed costs, kept up as you type
+-- (user, 2026-10-23: "so i know how much 100 would cost before clicking ok")
+local function StockPrompt(popup, data)
+    data = data or popup.data
+    if not data then return end
+    local n = tonumber(StockBox(popup):GetText())
+    local cost = n and StockCost(data.itemID, n)
+    local text = data.question .. "\n\n" .. (cost and string.format("About %s for %d", addon:FormatMoney(cost), n) or " ")
+    local fs = (popup.GetTextFontString and popup:GetTextFontString()) or popup.Text or popup.text
+    if fs and fs.SetText then fs:SetText(text) end
+    if StaticPopup_Resize then pcall(StaticPopup_Resize, popup, popup.which) end
+end
+
+local function AcceptStock(popup, data)
+    data = data or popup.data
+    local n = tonumber(StockBox(popup):GetText())
+    if data and n and n > 0 then addon:AddStockToQueue(data.charKey, data.itemID, n, data.name) end
+end
+
+StaticPopupDialogs["GOLDSMITH_STOCK_UP"] = {
+    text = "%s",
+    button1 = OKAY or "OK",
+    button2 = CANCEL or "Cancel",
+    hasEditBox = true,
+    OnShow = function(self, data)
+        data = data or self.data
+        local box = StockBox(self)
+        box:SetNumeric(true)
+        box:SetText(tostring(data and data.quantity or 1))
+        box:HighlightText()
+        box:SetFocus()
+        StockPrompt(self, data)
+    end,
+    EditBoxOnTextChanged = function(box, data)
+        StockPrompt(box:GetParent(), data)
+    end,
+    OnAccept = AcceptStock,
+    EditBoxOnEnterPressed = function(box, data)
+        local popup = box:GetParent()
+        AcceptStock(popup, data)
+        popup:Hide()
+    end,
+    EditBoxOnEscapePressed = function(box) box:GetParent():Hide() end,
+    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+}
+
+function addon:AskStockUp(charKey, itemID, name, quantity)
+    local question = string.format("How many %s to stock up on? (Buy next buys them for %s)", name or "items", CharName(charKey))
+    StaticPopup_Show("GOLDSMITH_STOCK_UP", question, nil,
+        { charKey = charKey, itemID = itemID, name = name, quantity = quantity, question = question })
+end
+
+-- How many of a material your queue still has to buy to stock up
+function addon:QueuedStock(itemID)
+    local e = addon:FindStockEntry(addon.charKey, itemID)
+    return e and math.max(e.quantity - (e.made or 0), 0) or 0
 end
 
 -- Asks how many to salvage, then queues the batch
@@ -304,7 +401,12 @@ local function Progress(match, quantity, describe, finished)
             if done then
                 table.remove(q, i)
                 addon:Notify("info", "Queue: %s, done.", describe(e))
-                if #q == 0 then addon:Notify("info", "Queue: everything's crafted.") end
+                -- Said as the last entry did it: a queue of stock-ups said
+                -- "everything's crafted" (user, 2026-10-23)
+                if #q == 0 then
+                    local word = (e.stockID and "bought") or (e.salvageID and "salvaged") or "crafted"
+                    addon:Notify("info", "Queue: everything's %s.", word)
+                end
             end
             Changed()
             return e, done
@@ -331,6 +433,15 @@ function addon:QueueCrafted(recipeID, quantity, itemID)
     end, quantity, function(e)
         local recipe = GoldsmithDB.recipes[recipeID]
         return string.format("made %d %s", e.made, recipe and recipe.outputName or "items")
+    end)
+end
+
+-- Bought at the AH (Core.lua, every purchase, Buy next or not): counts
+-- toward a stock-up of it
+function addon:QueueBought(itemID, quantity)
+    if not itemID then return end
+    Progress(function(x) return x.stockID == itemID end, quantity, function(e)
+        return string.format("stocked up on %d %s", e.made, e.name or C_Item.GetItemNameByID(itemID) or "items")
     end)
 end
 
@@ -425,8 +536,14 @@ local function SalvagePlan(row, salvageRows, useOnHand, pool)
     if unit then
         plan.cost = unit * remaining
         if remaining > have then
-            table.insert(plan.buyAH, { itemID = itemID, name = name, quantity = remaining - have, unit = unit,
-                                       cost = unit * (remaining - have) })
+            -- With a fresh search, walk the listings for all of it, as a
+            -- craft's plan does: 160 Malleable Root was planned at the
+            -- lowest 14.93g with 31 listed there (user, 2026-10-23)
+            local qty = remaining - have
+            local live, enough = addon:GetLiveBuyCost(itemID, qty)
+            table.insert(plan.buyAH, { itemID = itemID, name = name, quantity = qty, unit = live or unit,
+                                       cost = (live or unit) * qty, live = live and true or nil,
+                                       short = live and not enough or nil })
         end
     end
     if found and found.info.price and unit then
@@ -438,6 +555,26 @@ local function SalvagePlan(row, salvageRows, useOnHand, pool)
         table.insert(plan.outputs, { itemID = o.itemID, name = o.name, quantity = o.perCast * casts,
                                      value = o.unit and o.unit * o.perCast * casts })
     end
+    return plan
+end
+
+-- A stock-up as a plan: all of it bought at the AH, on top of what the
+-- crafts need (it doesn't take from what you hold). Not a cost of the
+-- queue's crafts, so it's left out of the queue's cost and profit; Buy
+-- next's spend includes it.
+local function StockPlan(row)
+    local itemID = row.entry.stockID
+    local name = row.entry.name or C_Item.GetItemNameByID(itemID) or ("item " .. itemID)
+    row.recipe = { outputName = "Stock up: " .. name }
+    row.stockName = name
+    -- With a fresh search, the listings walked for all of it (SalvagePlan)
+    local live, enough = addon:GetLiveBuyCost(itemID, row.remaining)
+    local unit = live or addon:GetMarketPrice(itemID, true)
+    local plan = { stock = true, crafts = 0, buyAH = {}, buyVendor = {}, cost = unit and unit * row.remaining or 0,
+                   complete = unit ~= nil }
+    table.insert(plan.buyAH, { itemID = itemID, name = name, quantity = row.remaining, unit = unit,
+                               cost = unit and unit * row.remaining or 0, live = live and true or nil,
+                               short = live and not enough or nil })
     return plan
 end
 
@@ -467,6 +604,10 @@ function addon:BuildQueue(charKey)
     local q = { charKey = charKey, mine = mine, rows = {}, cost = 0, revenue = 0, profit = 0, complete = true,
                 listName = "Goldsmith: Queue (" .. CharName(charKey) .. ")", listKey = "queue:" .. charKey }
     local ah, vendor = {}, {}
+    -- Items bought only to stock up (not for any craft): Buy next doesn't
+    -- weigh their price against the queue's profit (Shop.lua)
+    local stockOnly = {}
+    q.stockOnly = stockOnly
     local salvageRows
     -- Orders past their time are gone from the game too
     local entries = Queue(charKey) or {}
@@ -482,7 +623,9 @@ function addon:BuildQueue(charKey)
     for _, e in ipairs(entries) do
         local row = { entry = e, remaining = math.max(e.quantity - (e.made or 0), 0) }
         local plan
-        if e.salvageID and row.remaining > 0 then
+        if e.stockID then
+            if row.remaining > 0 then plan = StockPlan(row) end
+        elseif e.salvageID and row.remaining > 0 then
             if not salvageRows then
                 salvageRows = {}
                 for _, r in ipairs(addon:GetSalvageRows("All", {})) do salvageRows[r.itemID] = r end
@@ -563,7 +706,13 @@ function addon:BuildQueue(charKey)
             end
         end
         row.plan = plan
-        if plan then
+        if plan and plan.stock then
+            for _, entry in ipairs(plan.buyAH) do
+                Merge(ah, entry)
+                stockOnly[entry.itemID] = stockOnly[entry.itemID] ~= false
+            end
+        elseif plan then
+            for _, entry in ipairs(plan.buyAH) do stockOnly[entry.itemID] = false end
             q.cost = q.cost + plan.cost
             if not plan.complete then q.complete = false end
             if plan.revenue then
@@ -593,7 +742,10 @@ function addon:QueueStalePrices(q)
     end
     for _, row in ipairs(q.rows) do
         local plan = row.plan
-        if plan and plan.salvage then
+        if plan and plan.stock then
+            local price, source, age = addon:GetAHPriceInfo(row.entry.stockID)
+            if not price or addon:IsPriceOld(source, age) then Add(row.entry.stockID) end
+        elseif plan and plan.salvage then
             -- The input and what comes out
             local ids = { row.entry.salvageID }
             for _, o in ipairs(plan.outputs) do table.insert(ids, o.itemID) end
@@ -621,6 +773,10 @@ end
 
 -- A queued entry's name, with tier icon
 function addon:QueueRowName(row)
+    if row.entry.stockID then
+        local tier, tierCount = addon:GetItemTier(row.entry.stockID)
+        return "Stock up: " .. (tier and (addon:TierIconText(tier, tierCount) .. " ") or "") .. (row.stockName or "?")
+    end
     local name = row.recipe and row.recipe.outputName
         or (row.entry.recipeID and ("recipe " .. row.entry.recipeID)) or "?"
     local icon = row.tierInfo and (addon:TierIconText(row.tierInfo.tier, row.tierInfo.tierCount) .. " ") or ""
@@ -643,6 +799,7 @@ end
 -- A short status for a queued entry and its color: what Craft next would
 -- do for it, or why it can't
 function addon:QueueRowStatus(row, q)
+    if row.entry.stockID then return "Buy at the AH", "muted" end
     if not row.recipe then return "Recipe not loaded", "warning" end
     if not q.mine then return "On " .. CharName(q.charKey), "muted" end
     local s = row.state
@@ -909,8 +1066,13 @@ local function UpdatePanel()
     if not (ProfessionsFrame and ProfessionsFrame:IsShown()) then return end
     CreatePanel()
     if not panel then return end
-    local entries = Queue(addon.charKey)
-    if not entries or #entries == 0 then
+    -- Stock-ups are shopping, done at the AH: a queue of only those has
+    -- nothing to craft, so no panel (user, 2026-10-23)
+    local crafting = 0
+    for _, e in ipairs(Queue(addon.charKey) or {}) do
+        if not e.stockID then crafting = crafting + 1 end
+    end
+    if crafting == 0 then
         -- Multicraft can fill the last entry before the game's batch ends;
         -- it keeps crafting (materials were bought for the unlucky case),
         -- so the panel stays until it stops (user, 2026-10-20: Sienna Ink)
@@ -944,9 +1106,14 @@ local function UpdatePanel()
     -- Blocked by "Needs Anvil nearby": checked every second (below)
     panel.nearby = row and row.state and row.state.nearby or nil
 
-    local shown = math.min(#q.rows, PANEL_LINES)
+    -- Without stock-ups (the Queue tab and Buy next show those)
+    local rows = {}
+    for _, r in ipairs(q.rows) do
+        if not r.entry.stockID then table.insert(rows, r) end
+    end
+    local shown = math.min(#rows, PANEL_LINES)
     for i, line in ipairs(panel.lines) do
-        local r = q.rows[i]
+        local r = rows[i]
         if r and i <= shown then
             line.text:SetText(string.format("%dx %s", r.remaining, addon:QueueRowName(r)))
             line.text:SetTextColor(addon:Color(r == row and "gold" or "text"))
@@ -960,9 +1127,9 @@ local function UpdatePanel()
             line:Hide()
         end
     end
-    if #q.rows > PANEL_LINES then
+    if #rows > PANEL_LINES then
         local last = panel.lines[PANEL_LINES]
-        last.text:SetText(string.format("and %d more", #q.rows - PANEL_LINES + 1))
+        last.text:SetText(string.format("and %d more", #rows - PANEL_LINES + 1))
         last.text:SetTextColor(addon:Color("muted"))
         last.status:SetText("")
     end
