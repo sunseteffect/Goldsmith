@@ -33,14 +33,33 @@ local QUEUED = "Interface\\AddOns\\Goldsmith\\Media\\Logo"
 
 -- How many you have of a material, any quality of it in the recipe:
 -- bags, banks, warband bank and the mailbox (Buy next's purchases)
-local function Held(itemID, recipeID)
-    local ids = { itemID }
+-- The qualities of a material in a recipe: the saved recipe's slot, else
+-- the game's (a Refulgent Whetstone not saved yet counted only the lowest
+-- quality, so ingots just made in the other one didn't turn it green,
+-- user 2026-10-23)
+local function SlotIDs(itemID, recipeID)
     local recipe = GoldsmithDB.recipes[recipeID]
     for _, slot in ipairs(recipe and recipe.reagents or {}) do
         for _, id in ipairs(slot.itemIDs or {}) do
-            if id == itemID then ids = slot.itemIDs break end
+            if id == itemID then return slot.itemIDs end
         end
     end
+    local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
+    for _, slot in ipairs(ok and type(schematic) == "table" and schematic.reagentSlotSchematics or {}) do
+        local ids, found = {}, false
+        for _, r in ipairs(slot.reagents or {}) do
+            if r.itemID then
+                table.insert(ids, r.itemID)
+                if r.itemID == itemID then found = true end
+            end
+        end
+        if found then return ids end
+    end
+    return { itemID }
+end
+
+local function Held(itemID, recipeID)
+    local ids = SlotIDs(itemID, recipeID)
     local have = 0
     for _, id in ipairs(ids) do
         have = have + (C_Item.GetItemCount(id, true, false, true, true) or 0)
@@ -522,6 +541,14 @@ end
 local events = CreateFrame("Frame")
 events:RegisterEvent("ADDON_LOADED")
 events:RegisterEvent("TRADE_SKILL_SHOW")
-events:SetScript("OnEvent", Hook)
+-- Bags changed (materials crafted or bought): the statuses again at once
+events:RegisterEvent("BAG_UPDATE_DELAYED")
+events:SetScript("OnEvent", function(_, event)
+    if event == "BAG_UPDATE_DELAYED" then
+        if hooked and box and box:IsVisible() then UpdateSoon() end
+        return
+    end
+    Hook()
+end)
 
 _G.Goldsmith = addon
