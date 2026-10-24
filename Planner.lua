@@ -27,15 +27,41 @@ local MIN_SALVAGE_CASTS = 10
 local SALVAGE_MARGIN = 0.10
 local SalvageCasts -- below, sized for an unlucky run
 
+-- A character's key from their saved table (WithCharacter passes the table)
+local keyOf = setmetatable({}, { __mode = "k" })
+local function KeyOf(c)
+    if keyOf[c] then return keyOf[c] end
+    for key, data in pairs(GoldsmithDB.characters) do
+        if data == c then keyOf[c] = key return key end
+    end
+end
+
 local function GetOnHand(itemID)
     -- The tour's sample (Tour.lua): what its "you" holds, not your bags
     if addon:UsingTourData() then
         return addon.char.stock and addon.char.stock[itemID] or 0
     end
+    -- Another character's plan (WithCharacter): their bags and bank as
+    -- counted at their last login, plus the warband bank. Planned with
+    -- nothing held, Maddoxius's queue asked to buy 30 scales with 131 on
+    -- them (user, 2026-10-24).
+    -- Their mail (mailed to them from here) and what Buy next bought for
+    -- them on another character count too (Shop.lua's boughtFor)
+    local c = addon:StatsChar()
+    if c ~= addon.char then
+        local key = KeyOf(c)
+        return (c.stock and c.stock[itemID] or 0) + (GoldsmithDB.warbandStock[itemID] or 0)
+            + (key and addon.InMailCountFor and addon:InMailCountFor(key, itemID) or 0)
+            + (key and addon.OnTheWayFor and addon:OnTheWayFor(key, itemID) or 0)
+    end
     -- Bought with Buy next and waiting in the mailbox counts as yours
-    -- (Shop.lua), so it isn't bought again or swapped for something else
-    return (C_Item.GetItemCount(itemID, true, false, true, true) or 0)
+    -- (Shop.lua), so it isn't bought again or swapped for something else.
+    -- Less what you bought for another character's queue (it's theirs),
+    -- plus what another character bought for yours.
+    local own = (C_Item.GetItemCount(itemID, true, false, true, true) or 0)
         + (addon.InMailCount and addon:InMailCount(itemID) or 0)
+        - (addon.ReservedCount and addon:ReservedCount(itemID) or 0)
+    return math.max(own, 0) + (addon.OnTheWayFor and addon:OnTheWayFor(addon.charKey, itemID) or 0)
 end
 
 -- Crafting from materials you already hold beats buying unless buying is
@@ -62,6 +88,8 @@ local HELD_SALVAGE_SHARE = 0.5
 -- Down to 1 Luminant Flux after a gold Refulgent Copper Ingot, the plan
 -- stopped counting the ore as held and bought 13 ingots for 0.15g less
 -- each than crafting them (user, 2026-10-22).
+addon.GetOnHand = function(_, itemID) return GetOnHand(itemID) end
+
 local function HoldsMaterials(recipe)
     local reagents = recipe and recipe.reagents
     if not reagents or #reagents == 0 then return false end
@@ -836,7 +864,11 @@ end
 function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
     -- The old choices for every plan (see WithChoices) are dropped
     GoldsmithDB.ui.methodOverrides = nil
-    local ctx = { memo = {}, useOnHand = useOnHand, pool = pool, conc = {} }
+    -- One count of what you hold for the whole plan, as the queue keeps
+    -- across its entries: without it each line counted your bags again.
+    -- Gloaming Alloy's two ingot batches both used the same 22 ore, so the
+    -- plan bought 18 where it needed 30 (user, 2026-10-24).
+    local ctx = { memo = {}, useOnHand = useOnHand, pool = pool or {}, conc = {} }
     local outputQty, slots = GetCraftNumbers(recipe)
     local crafts = WholeCrafts(quantity, SurePerCraft(recipe, outputQty))
     -- The craft's own concentration comes first from its crafter's
@@ -1047,6 +1079,9 @@ end
 -- passes its own listName and listKey (see BuildQueue in Queue.lua).
 -- Returns true on success, or false and a reason.
 function addon:SendShoppingList(plan)
+    if addon:UsingTourData() then
+        return false, "The tour shows sample data: end it to send your own list to Auctionator."
+    end
     local api = ShoppingAPI()
     if not (api and api.CreateShoppingList) then
         return false, "Auctionator's shopping list API isn't available."

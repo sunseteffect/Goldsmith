@@ -64,6 +64,17 @@ function addon:UsingTourData()
     return saved ~= nil
 end
 
+-- The tour is cut off from the live game: on the sample's queue, Buy
+-- next would have spent real gold (error review, 2026-10-23; user: "you
+-- are basically severing goldsmith from doing anything in the live game").
+-- Buying, crafting, opening a profession and sending a list say what they
+-- would do and do nothing. True when blocked.
+function addon:TourBlocks(would)
+    if not addon:UsingTourData() then return false end
+    addon:Notify("info", "Tour: this would %s. Nothing was done: the tour shows sample data. End it to use your own.", would)
+    return true
+end
+
 local function Noon(t)
     local d = date("*t", t)
     return time({ year = d.year, month = d.month, day = d.day, hour = 12 })

@@ -1284,7 +1284,16 @@ local function CheckMaterials(state, needs, crafts)
         local have = C_Item.GetItemCount(itemID, true, false, true, true) or 0
         local possible = math.floor(have / per)
         if possible < crafts then
-            table.insert(short, string.format("%d %s", per * crafts - have, MaterialName(itemID)))
+            -- Bought and still in the mailbox: say so, it's why it's
+            -- "missing" (error review, 2026-10-23; user forgot the mail once)
+            local mail = addon.InMailCount and addon:InMailCount(itemID) or 0
+            -- Bought for you by Buy next on another character, not mailed yet
+            local away, holder = 0, nil
+            if addon.OnTheWayFor then away, holder = addon:OnTheWayFor(addon.charKey, itemID) end
+            table.insert(short, string.format("%d %s%s", per * crafts - have, MaterialName(itemID),
+                mail > 0 and string.format(" (%d in your mailbox)", mail)
+                or away > 0 and string.format(" (%d bought on %s, not mailed yet)", away, holder or "another character")
+                or ""))
         end
         if possible == 0 then
             stuck = true
@@ -1385,11 +1394,13 @@ local function FindVellum(vellumID)
     return location, C_Item.GetItemCount(vellumID) or 0
 end
 
--- Button label: "Mill 15 Tranquility Bloom", shortened if it won't fit
+-- Button label: "Mill 15 Tranquility Bloom", shortened if it won't fit;
+-- and the whole step (state.step), for the line over the button
 local function StepLabel(verb, count, name)
-    local label = string.format("%s %d %s", verb, count, name)
+    local full = string.format("%s %d %s", verb, count, name)
+    local label = full
     if #label > 22 then label = string.format("%s %d", verb, count) end
-    return label
+    return label, full
 end
 
 -- A salvage step (mill, prospect, crush): salvage enough items for what's
@@ -1425,7 +1436,7 @@ local function MillStepState(node, state)
             table.insert(state.blockers, string.format("Not enough %s to %s (%d at a time). Send the shopping list to Auctionator.",
                 herbName, lower, perCast))
         end
-        state.label = StepLabel(verb, wanted * perCast, herbName)
+        state.label, state.step = StepLabel(verb, wanted * perCast, herbName)
         return state
     end
     local inBags = C_Item.GetItemCount(herbID) or 0
@@ -1433,9 +1444,9 @@ local function MillStepState(node, state)
     if casts < wanted and inBags >= (casts + 1) * perCast then
         table.insert(state.notes, verb .. "s one stack per click.")
     end
-    state.salvage = { recipeID = recipeID, casts = casts, location = location }
+    state.salvage = { recipeID = recipeID, casts = casts, location = location, profession = profession }
     state.enabled = #state.blockers == 0
-    state.label = StepLabel(verb, casts * perCast, herbName)
+    state.label, state.step = StepLabel(verb, casts * perCast, herbName)
     return state
 end
 
@@ -1550,7 +1561,7 @@ local function CraftStepState(node, state)
     state.recipeID, state.reagents, state.crafts = recipe.recipeID, reagents, crafts
     state.concentrate = concentrate
     state.enabled = #state.blockers == 0 and crafts > 0
-    state.label = StepLabel("Craft", crafts, node.name)
+    state.label, state.step = StepLabel("Craft", crafts, node.name)
     return state
 end
 
@@ -1599,6 +1610,18 @@ local function CraftState(p, tierInfo, plan)
         state.onCooldown = addon:CooldownWarning(recipe.recipeID, cooldown)
         table.insert(state.blockers, state.onCooldown)
         return state
+    end
+    -- Short on concentration: said before "Open Alchemy", which would only
+    -- have opened it to say so (user, 2026-10-24). Concentration can be
+    -- read with the profession closed.
+    if tierInfo and tierInfo.concentrate == true and not ProfessionOpen(recipe) then
+        local current = addon:GetConcentration(recipe.profession)
+        local full = tierInfo.scenario and tierInfo.scenario.concentration or tierInfo.concentration
+        if current and full and full > 0 and current < full then
+            table.insert(state.blockers, string.format("Not enough concentration: %d to start, you have %d.",
+                full, current))
+            return state
+        end
     end
     if not ProfessionOpen(recipe) then
         state.label, state.enabled, state.open = "Open " .. recipe.profession, true, true
@@ -1681,6 +1704,7 @@ end
 -- press (the game only crafts from one).
 local function PerformCraftState(state, recipe, onOpened)
     if not (state and state.enabled) then return end
+    if addon:TourBlocks(state.open and ("open " .. (recipe.profession or "the profession")) or "craft") then return end
     if state.open then
         if C_TradeSkillUI.OpenRecipe then
             -- A salvage batch opens at its salvage recipe (SalvageState)
@@ -1697,6 +1721,15 @@ local function PerformCraftState(state, recipe, onOpened)
         return
     end
     if state.final then addon:StartCraftBatch(recipe, state) end
+    -- A material made for this entry (ingots for an alloy) isn't the
+    -- queue's own entry for that item: 5 gold ingots made for Gloaming
+    -- Alloy finished the queued "Refulgent Copper Ingot x4" to sell, and it
+    -- left the queue (user, 2026-10-24). QueueCrafted skips these.
+    if state.final then
+        addon.materialStep = nil
+    elseif state.recipeID then
+        addon.materialStep = { recipeID = state.recipeID, untilTime = GetTime() + 30 + 6 * (state.crafts or 1) }
+    end
     if state.vellum then
         -- CraftEnchant(recipeID, count, reagents, itemTarget, concentrate):
         -- an enchant scroll, put on the vellum
@@ -2267,10 +2300,36 @@ local function CreatePlanScreen(parent)
     screen.buffWarn = UI.Text(summary, "small", "warning", "RIGHT")
     screen.buffWarn:SetPoint("BOTTOMRIGHT", screen.craft, "TOPRIGHT", 0, 6)
     screen.buffWarn:SetWidth(320)
+    -- In the same spot, a button for what to do first (Prep.lua): the
+    -- right tool to equip, or the buff to turn on (user, 2026-10-23)
+    screen.prep = UI.Button(summary, "", 260, 22, function()
+        addon:RunPrep(screen.prepAction)
+    end)
+    -- The Craft button's size, as on the Queue tab
+    screen.prep:SetPoint("BOTTOMLEFT", screen.craft, "TOPLEFT", 0, 6)
+    screen.prep:SetPoint("BOTTOMRIGHT", screen.craft, "TOPRIGHT", 0, 6)
+    screen.prep:SetHeight(screen.craft:GetHeight())
+    screen.prep.label:SetTextColor(addon:Color("warning"))
+    screen.prep:Hide()
+    UI.SetTooltip(screen.prep, function(tooltip)
+        local action = screen.prepAction
+        if not action then return end
+        tooltip:AddLine(action.label, 1, 1, 1)
+        for _, line in ipairs(action.lines or {}) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
+    end, "ANCHOR_TOP")
     function screen:UpdateBuffWarning()
         local p = screen.plan
-        local name = p and p.charKey == addon.charKey and addon:MissingCraftBuff(p.recipe.profession, p.recipe)
+        local mine = p and p.charKey == addon.charKey
+        local action = mine and addon:CraftPrep(screen.craftState, p.recipe,
+            screen.tierInfo and screen.tierInfo.concentrate == true) or nil
+        screen.prepAction = action
+        screen.prep:SetShown(action ~= nil)
+        if action then addon:SetPrepLabel(screen.prep, action) end
+        local name = not action and mine and addon:MissingCraftBuff(p.recipe.profession, p.recipe)
         screen.buffWarn:SetText(name and (name .. " isn't active") or "")
+    end
+    addon.UpdatePlanPrep = function()
+        if screen:IsVisible() then screen:UpdateBuffWarning() end
     end
     local buffEvents = CreateFrame("Frame", nil, screen)
     buffEvents:RegisterUnitEvent("UNIT_AURA", "player")
@@ -2330,6 +2389,7 @@ local function CreatePlanScreen(parent)
 
     local function SetCraftState(state)
         screen.craftState = state
+        screen:UpdateBuffWarning()
         local enabled = state ~= nil and state.enabled == true
         -- Stuck says why, as the queue does ("Needs Alchemist's Lab Bench")
         local label = state and state.label or "Craft"

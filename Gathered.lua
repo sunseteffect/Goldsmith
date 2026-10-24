@@ -360,6 +360,58 @@ function addon:HeldAnywhere(itemID)
     return math.max(addon.GetHeld and addon:GetHeld(itemID) or 0, here)
 end
 
+-- Lots from your own salvage runs (mill, prospect, crush), for
+-- GetAcquiredCost: each run's share of what went in, like a purchase, so
+-- they take their turn by date with what you bought. Before, every
+-- Gemdust ever crushed (9, from a few test crushes at gem prices) was
+-- averaged with the 8 bought at 33g that you hold: 62g each, and a
+-- Kaleidoscopic Prism showed -58g instead of about +170g (user,
+-- 2026-10-24). From GoldsmithDB.salvageRuns (the last 120 runs); older
+-- ones are left to the all-time average (GetMilledCost) for what these
+-- don't cover. Returns { { time, qty, copper, itemID } } oldest first.
+local salvageLotCache
+local salvageBusy = {}
+local function SalvageLots(itemName, exactItemID)
+    salvageLotCache = salvageLotCache or addon:NewCache()
+    local store = salvageLotCache:Get()
+    local key = itemName .. ":" .. tostring(exactItemID)
+    if store[key] then return store[key] end
+    if salvageBusy[itemName] then return {} end
+    salvageBusy[itemName] = true
+    local lots = {}
+    for _, run in ipairs(GoldsmithDB.salvageRuns or {}) do
+        local record = run.itemID and GoldsmithDB.milling[run.itemID]
+        local outputs = run.outputs
+        if record and outputs and (run.used or 0) > 0 then
+            for outID, qty in pairs(outputs) do
+                local out = record.outputs and record.outputs[outID]
+                local name = out and out.name or C_Item.GetItemNameByID(outID)
+                if qty > 0 and name == itemName and (not exactItemID or outID == exactItemID) then
+                    local unit = addon:GetHerbUnitCost(run.itemID, record.name)
+                    if unit then
+                        -- This output's share of the run, by AH value (by
+                        -- count when something has no price)
+                        local sumValue, sumQty, priced = 0, 0, true
+                        for id, q in pairs(outputs) do
+                            sumQty = sumQty + q
+                            local p = addon:GetMarketPrice(id)
+                            if p then sumValue = sumValue + p * q else priced = false end
+                        end
+                        local mine = addon:GetMarketPrice(outID)
+                        local share = (priced and sumValue > 0 and mine) and (mine * qty / sumValue) or (qty / sumQty)
+                        table.insert(lots, { time = run.time or 0, qty = qty, copper = unit * run.used * share,
+                                             itemID = outID })
+                    end
+                end
+            end
+        end
+    end
+    table.sort(lots, function(a, b) return a.time < b.time end)
+    salvageBusy[itemName] = nil
+    store[key] = lots
+    return lots
+end
+
 -- How you got what you hold of an item: the newest purchases and gathered
 -- lots, going back until they cover what you have on every character (or
 -- just the newest one when you hold none, e.g. right after a craft used
@@ -370,7 +422,9 @@ end
 --                           each item ID (tiers are priced apart)
 --   ownIDs                - of those, the ones you gathered yourself (not
 --                           out of a payout bag), by item ID
--- or nil if you've never bought or gathered it.
+--   uncovered             - units held that none of these cover
+-- or nil if you've never bought or gathered it. Your own salvage runs
+-- count as purchases here (SalvageLots).
 -- exactItemID: only that item (one quality tier): silver and gold of a
 -- material share a name, and by name a silver Munsell Ink was costed at
 -- 37.50g, the average with gold ones, against 13.15g on the AH (2026-10-10)
@@ -400,10 +454,15 @@ function addon:GetAcquiredCost(itemName, exactItemID, skip)
             gatheredCount = gatheredCount + 1
         end
     end
+    local listed = #list
+    for _, lot in ipairs(SalvageLots(itemName, exactItemID)) do
+        list[#list + 1] = { time = lot.time, qty = lot.qty, copper = lot.copper }
+        ids[lot.itemID] = true
+    end
     if exactItemID then ids = { [exactItemID] = true } end
     if #list == 0 then return nil end
     -- Each list is oldest first already; only a mix needs sorting
-    if gatheredCount > 0 and #list > gatheredCount then
+    if (gatheredCount > 0 and listed > gatheredCount) or (#list > listed and listed > 0) then
         table.sort(list, function(a, b) return a.time < b.time end)
     end
 
@@ -429,7 +488,8 @@ function addon:GetAcquiredCost(itemName, exactItemID, skip)
         remaining = remaining - take
         if remaining <= 0 then break end
     end
-    return paidQty > 0 and copper / paidQty or nil, paidQty, gatheredQty, gatheredIDs, ownIDs
+    return paidQty > 0 and copper / paidQty or nil, paidQty, gatheredQty, gatheredIDs, ownIDs,
+        held > 0 and math.max(remaining, 0) or 0
 end
 
 -- What the ones you hold cost you in gold, gathered ones counting as free:

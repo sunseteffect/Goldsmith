@@ -398,12 +398,46 @@ local function Create(parent)
     view.buffWarn = UI.Text(summary, "small", "warning", "RIGHT")
     view.buffWarn:SetPoint("BOTTOMRIGHT", view.craft, "TOPRIGHT", 0, 6)
     view.buffWarn:SetWidth(320)
+    -- The tool swap or buff button (Prep.lua) in the buff warning's spot,
+    -- as on the plan and the queue panel (user, 2026-10-24: it showed in
+    -- the panel but not here)
+    view.prep = UI.Button(summary, "", 260, 22, function()
+        addon:RunPrep(view.prepAction)
+    end)
+    -- The Craft button's size, not wider (user, 2026-10-24: "looks weird")
+    view.prep:SetPoint("BOTTOMLEFT", view.craft, "TOPLEFT", 0, 6)
+    view.prep:SetPoint("BOTTOMRIGHT", view.craft, "TOPRIGHT", 0, 6)
+    view.prep:SetHeight(view.craft:GetHeight())
+    view.prep.label:SetTextColor(addon:Color("warning"))
+    view.prep:Hide()
+    UI.SetTooltip(view.prep, function(tooltip)
+        local action = view.prepAction
+        if not action then return end
+        tooltip:AddLine(action.label, 1, 1, 1)
+        for _, line in ipairs(action.lines or {}) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
+    end, "ANCHOR_TOP")
+    function view:UpdatePrep()
+        local row = view.mine and view.next or nil
+        local action = row and addon:CraftPrep(row.state, row.recipe or {}, row.entry.concentrate) or nil
+        view.prepAction = action
+        view.prep:SetShown(action ~= nil)
+        if action then addon:SetPrepLabel(view.prep, action) end
+        local buff = not action and addon:QueueMissingBuff(view.next, view.mine)
+        local nextLine = not buff and view.mine and addon:QueueNextLine(view.next)
+        view.buffWarn:SetText(buff and (buff .. " isn't active") or nextLine or "")
+        view.buffWarn:SetTextColor(addon:Color(buff and "warning" or "muted"))
+        -- Above the tool button when it shows
+        view.buffWarn:ClearAllPoints()
+        view.buffWarn:SetPoint("BOTTOMRIGHT", action and view.prep or view.craft, "TOPRIGHT", 0, 6)
+    end
+    addon.UpdateQueueTabPrep = function()
+        if view.craft:IsVisible() then view:UpdatePrep() end
+    end
     local auraWatch = CreateFrame("Frame", nil, view.craft)
     auraWatch:RegisterUnitEvent("UNIT_AURA", "player")
     auraWatch:SetScript("OnEvent", function()
         if not view.craft:IsVisible() then return end
-        local buff = addon:QueueMissingBuff(view.next, view.mine)
-        view.buffWarn:SetText(buff and (buff .. " isn't active") or "")
+        view:UpdatePrep()
     end)
     UI.Style(view.craft, "highlight", "borderGold")
     view.craft.label:SetTextColor(addon:Color("gold"))
@@ -531,7 +565,15 @@ local function Refresh(v)
                 Money(q.spend))
         if live > 0 then text = text .. string.format(" (%d priced from live listings)", live) end
         if short then text = text .. ". Not enough listed for all of it." end
-        if not q.mine then text = text .. ". Planned without their bags: log in on them for what they already have." end
+        if not q.mine then
+            local c = GoldsmithDB.characters[q.charKey]
+            local when = c and c.stockTime and date("%b %d", c.stockTime)
+            text = text .. (when and string.format(". Counts what they held at their last login (%s)", when)
+                or ". Their bags aren't counted yet: log in on them once")
+            if #q.buyAH > 0 and addon:Setting("buyFor") == "all" then
+                text = text .. ". Buy next on any of your characters buys them"
+            end
+        end
         -- Where to buy it, always in sight (user, 2026-10-20: nobody would
         -- know Buy next is there)
         if q.mine and #q.buyAH > 0 and not short then text = text .. ". At the AH, Goldsmith's Buy next buys them." end
@@ -571,8 +613,7 @@ local function Refresh(v)
     v.craft:SetEnabled(enabled)
     v.craft:SetAlpha(enabled and 1 or 0.5)
     v.mine = q.mine
-    local buff = addon:QueueMissingBuff(v.next, q.mine)
-    v.buffWarn:SetText(buff and (buff .. " isn't active") or "")
+    v:UpdatePrep()
 end
 
 local function Reset(v)

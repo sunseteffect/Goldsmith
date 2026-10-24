@@ -2623,7 +2623,7 @@ function addon:GetOwnCost(itemName, excludeItemID, exactItemID, forSale)
         crafted, craftedQty = addon:GetCraftedCostByName(itemName)
         if excludeItemID and C_Item.GetItemNameByID(excludeItemID) == itemName then crafted = nil end
     end
-    local paid, paidQty, _, gatheredIDs, ownIDs = addon:GetAcquiredCost(itemName, exactItemID, crafted and craftedQty)
+    local paid, paidQty, _, gatheredIDs, ownIDs, uncovered = addon:GetAcquiredCost(itemName, exactItemID, crafted and craftedQty)
     if paid then table.insert(sources, { "paid", paid, paidQty }) end
     if forSale and ownIDs and next(ownIDs) then
         local free, rest = 0, {}
@@ -2638,8 +2638,16 @@ function addon:GetOwnCost(itemName, excludeItemID, exactItemID, forSale)
     -- Gathered ones at today's AH price: what you could sell them for
     local gathered, gatheredQty = addon:GatheredValue(gatheredIDs)
     if gathered then table.insert(sources, { "gathered", gathered, gatheredQty }) end
+    -- The all-time milling average only for what the dated lots above
+    -- (purchases, gathering, your recent salvage runs) don't cover, and
+    -- only for that many: it weighed every pigment ever milled against the
+    -- few you hold
     local milled, milledQty = addon:GetMilledCost(itemName)
-    if milled then table.insert(sources, { "milled", milled, milledQty }) end
+    if milled and paid == nil and #sources == 0 and not gatheredIDs then
+        table.insert(sources, { "milled", milled, milledQty })
+    elseif milled and (uncovered or 0) > 0 then
+        table.insert(sources, { "milled", milled, math.min(milledQty, uncovered) })
+    end
     if crafted then
         table.insert(sources, { "crafted", crafted, craftedQty })
     end
@@ -2797,12 +2805,19 @@ ChooseFinishing = function(recipe, stats)
         ingenuity = stats.ingenuity, picks = {}, options = {}, yours = yours,
         recipeID = recipe.recipeID, base = stats, priced = price ~= nil, extraRatio = baseRatio }
     local bySlot, order = {}, {}
+    -- A reagent whose details the game hasn't sent yet (right after a
+    -- /reload) can't be priced: the choice isn't kept, so it's made again
+    -- once they arrive. Kept, it stayed "none, not worth it" all session:
+    -- Silvermoon Parade lost its Bazaar Bites, about 700g of profit, after
+    -- a /reload (user, 2026-10-24)
+    local unready = false
     for _, o in ipairs(stats.finishing) do
         if not bySlot[o.dataSlotIndex] then
             bySlot[o.dataSlotIndex] = {}
             table.insert(order, o.dataSlotIndex)
         end
         local slot = FinishingSlot(o)
+        if not slot then unready = true end
         local unit = slot and GetSlotCost(slot)
         local ratio, learnedCrafts = OptionRatio(o)
         local extraItems = (recipe.outputQty or 1) * (ratio - baseRatio)
@@ -2836,7 +2851,7 @@ ChooseFinishing = function(recipe, stats)
             table.insert(result.picks, { slot = pick.slot, option = o })
         end
     end
-    store[stats] = result
+    if not unready then store[stats] = result end
     return result
 end
 

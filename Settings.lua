@@ -32,6 +32,10 @@ local UI = addon.UI
 --                 % more than the plan, of the item's cost or the queue's
 --                 profit (Shop.lua; user, 2026-10-19: a second click for
 --                 1.75g over 820g was friction). 0 always asks
+--   buyFor      - whose queues Buy next shops for: "me" (the character
+--                 you're on) or "all" (every character's, for buying on a
+--                 bank alt; Shop.lua; user, 2026-10-24)
+--   sounds      - a sound when Goldsmith stops you (addon:Alert)
 --   peekKey     - the modifier held to see through the window (Window.lua):
 --                 "alt" or "off" (the key binding only). Not Shift or Ctrl:
 --                 shift-clicks and Ctrl-to-explain would peek (user, 2026-10-17)
@@ -53,6 +57,8 @@ local DEFAULTS = {
     ahScan = true,
     autoScan = true,
     buyOver = 2,
+    buyFor = "me",
+    sounds = true,
     peekKey = "alt",
 }
 
@@ -503,6 +509,90 @@ function addon:Notify(kind, msg, ...)
     print("|cFF00FF00[Goldsmith]|r " .. string.format(msg, ...))
 end
 
+-- A sound, only where Goldsmith stops you: refuses a click or waits for a
+-- second one. Never for news (a scan done, a deal found): sounds are kept
+-- rare so they still mean something (user, 2026-10-23: "used thoughtfully
+-- and sparingly because they can get annoying"). The game's own sounds.
+--   "loss" - going on would lose gold (the quest-failed sound)
+--   "stop" - look before you go on (a short alarm beep)
+-- One at a time: a key held down or pressed again doesn't stack them.
+local ALERT_SOUNDS = { loss = "IG_QUEST_FAILED", stop = "ALARM_CLOCK_WARNING_3" }
+local ALERT_GAP = 1.5
+local lastAlert = 0
+-- The sound for a kind: one picked with /gsm sound use, else the default
+local function AlertSound(kind)
+    kind = ALERT_SOUNDS[kind] and kind or "stop"
+    local picked = GoldsmithDB and GoldsmithDB.alertSounds and GoldsmithDB.alertSounds[kind]
+    return SOUNDKIT and (picked and SOUNDKIT[picked] or SOUNDKIT[ALERT_SOUNDS[kind]])
+end
+function addon:Alert(kind)
+    if not addon:Setting("sounds") then return end
+    local now = GetTime()
+    if now - lastAlert < ALERT_GAP then return end
+    local sound = AlertSound(kind)
+    if not sound then return end
+    lastAlert = now
+    PlaySound(sound)
+end
+
+-- /gsm sound: the game's sounds to try for the alerts, one per use (user,
+-- 2026-10-23: "are there other sounds i can sample?"). "/gsm sound <word>"
+-- tries the game's sounds with that word in their name; "/gsm sound use"
+-- makes the last one heard the "stop" sound ("use loss": the loss sound);
+-- "/gsm sound reset" goes back to the defaults. Names missing from this
+-- version of the game are skipped.
+local SAMPLE_SOUNDS = {
+    "ALARM_CLOCK_WARNING_3", "ALARM_CLOCK_WARNING_2", "ALARM_CLOCK_WARNING_1", "IG_QUEST_FAILED",
+    "RAID_WARNING", "READY_CHECK", "IG_PLAYER_INVITE_DECLINE", "IG_QUEST_LOG_ABANDON_QUEST",
+    "UI_RAID_BOSS_WHISPER_WARNING", "LFG_ROLE_CHECK", "PVP_THROUGH_QUEUE", "TELL_MESSAGE",
+    "UI_GARRISON_TOAST_INVASION_ALERT", "IG_MAINMENU_QUIT", "IG_SPELLBOOK_CLOSE", "UI_BNET_TOAST",
+}
+local sample = { list = nil, word = nil, i = 0, last = nil }
+local function SampleList(word)
+    local list = {}
+    if word == "" then
+        for _, name in ipairs(SAMPLE_SOUNDS) do
+            if SOUNDKIT and SOUNDKIT[name] then table.insert(list, name) end
+        end
+    else
+        word = word:upper()
+        for name in pairs(SOUNDKIT or {}) do
+            if type(name) == "string" and name:find(word, 1, true) then table.insert(list, name) end
+        end
+        table.sort(list)
+    end
+    return list
+end
+function addon:SampleSound(arg)
+    arg = strtrim(arg or "")
+    local Print = function(msg, ...) print("|cFF00FF00[Goldsmith]|r " .. string.format(msg, ...)) end
+    local use = arg:lower():match("^use%s*(%a*)$")
+    if use then
+        local kind = use == "loss" and "loss" or "stop"
+        if not sample.last then Print("Try a sound first: /gsm sound") return end
+        GoldsmithDB.alertSounds = GoldsmithDB.alertSounds or {}
+        GoldsmithDB.alertSounds[kind] = sample.last
+        Print("%s is now the %s sound.", sample.last, kind == "loss" and "\"queue would lose gold\"" or "warning")
+        return
+    end
+    if arg:lower() == "reset" then
+        GoldsmithDB.alertSounds = nil
+        Print("Back to the default sounds (%s, and %s when the queue would lose gold).",
+            ALERT_SOUNDS.stop, ALERT_SOUNDS.loss)
+        return
+    end
+    if not sample.list or sample.word ~= arg:lower() then
+        sample.list, sample.word, sample.i = SampleList(arg), arg:lower(), 0
+    end
+    if #sample.list == 0 then Print("No game sounds named with \"%s\".", arg) return end
+    sample.i = sample.i % #sample.list + 1
+    local name = sample.list[sample.i]
+    sample.last = name
+    PlaySound(SOUNDKIT[name])
+    Print("%d of %d: %s. Again for the next; /gsm sound use to pick it, /gsm sound use loss for the losing-gold one.",
+        sample.i, #sample.list, name)
+end
+
 -- Keybinding
 
 -- The key that opens Goldsmith ("CTRL-G"), or nil if none is set
@@ -580,6 +670,10 @@ local CHOICES = {
     dealPercent = {},
     heldDays = {},
     buyOver = {},
+    buyFor = {
+        { value = "me", label = "This character's queue" },
+        { value = "all", label = "Every character's queue" },
+    },
     keepDays = {
         { value = 0, label = "Forever" },
         { value = 730, label = "2 years" },
@@ -687,6 +781,12 @@ local HELP = {
         "On: each sale, purchase and AH deposit, saved recipes and milling results. Handy for checking what Goldsmith records.",
         "Off: none. Everything is still recorded; see the History tab. Answers to /gsm commands always show.",
     },
+    sounds = {
+        "Sounds",
+        "A sound only when Goldsmith stops you, so you look before going on. Never for news like a finished scan or a deal.",
+        "When Buy next waits because the AH asks more than the plan: a beep, or a failed-quest sound if the queue would lose gold. A beep when a purchase fails, or when Craft next or Buy next can't do anything.",
+        "The game's own sounds, at your Sound effects volume.",
+    },
     characters = {
         "Exclude characters",
         "Tick a character to leave it out of Gold in stock, concentration, total gold, the Crafts tab and Do this next: a bank alt, or one you've stopped playing.",
@@ -724,6 +824,12 @@ local HELP = {
         "How much more than the plan Buy next pays without a second click. Up to 2% more: buys when the extra is under 2% of the item's cost or under 2% of the queue's profit.",
         "Over that, the panel says how much more and what the queue earns then, and waits for a second click. It always asks when the queue would lose gold.",
         "Always ask: a second click for anything over the plan. Under the plan always buys at once.",
+    },
+    buyFor = {
+        "Buy next for",
+        "This character's queue: Buy next shops for the character you're logged in on.",
+        "Every character's queue: it also shops for your other characters' queues, so you can buy on a bank alt for your crafters. Each item says whose queue it's for. What's bought for another character is kept for them (neither queue buys it again) until you mail it; the mailbox reminds you what to send.",
+        "Either way, Buy next's All queues box flips it for one shopping trip, then goes back to this.",
     },
     craftCost = {
         "Cost in the profession window",
@@ -831,8 +937,8 @@ local function SetKeepDays(value, panel)
 end
 
 local COLUMNS = {
-    { title = "Crafting and prices", rows = { "priceSource", "autoScan", "buyOver", "minROI", "minLine", "dealPercent", "heldDays", "keepDays" } },
-    { title = "Display", rows = { "ignored", "tooltips", "chat", "characters", "showMinimap", "craftCost", "peekKey", "keybind" } },
+    { title = "Crafting and prices", rows = { "priceSource", "autoScan", "buyOver", "buyFor", "minROI", "minLine", "dealPercent", "heldDays", "keepDays" } },
+    { title = "Display", rows = { "ignored", "tooltips", "chat", "sounds", "characters", "showMinimap", "craftCost", "peekKey", "keybind" } },
 }
 
 function addon:CreateSettingsPanel(parent)
@@ -869,6 +975,7 @@ function addon:CreateSettingsPanel(parent)
     rows.dealPercent = ChoiceRow(panel, "dealPercent", "Cheap materials", "How far below usual a material's price counts as cheap.")
     rows.heldDays = ChoiceRow(panel, "heldDays", "Held too long", "Days unsold before a crafted item is flagged.")
     rows.buyOver = ChoiceRow(panel, "buyOver", "Buy without asking", "How much over the plan Buy next pays without a second click.")
+    rows.buyFor = ChoiceRow(panel, "buyFor", "Buy next for", "Whose queues Buy next shops for at the AH.")
     rows.keepDays = Row(panel, "keepDays", "Keep history for", "How long purchases, sales and deposits are kept.")
     rows.keepDays.control = Dropdown(rows.keepDays, "keepDays", function(root)
         for _, c in ipairs(CHOICES.keepDays) do
@@ -957,6 +1064,17 @@ function addon:CreateSettingsPanel(parent)
         self.control:SetChecked(on and addon:Setting("autoScan"))
         self.control:SetAlpha(on and 1 or 0.4)
     end
+
+    rows.sounds = Row(panel, "sounds", "Sounds", "A sound when Goldsmith stops you, so you look first.")
+    rows.sounds.control = UI.Checkbox(rows.sounds, "On", function(checked)
+        addon:SetSetting("sounds", checked)
+        -- What it sounds like
+        if checked then addon:Alert("stop") end
+        panel:Update()
+    end)
+    rows.sounds.control:SetPoint("TOPRIGHT", 0, 0)
+    UI.SetTooltip(rows.sounds.control, function(tooltip) AddHelp(tooltip, "sounds") end, "ANCHOR_LEFT")
+    function rows.sounds:Update() self.control:SetChecked(addon:Setting("sounds")) end
 
     rows.craftCost = Row(panel, "craftCost", "Cost in the profession window", "Your materials and Profit under a recipe's materials.")
     rows.craftCost.control = UI.Checkbox(rows.craftCost, "Show", function(checked)

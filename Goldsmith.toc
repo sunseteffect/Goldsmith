@@ -22,6 +22,7 @@ Stock.lua
 Cooldowns.lua
 Planner.lua
 Quality.lua
+Prep.lua
 Insights.lua
 Lifetime.lua
 Window.lua

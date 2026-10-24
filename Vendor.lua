@@ -81,6 +81,7 @@ local Update
 -- button's click: the game may want one for buying.
 local function BuyAll()
     if buyingNow or #here == 0 then return end
+    if addon:TourBlocks("buy the queue's items from this vendor") then return end
     local total = Total()
     if GetMoney() < total then
         addon:Notify("info", "You need %s for this and have %s.", Money(total), Money(GetMoney()))

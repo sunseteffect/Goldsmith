@@ -289,17 +289,37 @@ function addon:MatchSaleToPost(itemName, count, unitPrice)
     return best.itemID
 end
 
+-- Posted under what yours cost you, after the AH cut: Goldsmith doesn't
+-- post (the AH window or Auctionator does), so it can't stop it, only say
+-- so right after, while cancelling costs just the deposit (error review,
+-- 2026-10-23). Only from a real cost (your crafts or what you paid), not
+-- a recipe's estimate, so a guess never cries wolf.
+local AH_CUT = 0.05
+local function CheckPostPrice(itemLocation, quantity, unitPrice)
+    if not (unitPrice and unitPrice > 0 and C_Item.DoesItemExist(itemLocation)) then return end
+    local itemID, name = C_Item.GetItemID(itemLocation), C_Item.GetItemName(itemLocation)
+    local cost, _, source = addon:GetUnitCostBasis(name, quantity, itemID)
+    if not cost or cost <= 0 or (source ~= "crafted" and source ~= "paid") then return end
+    local breakEven = cost / (1 - AH_CUT)
+    if unitPrice >= breakEven then return end
+    addon:Notify("info", "%s posted at %s each, under your break-even of %s (what yours cost you, after the AH cut). Cancel it in the AH if that's a mistake.",
+        name or "An item", addon:FormatMoney(unitPrice), addon:FormatMoney(breakEven))
+    addon:Alert("stop")
+end
+
 local function OnPostCommodity(itemLocation, duration, quantity, unitPrice)
     if not C_Item.DoesItemExist(itemLocation) then return end
     local itemID = C_Item.GetItemID(itemLocation)
     RememberPost(itemLocation, quantity, unitPrice)
     QueuePost(itemLocation, C_AuctionHouse.CalculateCommodityDeposit(itemID, duration, quantity), quantity)
+    pcall(CheckPostPrice, itemLocation, quantity, unitPrice)
 end
 
 local function OnPostItem(itemLocation, duration, quantity, bid, buyout)
     local price = buyout or bid
     RememberPost(itemLocation, quantity, price and quantity and quantity > 0 and price / quantity)
     QueuePost(itemLocation, C_AuctionHouse.CalculateItemDeposit(itemLocation, duration, quantity), quantity)
+    if price and quantity and quantity > 0 then pcall(CheckPostPrice, itemLocation, quantity, price / quantity) end
 end
 
 local function RecordDeposit()
@@ -576,6 +596,7 @@ local function PrintHelp()
     print("  /gsm cooldowns - craft cooldowns on every character")
     print("  /gsm gathered - what was counted as gathered today, and what was skipped")
     print("  /gsm buffs - your buffs, and the crafting buffs Goldsmith has seen")
+    print("  /gsm sound - try the game's sounds for Goldsmith's warnings (/gsm sound <word> to search)")
     print("  /gsm perf - time each tab and show memory use")
     print("  /gsm report - copy a bug report (versions, settings and recent errors) to paste in a comment")
     print("  /gsm reset - delete all transactions")
@@ -615,6 +636,10 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:DumpSalvageStats()
     elseif cmd == "cooldowns" or cmd == "cd" then
         addon:ListCooldowns()
+    elseif cmd == "sound" or cmd == "sounds" then
+        addon:SampleSound(rest)
+    elseif cmd == "buylist" then
+        addon:PrintBuyList(rest)
     elseif cmd == "perf" then
         addon:RunPerfCheck()
     elseif cmd == "report" or cmd == "bug" then

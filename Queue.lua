@@ -420,6 +420,9 @@ end
 -- gold queued). Recipes without tiers, gear (one item for every tier) or
 -- tiers not read yet match on the recipe alone.
 function addon:QueueCrafted(recipeID, quantity, itemID)
+    -- Made by Craft next as a material for another entry (Crafts.lua)
+    local step = addon.materialStep
+    if step and step.recipeID == recipeID and GetTime() < step.untilTime then return end
     local madeTier
     local td = addon.char.tierData and addon.char.tierData[recipeID]
     for tier, out in pairs(td and td.outputs or {}) do
@@ -522,8 +525,7 @@ local function SalvagePlan(row, salvageRows, useOnHand, pool)
     if useOnHand then
         -- Bought with Buy next and still in the mailbox counts too: a mill
         -- batch kept asking for the 494 herbs just bought (user, 2026-10-21)
-        local held = (C_Item.GetItemCount(itemID, true, false, true, true) or 0)
-            + (addon.InMailCount and addon:InMailCount(itemID) or 0)
+        local held = addon:GetOnHand(itemID)
         have = math.max(held - (pool[itemID] or 0), 0)
         have = math.min(have, remaining)
         pool[itemID] = (pool[itemID] or 0) + have
@@ -595,11 +597,11 @@ end
 -- The whole queue planned in order. Returns { charKey, mine, rows = { {
 -- entry, recipe, remaining, p, tierInfo, plan, state } }, cost, revenue,
 -- profit, complete, buyAH, buyVendor, spend, listName, listKey }.
--- Another character's queue is planned without what you have (only their
--- own bags count, and those aren't known here) and has no craft states.
+-- Another character's queue counts what they held at their last login
+-- (Planner.lua's GetOnHand) and has no craft states.
 function addon:BuildQueue(charKey)
     local mine = charKey == addon.charKey
-    local useOnHand = mine
+    local useOnHand = true
     local pool = {}
     local q = { charKey = charKey, mine = mine, rows = {}, cost = 0, revenue = 0, profit = 0, complete = true,
                 listName = "Goldsmith: Queue (" .. CharName(charKey) .. ")", listKey = "queue:" .. charKey }
@@ -630,7 +632,7 @@ function addon:BuildQueue(charKey)
                 salvageRows = {}
                 for _, r in ipairs(addon:GetSalvageRows("All", {})) do salvageRows[r.itemID] = r end
             end
-            plan = SalvagePlan(row, salvageRows, useOnHand, pool)
+            plan = addon:WithCharacter(charKey, SalvagePlan, row, salvageRows, useOnHand, pool)
             if mine then
                 row.state = addon.SalvageState(e.salvageID, row.inputName, row.remaining, row.verb)
             end
@@ -834,6 +836,11 @@ function addon:BlockedLabel(s)
         -- One thing short: name it, without the count ("Needs Luminant Flux"):
         -- the step needed 19, the vendor line said 53 for the whole queue
         local what = blocker:match("^Missing for [^:]+: (.-)%.$")
+        -- Bought and still in the mail: say where it is, short. "Needs
+        -- Sienna Ink (20 in your mailbox)" ran off the button (user,
+        -- 2026-10-24); the hover has the whole line.
+        if what and what:find("in your mailbox") then return "In the mailbox", "warning" end
+        if what and what:find("not mailed yet") then return "Not mailed yet", "warning" end
         if what and not what:find(",") then return "Needs " .. (what:gsub("^%d+ ", "")), "warning" end
         return "Needs materials", "warning"
     elseif blocker:find("concentration") then
@@ -860,9 +867,13 @@ function addon:ShoppingBlocker(line, plan)
     for part in list:gmatch("[^,]+") do
         part = part:gsub("^%s+", "")
         local name = part:match("^%d+ (.+)$") or part
+        -- Without the quality icon and any "(20 in your mailbox)": "3 ◆
+        -- Sunglass Vial" never matched the vendor list's "Sunglass Vial",
+        -- so the hover said Missing, not "from a vendor" (user, 2026-10-24)
+        local plain = name:gsub("|A.-|a", ""):gsub("%s*%(.-%)$", ""):gsub("^%s+", "")
         local total
         for _, entry in ipairs(vendor) do
-            if entry.name == name then total = entry.quantity end
+            if entry.name == plain then total = entry.quantity end
         end
         table.insert(total and fromVendor or other, total and (total .. " " .. name) or part)
     end
@@ -870,6 +881,26 @@ function addon:ShoppingBlocker(line, plan)
     local text = "Buy " .. table.concat(fromVendor, ", ") .. " from a vendor: enough for every step."
     if #other > 0 then text = head .. ": " .. table.concat(other, ", ") .. ". " .. text end
     return text
+end
+
+-- Over the button when it gives a reason instead of the step: which entry
+-- it's on, "Next: Munsell Ink x2". The button stays short ("In the
+-- mailbox"); this says what it's about (user, 2026-10-24: the middle
+-- ground over a grayed "Craft" with the reason elsewhere)
+-- A step before the craft itself (materials to make, a mill) says what
+-- it's for: "Craft 2" was Entropic Extract for Bouquet of Herbs, and
+-- nothing said so (user, 2026-10-24)
+function addon:QueueNextLine(row)
+    local s = row and row.state
+    if not s or not row.recipe or addon.QueueBusy() then return nil end
+    local name = row.recipe.outputName or "?"
+    if s.enabled then
+        -- The craft itself too: "Craft 2" alone didn't say what (user,
+        -- 2026-10-24: "i like the label above the button its missing here")
+        if s.step and not s.final then return string.format("Next: %s, for %s", s.step, name) end
+        return "Next: " .. name
+    end
+    return "Next: " .. name .. ((row.remaining or 0) > 1 and (" x" .. row.remaining) or "")
 end
 
 -- What the Craft next button says for the entry it's on: the step, or why
@@ -889,21 +920,34 @@ end
 -- stuck entry above those (Needs Anvil, Needs materials) beats opening
 -- another profession: Blacksmithing open, Gloaming Alloy first, and the
 -- button said Open Jewelcrafting (user, 2026-10-22: it should say why)
+-- Stuck only on concentration: nothing to do about it but wait. Another
+-- stuck entry you can fix now (the mailbox, a vendor) comes first: the
+-- button said Light's Potential, Needs concentration, while Bouquet of
+-- Herbs only needed its mail taken (user, 2026-10-24).
+local function WaitsOnConcentration(s)
+    for _, b in ipairs(s.blockers or {}) do
+        if b:find("concentration") then return true end
+    end
+    return false
+end
+
 function addon:QueueNextRow(q)
-    local open, stuck, station
+    local open, stuck, station, waiting
     for _, row in ipairs(q.rows) do
         local s = row.state
         if s then
             if s.enabled and not s.open then return row end
             if s.enabled then
                 open = open or row
+            elseif WaitsOnConcentration(s) then
+                waiting = waiting or row
             else
                 if not open and not stuck then station = row end
                 stuck = stuck or row
             end
         end
     end
-    return station or open or stuck
+    return station or open or stuck or waiting
 end
 
 -- Crafting in progress (a batch still casting)
@@ -925,10 +969,12 @@ function addon:CraftNext()
     local row = addon:QueueNextRow(q)
     if not row then
         addon:Notify("info", "Nothing in the queue can be crafted yet.")
+        addon:Alert("stop")
         return
     end
     if not row.state.enabled then
         addon:Notify("info", "%s: %s", row.recipe.outputName, row.state.blockers[1] or "can't craft yet")
+        addon:Alert("stop")
         return
     end
     addon.PerformCraftState(row.state, row.recipe, UpdateSoon)
@@ -949,6 +995,29 @@ local function PanelLine(i)
     line.text:SetPoint("LEFT")
     line.text:SetPoint("RIGHT", line.status, "LEFT", -6, 0)
     return line
+end
+
+-- The buff line, or in its place a button for what to do first
+-- (Prep.lua): a tool to swap, the crafting buff to turn on
+local function SetPanelPrep(row)
+    local action = row and addon:CraftPrep(row.state, row.recipe or {}, row.entry and row.entry.concentrate) or nil
+    panel.prepAction = action
+    local buff = not action and addon:QueueMissingBuff(row, true)
+    -- The Next line goes above the tool button when both show (user,
+    -- 2026-10-24: the Equip button hid it)
+    local nextLine = not buff and addon:QueueNextLine(row)
+    panel.buff:SetText(buff and (buff .. " isn't active") or nextLine or "")
+    panel.buff:SetTextColor(addon:Color(buff and "warning" or "muted"))
+    local y = 56 + (action and 26 or 0)
+    panel.buff:SetPoint("BOTTOMLEFT", 10, y)
+    panel.buff:SetPoint("BOTTOMRIGHT", -10, y)
+    buff = buff or nextLine
+    panel.prep:SetShown(action ~= nil)
+    if action then addon:SetPrepLabel(panel.prep, action) end
+    panel:SetHeight(30 + (panel.shownLines or 0) * LINE_HEIGHT + 64 + (action and 26 or 0) + (buff and 16 or 0))
+end
+addon.UpdateQueuePanelPrep = function()
+    if panel and panel:IsShown() and panel.row then SetPanelPrep(panel.row) end
 end
 
 local function KeyText()
@@ -1032,6 +1101,16 @@ local function CreatePanel()
     panel.buff = UI.Text(panel, "small", "warning", "CENTER")
     panel.buff:SetPoint("BOTTOMLEFT", 10, 56)
     panel.buff:SetPoint("BOTTOMRIGHT", -10, 56)
+    panel.prep = UI.Button(panel, "", PANEL_WIDTH - 20, 22, function() addon:RunPrep(panel.prepAction) end)
+    panel.prep:SetPoint("BOTTOMLEFT", 10, 56)
+    panel.prep.label:SetTextColor(addon:Color("warning"))
+    panel.prep:Hide()
+    UI.SetTooltip(panel.prep, function(tooltip)
+        local action = panel.prepAction
+        if not action then return end
+        tooltip:AddLine(action.label, 1, 1, 1)
+        for _, line in ipairs(action.lines or {}) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
+    end, "ANCHOR_RIGHT")
     panel.hint = UI.Text(panel, "small", "dim", "CENTER")
     panel.hint:SetPoint("BOTTOMLEFT", 10, 8)
     panel.hint:SetPoint("BOTTOMRIGHT", -10, 8)
@@ -1090,6 +1169,8 @@ local function UpdatePanel()
             end
             panel.shownLines = 1
             panel.buff:SetText("")
+            panel.prep:Hide()
+            panel.prepAction = nil
             panel:SetHeight(30 + LINE_HEIGHT + 64)
             panel.button:SetLabel("Finishing the batch")
             panel.button:SetEnabled(false)
@@ -1135,9 +1216,7 @@ local function UpdatePanel()
     end
     -- Room for the buff line when it shows; kept for the aura watch below
     panel.shownLines = shown
-    local buff = addon:QueueMissingBuff(row, true)
-    panel.buff:SetText(buff and (buff .. " isn't active") or "")
-    panel:SetHeight(30 + shown * LINE_HEIGHT + 64 + (buff and 16 or 0))
+    SetPanelPrep(row)
 
     local busy = Busy()
     local state = row and row.state
@@ -1205,9 +1284,7 @@ local auraWatch = CreateFrame("Frame")
 auraWatch:RegisterUnitEvent("UNIT_AURA", "player")
 auraWatch:SetScript("OnEvent", function()
     if not (panel and panel:IsShown() and panel.row) then return end
-    local buff = addon:QueueMissingBuff(panel.row, true)
-    panel.buff:SetText(buff and (buff .. " isn't active") or "")
-    panel:SetHeight(30 + (panel.shownLines or 0) * LINE_HEIGHT + 64 + (buff and 16 or 0))
+    SetPanelPrep(panel.row)
 end)
 
 -- Walking up to an anvil fires no event, so while the next craft needs one
