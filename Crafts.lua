@@ -2747,7 +2747,7 @@ local function CreatePlanScreen(parent)
         if #plan.buyVendor > 0 then
             local parts = {}
             for _, entry in ipairs(plan.buyVendor) do table.insert(parts, entry.quantity .. " " .. entry.name) end
-            screen.vendorLine:SetText("Buy from a vendor first: " .. table.concat(parts, ", "))
+            screen.vendorLine:SetText("Buy from vendor first: " .. table.concat(parts, ", "))
             screen.vendorLine:SetTextColor(addon:Color("warning"))
         else
             screen.vendorLine:SetText("")

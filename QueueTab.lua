@@ -588,7 +588,7 @@ local function Refresh(v)
         for _, entry in ipairs(q.buyVendor) do table.insert(parts, entry.quantity .. " " .. entry.name) end
         -- Orange and "first": 53 Luminant Flux in muted text was missed and
         -- the queue stalled on Needs materials (user, 2026-10-22)
-        v.vendorLine:SetText("Buy from a vendor first: " .. table.concat(parts, ", "))
+        v.vendorLine:SetText("Buy from vendor first: " .. table.concat(parts, ", "))
         v.vendorLine:SetTextColor(addon:Color("warning"))
     else
         v.vendorLine:SetText("")

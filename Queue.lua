@@ -875,7 +875,9 @@ end
 -- One item per line, under its heading: run together, "Missing for 2
 -- crafts: 12 Ominous Octopus, 2 Earthy Garnish. Buy 30 A Big Ol' Stick of
 -- Butter (6 for this craft) from a vendor…" was hard to read (user,
--- 2026-10-25)
+-- 2026-10-25). Vendor items show only the whole queue's amount, what the
+-- vendor panel buys: queueing, you care about the total (user, 2026-10-25:
+-- "6 for this craft" dropped)
 local function ListLines(head, items)
     return head .. "\n  " .. table.concat(items, "\n  ")
 end
@@ -887,7 +889,7 @@ function addon:ShoppingBlocker(line, plan)
     for part in list:gmatch("[^,]+") do table.insert(items, (part:gsub("^%s+", ""))) end
     local vendor = plan and plan.buyVendor
     if not vendor or #vendor == 0 then return ListLines(head .. ":", items) end
-    local fromVendor, other, anyAll = {}, {}, false
+    local fromVendor, other = {}, {}
     for _, part in ipairs(items) do
         local name = part:match("^%d+ (.+)$") or part
         -- Without the quality icon and any "(20 in your mailbox)": "3 ◆
@@ -904,13 +906,10 @@ function addon:ShoppingBlocker(line, plan)
         for _, entry in ipairs(addon.lastQueueVendor or {}) do
             if entry.name == plain and total and entry.quantity > total then all = entry.quantity end
         end
-        table.insert(total and fromVendor or other, total and (all and string.format("%d %s (%d for this craft)", all, name, total)
-            or (total .. " " .. name)) or part)
-        anyAll = anyAll or all ~= nil
+        table.insert(total and fromVendor or other, total and ((all or total) .. " " .. name) or part)
     end
     if #fromVendor == 0 then return ListLines(head .. ":", items) end
-    local text = ListLines("Buy from a vendor, for " .. (anyAll and "the whole queue:" or "every step:"),
-        fromVendor)
+    local text = ListLines("Buy from vendor:", fromVendor)
     if #other > 0 then text = ListLines(head .. ":", other) .. "\n" .. text end
     return text
 end

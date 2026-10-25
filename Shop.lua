@@ -995,7 +995,7 @@ function addon.UpdateShopSection()
     if #vendorList > 0 and color == "muted" then
         local names = {}
         for _, e in ipairs(vendorList) do table.insert(names, string.format("%dx %s", e.quantity, e.name)) end
-        note = (note and (note .. " ") or "") .. "From a vendor: " .. table.concat(names, ", ") .. "."
+        note = (note and (note .. " ") or "") .. "From vendor: " .. table.concat(names, ", ") .. "."
     end
     -- The button: ask for a price, confirm it, or why it can't
     local label, enabled = "Buy next", nextEntry ~= nil
