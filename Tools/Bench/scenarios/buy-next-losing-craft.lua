@@ -1,0 +1,29 @@
+-- Buy next for a queued craft that now loses gold (what it sells for
+-- dropped since it was queued): even under the plan's price it waits for
+-- a second click, says why, and plays the loss sound (error review #1)
+local bench = dofile(BENCH_DIR .. "bench.lua")
+local AZEROOT, TEA = 236774, 1226197
+local db = bench.LoadSaved()
+db.settings.buyOver = 0
+db.inMail["Mysticmead-Sargeras"] = {}
+db.queues["Mysticmead-Sargeras"] = { { recipeID = TEA, quantity = 8, made = 0, added = os.time() } }
+-- Azeroot Tea now sells for 1 copper
+db.ownScan.prices[db.recipes[TEA].outputItemID] = { 1 }
+local myst = db.characters["Mysticmead-Sargeras"]
+myst.stock[AZEROOT], myst.stock[AZEROOT + 1] = nil, nil
+bench.Login("Mysticmead", { db = db })
+bench.world.bank[AZEROOT], bench.world.bank[AZEROOT + 1] = nil, nil
+bench.SetBags({ [AZEROOT] = nil, [AZEROOT + 1] = nil })
+
+bench.OpenAH()
+bench.Click("Buy 8 Azeroot")
+bench.Calls()
+-- 15g each, under the plan's ~20g
+bench.QuotePrice(AZEROOT, bench.Gold(15), 8)
+local calls = bench.Calls()
+bench.HasNot("not bought though under plan", calls, "Confirm")
+bench.Has("loss sound", calls, "PlaySound(IG_QUEST_FAILED)")
+bench.Has("says the craft loses gold", bench.Screen(), "Azeroot Tea loses")
+bench.Click("Buy 8 Azeroot for 120")
+bench.Has("second click buys anyway", bench.Calls(), "ConfirmCommoditiesPurchase(236774, 8)")
+bench.Done()

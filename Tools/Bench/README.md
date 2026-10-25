@@ -71,6 +71,7 @@ Shared code for several scenarios goes in `lib\` (see
 
 | | |
 |---|---|
+| `bench.OpenProfession("Cooking")` / `CloseProfession()` | the profession window, its recipes answered from the saved ones (quality stats only if `world.operations` has them) |
 | `bench.OpenAH()` / `CloseAH()`, `OpenMail()` / `CloseMail()`, `OpenVendor(items)` / `CloseVendor()` | |
 | `bench.Click("label", mouseButton, wait)` | click the shown button with that text, then let `wait` seconds pass (default 1) |
 | `bench.Slash("/gsm data")` | |
@@ -85,7 +86,7 @@ Shared code for several scenarios goes in `lib\` (see
 | | |
 |---|---|
 | `bench.Check(name, ok, detail)`, `Equal(name, got, want)`, `Near(name, got, want, tolerance)` | |
-| `bench.Has(name, where, text)` / `HasNot` | text in a string or any line of a list |
+| `bench.Has(name, where, text)` / `HasNot` | plain text in a string or any line of a list (`false` as a 4th argument for a Lua pattern) |
 | `bench.Screen()` | text of every frame showing now |
 | `bench.Chat()` | chat lines since the last call (`bench.loginChat`: what login said) |
 | `bench.Calls()` | game calls since the last call: `"ConfirmCommoditiesPurchase(236774, 8)"` |

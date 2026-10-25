@@ -53,10 +53,10 @@ function B.Near(name, got, want, tolerance)
     return B.Check(name, ok, "got " .. Show(got) .. ", want " .. Show(want) .. " (±" .. tolerance .. ")")
 end
 
--- A pattern (plain text unless it has Lua pattern characters) found in a
--- string or in any line of a list
+-- Text found in a string or in any line of a list: plain text (a hyphen is
+-- just a hyphen); pass plain = false for a Lua pattern
 function B.Has(name, where, pattern, plain)
-    if plain == nil then plain = not pattern:find("[%%%[%]%^%$%*%+%-%?]") end
+    if plain == nil then plain = true end
     local lines = type(where) == "table" and where or { tostring(where) }
     for _, line in ipairs(lines) do
         if tostring(line):find(pattern, 1, plain) then return B.Check(name, true) end
@@ -65,7 +65,7 @@ function B.Has(name, where, pattern, plain)
 end
 
 function B.HasNot(name, where, pattern, plain)
-    if plain == nil then plain = not pattern:find("[%%%[%]%^%$%*%+%-%?]") end
+    if plain == nil then plain = true end
     local lines = type(where) == "table" and where or { tostring(where) }
     for _, line in ipairs(lines) do
         if tostring(line):find(pattern, 1, plain) then
@@ -336,11 +336,11 @@ function B.OpenMail()
 end
 function B.CloseMail() world.mailOpen = false Close(MailFrame, "MAIL_CLOSED") end
 
--- Click the shown button whose label matches (plain text, or a pattern),
+-- Click the shown button whose label contains this text,
 -- then let `wait` seconds pass (default 1). Fails the check when no such
 -- button shows.
 function B.Click(label, mouseButton, wait)
-    local plain = not label:find("[%%%[%]%^%$%*%+%-%?]")
+    local plain = true
     for _, f in ipairs(wow.frames) do
         if f._text and f:IsVisible() and wow.Strip(f._text):find(label, 1, plain) then
             local b = f
@@ -360,6 +360,42 @@ function B.OpenVendor(items)
     Open(MerchantFrame, "MERCHANT_SHOW")
 end
 function B.CloseVendor() world.merchantOpen = false Close(MerchantFrame, "MERCHANT_CLOSED") end
+
+-- Open a profession window ("Cooking"): the game's answers about its
+-- recipes (learned, materials by slot and quality) are built from the
+-- recipes Goldsmith saved for the character. Quality stats
+-- (GetCraftingOperationInfo) stay unanswered unless world.operations has them.
+function B.OpenProfession(name)
+    local c = GoldsmithDB.characters[B.addon.charKey]
+    for id, r in pairs(GoldsmithDB.recipes) do
+        if r.profession == name and c.knownRecipes and c.knownRecipes[id] then
+            local slots = {}
+            for i, s in ipairs(r.reagents or {}) do
+                local reagents = {}
+                for _, itemID in ipairs(s.itemIDs or {}) do table.insert(reagents, { itemID = itemID }) end
+                table.insert(slots, { required = true, quantityRequired = s.quantity, reagentType = 1,
+                    dataSlotIndex = i, slotIndex = i, reagents = reagents })
+            end
+            world.recipeInfo[id] = world.recipeInfo[id] or { recipeID = id, learned = true, name = r.name,
+                craftable = true, categoryID = 0 }
+            world.schematics[id] = world.schematics[id] or { recipeID = id, outputItemID = r.outputItemID,
+                quantityMin = r.outputQty or 1, quantityMax = r.outputQty or 1, reagentSlotSchematics = slots }
+        end
+    end
+    world.openProfession = { professionName = name, profession = 0, professionID = 0, skillLevel = 100,
+        maxSkillLevel = 100 }
+    ProfessionsFrame:Show()
+    B.Fire("TRADE_SKILL_SHOW")
+    B.Fire("TRADE_SKILL_LIST_UPDATE")
+    B.Advance(2)
+end
+
+function B.CloseProfession()
+    world.openProfession = nil
+    ProfessionsFrame:Hide()
+    B.Fire("TRADE_SKILL_CLOSE")
+    B.Advance(1)
+end
 
 -- The AH answers a commodity purchase started with StartCommoditiesPurchase
 function B.QuotePrice(itemID, unitPrice, quantity)
