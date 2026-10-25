@@ -988,15 +988,15 @@ function addon:CraftNext()
         addon:Notify("info", "Nothing in the queue.")
         return
     end
+    -- Can't craft: chat and the Craft button say why, no sound (user,
+    -- 2026-10-25)
     local row = addon:QueueNextRow(q)
     if not row then
         addon:Notify("info", "Nothing in the queue can be crafted yet.")
-        addon:Alert("stop")
         return
     end
     if not row.state.enabled then
         addon:Notify("info", "%s: %s", row.recipe.outputName, row.state.blockers[1] or "can't craft yet")
-        addon:Alert("stop")
         return
     end
     addon.PerformCraftState(row.state, row.recipe, UpdateSoon)
