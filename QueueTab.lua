@@ -127,6 +127,9 @@ end
 local function FillRow(row, item)
     local c = row.cells
     c.item:SetText(ItemText(item))
+    -- The one Craft next is on in gold, as on the queue panel (user,
+    -- 2026-10-25)
+    c.item:SetTextColor(addon:Color(view.next == item and "gold" or "text"))
     local made = item.entry.made or 0
     c.make:SetText(made > 0 and string.format("%d of %d", item.remaining, item.entry.quantity) or tostring(item.remaining))
     local plan = item.plan

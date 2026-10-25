@@ -1031,12 +1031,17 @@ local function SetPanelPrep(row)
     panel.buff:SetText(buff and (buff .. " isn't active") or nextLine or "")
     panel.buff:SetTextColor(addon:Color(buff and "warning" or "muted"))
     local y = 56 + (action and 26 or 0)
+    panel.buff:ClearAllPoints()
     panel.buff:SetPoint("BOTTOMLEFT", 10, y)
-    panel.buff:SetPoint("BOTTOMRIGHT", -10, y)
     buff = buff or nextLine
     panel.prep:SetShown(action ~= nil)
     if action then addon:SetPrepLabel(panel.prep, action) end
-    local buffHeight = buff and math.max(math.ceil(panel.buff:GetStringHeight()) + 4, 16) or 0
+    -- Its own height, from its fixed width: sized by two corners it was
+    -- measured as one line and the second ran over the Craft button
+    -- (2026-10-25)
+    local textHeight = math.ceil(panel.buff:GetStringHeight())
+    panel.buff:SetHeight(math.max(textHeight, 1))
+    local buffHeight = buff and math.max(textHeight + 4, 16) or 0
     panel:SetHeight(30 + (panel.shownLines or 0) * LINE_HEIGHT + 64 + (action and 26 or 0) + buffHeight)
 end
 addon.UpdateQueuePanelPrep = function()
@@ -1125,7 +1130,8 @@ local function CreatePanel()
     -- The next craft's crafting buff when it's off (QueueMissingBuff)
     panel.buff = UI.Text(panel, "small", "warning", "CENTER")
     panel.buff:SetPoint("BOTTOMLEFT", 10, 56)
-    panel.buff:SetPoint("BOTTOMRIGHT", -10, 56)
+    panel.buff:SetWidth(PANEL_WIDTH - 20)
+    panel.buff:SetJustifyV("BOTTOM")
     -- Two lines rather than cut off ("for Gloaming..."; user, 2026-10-24)
     panel.buff:SetWordWrap(true)
     panel.buff:SetMaxLines(2)

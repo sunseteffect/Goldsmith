@@ -11,6 +11,10 @@ db.queues["Maddoxynn-Sargeras"] = {}
 db.queues["Mysticmead-Sargeras"] = { { recipeID = AZEROOT_TEA, quantity = 8, made = 0, added = os.time() } }
 local myst = db.characters["Mysticmead-Sargeras"]
 myst.stock[AZEROOT], myst.stock[AZEROOT + 1] = nil, nil
+-- Tea sells well, whatever today's prices: a losing craft would stop Buy next
+db.ownScan.prices[db.recipes[AZEROOT_TEA].outputItemID] = { 50 * 10000 }
+db.searchPrices = {}
+db.inMail["Mysticmead-Sargeras"] = {}
 
 local addon = bench.Login("Maddoxynn", { db = db })
 -- None held anywhere, whatever the last login saved

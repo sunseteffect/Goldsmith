@@ -714,8 +714,9 @@ function addon:BuyNext()
     if not addon:Setting("ahScan") or not ahOpen then return end
     if buying or asking then return end
     if addon:IsScanning() then
+        -- No sound: the panel says so too; sounds are for what matters
+        -- (user, 2026-10-25)
         addon:Notify("info", "Buy next waits for the Goldsmith scan to finish.")
-        addon:Alert("stop")
         return
     end
     -- Second click: buy at the price shown. A price more than a few

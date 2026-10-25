@@ -6,6 +6,12 @@ local AZEROOT = 236774
 local db = bench.LoadSaved()
 db.queues["Mysticmead-Sargeras"] = { { recipeID = 1226197, quantity = 8, made = 0, added = os.time() } }
 db.boughtFor["Mysticmead-Sargeras"] = { [AZEROOT] = { quantity = 3, holder = "Maddoxynn-Sargeras", time = os.time() } }
+-- She holds 5 of the 8 her queue needs, whatever the last login saw:
+-- 3 to mail, from a stack of 7
+local myst = db.characters["Mysticmead-Sargeras"]
+myst.stock[AZEROOT], myst.stock[AZEROOT + 1] = 5, nil
+if myst.stockBank then myst.stockBank[AZEROOT], myst.stockBank[AZEROOT + 1] = nil, nil end
+db.inMail["Mysticmead-Sargeras"] = {}
 local tsmMail = true
 TSM_API = { IsUIVisible = function(ui) return ui == "MAILING" and tsmMail end }
 bench.Login("Maddoxynn", { db = db })
