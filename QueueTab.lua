@@ -103,7 +103,7 @@ local function SalvageTooltip(tooltip, item)
     if s then
         tooltip:AddLine(" ")
         for _, line in ipairs(s.notes) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
-        for _, line in ipairs(s.blockers) do tooltip:AddLine(addon:ShoppingBlocker(line, item.plan), 1, 0.6, 0.2, true) end
+        for _, line in ipairs(s.blockers) do addon:AddShoppingBlocker(tooltip, line, item.plan) end
     end
     tooltip:AddLine(" ")
     addon:ClickHint(tooltip, "Click to open its plan (change how many there). Right-click to move or remove it.")
@@ -229,7 +229,7 @@ local function RowTooltip(tooltip, item)
             end
         end
         for _, line in ipairs(s.notes) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
-        for _, line in ipairs(s.blockers) do tooltip:AddLine(addon:ShoppingBlocker(line, item.plan), 1, 0.6, 0.2, true) end
+        for _, line in ipairs(s.blockers) do addon:AddShoppingBlocker(tooltip, line, item.plan) end
     end
     tooltip:AddLine(" ")
     addon:ClickHint(tooltip, "Click to open its plan (change how many there). Right-click to move or remove it.")
@@ -455,7 +455,7 @@ local function Create(parent)
             tooltip:AddLine(row.recipe.outputName, addon:Color("gold"))
             for _, line in ipairs(row.state.notes) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
             for _, line in ipairs(row.state.blockers) do
-                tooltip:AddLine(addon:ShoppingBlocker(line, row.plan), 1, 0.6, 0.2, true)
+                addon:AddShoppingBlocker(tooltip, line, row.plan)
             end
         elseif view.q and not view.q.mine then
             tooltip:AddLine("Log in on " .. CharName(view.q.charKey) .. " to craft their queue.", 1, 0.6, 0.2, true)

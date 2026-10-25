@@ -909,10 +909,22 @@ function addon:ShoppingBlocker(line, plan)
         anyAll = anyAll or all ~= nil
     end
     if #fromVendor == 0 then return ListLines(head .. ":", items) end
-    local text = ListLines("Buy from a vendor, enough for " .. (anyAll and "the whole queue:" or "every step:"),
+    local text = ListLines("Buy from a vendor, for " .. (anyAll and "the whole queue:" or "every step:"),
         fromVendor)
     if #other > 0 then text = ListLines(head .. ":", other) .. "\n" .. text end
     return text
+end
+
+-- Into a hover in orange: a list a line each, unwrapped so the hover
+-- widens to fit (wrapped in the narrow hover, "(6 for this craft)" broke
+-- across lines; user, 2026-10-25); any other blocker wraps as before
+function addon:AddShoppingBlocker(tooltip, line, plan)
+    local text = addon:ShoppingBlocker(line, plan)
+    if not text:find("\n") then
+        tooltip:AddLine(text, 1, 0.6, 0.2, true)
+        return
+    end
+    for part in text:gmatch("[^\n]+") do tooltip:AddLine(part, 1, 0.6, 0.2, false) end
 end
 
 -- Over the button when it gives a reason instead of the step: which entry
@@ -1173,7 +1185,7 @@ local function CreatePanel()
             end
             for _, line in ipairs(row.state.notes) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
             for _, line in ipairs(row.state.blockers) do
-                tooltip:AddLine(addon:ShoppingBlocker(line, row.plan), 1, 0.6, 0.2, true)
+                addon:AddShoppingBlocker(tooltip, line, row.plan)
             end
         end
         tooltip:AddLine(" ")

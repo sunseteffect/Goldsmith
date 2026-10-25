@@ -10,7 +10,7 @@ addon.lastQueueVendor = { { name = "A Big Ol' Stick of Butter", quantity = 30 } 
 local plan = { buyVendor = { { name = "A Big Ol' Stick of Butter", quantity = 6 } } }
 bench.Equal("vendor items under their own heading", addon:ShoppingBlocker(line, plan),
     "Missing for 2 crafts:\n  12 Ominous Octopus\n  2 Earthy Garnish\n"
-    .. "Buy from a vendor, enough for the whole queue:\n  30 A Big Ol' Stick of Butter (6 for this craft)")
+    .. "Buy from a vendor, for the whole queue:\n  30 A Big Ol' Stick of Butter (6 for this craft)")
 bench.Equal("other blockers untouched", addon:ShoppingBlocker("Needs Cooking Fire nearby", plan),
     "Needs Cooking Fire nearby")
 bench.Done()

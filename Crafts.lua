@@ -2374,7 +2374,7 @@ local function CreatePlanScreen(parent)
         end
         for _, line in ipairs(state.notes) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
         for _, line in ipairs(state.blockers) do
-            tooltip:AddLine(addon:ShoppingBlocker(line, screen.builtPlan), 1, 0.6, 0.2, true)
+            addon:AddShoppingBlocker(tooltip, line, screen.builtPlan)
         end
     end, "ANCHOR_TOP")
 
