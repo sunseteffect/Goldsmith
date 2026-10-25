@@ -1,0 +1,18 @@
+-- The Buy next key where it can't buy: AH closed says so in chat, without
+-- a sound; with the AH scan panel off the key does nothing at all (user,
+-- 2026-10-25: off means you don't use it)
+local bench = dofile(BENCH_DIR .. "bench.lua")
+local addon = bench.Login("Mysticmead")
+bench.Chat()
+bench.Calls()
+addon:BuyNext()
+bench.Has("AH closed: says so", bench.Chat(), "Open the auction house first.")
+bench.HasNot("AH closed: no sound", bench.Calls(), "PlaySound(")
+addon:SetSetting("ahScan", false)
+bench.OpenAH()
+bench.Chat()
+bench.Calls()
+addon:BuyNext()
+bench.Equal("panel off: nothing in chat", #bench.Chat(), 0)
+bench.HasNot("panel off: no sound", bench.Calls(), "PlaySound(")
+bench.Done()

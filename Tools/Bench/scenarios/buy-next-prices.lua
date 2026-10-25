@@ -5,11 +5,20 @@ local bench = dofile(BENCH_DIR .. "bench.lua")
 local AZEROOT = 236774
 local db = bench.LoadSaved()
 db.settings.buyOver = 0
+-- No auto scan on opening the AH: Buy next would wait for it
+db.settings.autoScan = false
+-- Her queue only: Buy next also buys for the other queues
+db.queues = {}
 db.queues["Mysticmead-Sargeras"] = { { recipeID = 1226197, quantity = 8, made = 0, added = os.time() } }
 local myst = db.characters["Mysticmead-Sargeras"]
 -- Nothing in her mailbox, whatever the last login saw
 db.inMail["Mysticmead-Sargeras"] = {}
 myst.stock[AZEROOT], myst.stock[AZEROOT + 1] = nil, nil
+-- No alt holds any either, or Buy next suggests mailing theirs first
+for _, c in pairs(db.characters) do
+    for _, held in ipairs({ c.stock or {}, c.stockBank or {} }) do held[AZEROOT], held[AZEROOT + 1] = nil, nil end
+end
+if db.warbandStock then db.warbandStock[AZEROOT], db.warbandStock[AZEROOT + 1] = nil, nil end
 local addon = bench.Login("Mysticmead", { db = db })
 bench.SetBags({ [AZEROOT] = nil, [AZEROOT + 1] = nil })
 

@@ -1,6 +1,7 @@
 -- Buy next for a queued craft that now loses gold (what it sells for
 -- dropped since it was queued): even under the plan's price it waits for
--- a second click, says why, and plays the loss sound (error review #1)
+-- a second click, says why, plays the raid warning and pops up the loss in
+-- the middle of the screen (error review #1)
 local bench = dofile(BENCH_DIR .. "bench.lua")
 local AZEROOT, TEA = 236774, 1226197
 local db = bench.LoadSaved()
@@ -22,7 +23,8 @@ bench.Calls()
 bench.QuotePrice(AZEROOT, bench.Gold(15), 8)
 local calls = bench.Calls()
 bench.HasNot("not bought though under plan", calls, "Confirm")
-bench.Has("loss sound", calls, "PlaySound(IG_QUEST_FAILED)")
+bench.Has("raid warning sound", calls, "PlaySound(RAID_WARNING)")
+bench.Has("popup says the craft loses gold", calls, "RaidNotice(Goldsmith: Azeroot Tea loses")
 bench.Has("says the craft loses gold", bench.Screen(), "Azeroot Tea loses")
 bench.Click("Buy 8 Azeroot for 120")
 bench.Has("second click buys anyway", bench.Calls(), "ConfirmCommoditiesPurchase(236774, 8)")

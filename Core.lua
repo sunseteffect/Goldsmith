@@ -304,7 +304,8 @@ local function CheckPostPrice(itemLocation, quantity, unitPrice)
     if unitPrice >= breakEven then return end
     addon:Notify("info", "%s posted at %s each, under your break-even of %s (what yours cost you, after the AH cut). Cancel it in the AH if that's a mistake.",
         name or "An item", addon:FormatMoney(unitPrice), addon:FormatMoney(breakEven))
-    addon:Alert("stop")
+    addon:Alert("loss", string.format("%s posted under your break-even of %s.", name or "An item",
+        addon:FormatMoney(breakEven)))
 end
 
 local function OnPostCommodity(itemLocation, duration, quantity, unitPrice)

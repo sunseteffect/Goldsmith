@@ -513,11 +513,15 @@ end
 -- second one. Never for news (a scan done, a deal found): sounds are kept
 -- rare so they still mean something (user, 2026-10-23: "used thoughtfully
 -- and sparingly because they can get annoying"). The game's own sounds.
---   "loss" - going on would lose gold (the quest-failed sound)
+--   "loss" - going on would lose gold: the raid warning too (the
+--            quest-failed sound was too quiet for the worst case; user,
+--            2026-10-25), plus `popup` in the middle of the screen, as
+--            the game shows a raid warning, so it's clear where to look
 --   "stop" - look before you go on (the raid warning: the beep was too
 --            soft, user's pick from /gsm sound, 2026-10-24)
 -- One at a time: a key held down or pressed again doesn't stack them.
-local ALERT_SOUNDS = { loss = "IG_QUEST_FAILED", stop = "RAID_WARNING" }
+-- The popup shows with sounds off too: it's text, not noise.
+local ALERT_SOUNDS = { loss = "RAID_WARNING", stop = "RAID_WARNING" }
 local ALERT_GAP = 1.5
 local lastAlert = 0
 -- The sound for a kind: one picked with /gsm sound use, else the default
@@ -526,7 +530,11 @@ local function AlertSound(kind)
     local picked = GoldsmithDB and GoldsmithDB.alertSounds and GoldsmithDB.alertSounds[kind]
     return SOUNDKIT and (picked and SOUNDKIT[picked] or SOUNDKIT[ALERT_SOUNDS[kind]])
 end
-function addon:Alert(kind)
+function addon:Alert(kind, popup)
+    if popup and RaidNotice_AddMessage and RaidWarningFrame then
+        RaidNotice_AddMessage(RaidWarningFrame, "Goldsmith: " .. popup,
+            ChatTypeInfo and ChatTypeInfo.RAID_WARNING or { r = 1, g = 0.28, b = 0 })
+    end
     if not addon:Setting("sounds") then return end
     local now = GetTime()
     if now - lastAlert < ALERT_GAP then return end
@@ -785,7 +793,7 @@ local HELP = {
     sounds = {
         "Sounds",
         "A sound only when Goldsmith stops you, so you look before going on. Never for news like a finished scan or a deal.",
-        "When Buy next waits because the AH asks more than the plan: the raid warning, or a failed-quest sound if a craft would lose gold. The raid warning when a purchase fails, or when Craft next or Buy next can't do anything.",
+        "The raid warning when Buy next waits because the AH asks more than the plan, when a purchase fails, or when Craft next can't craft anything. When you'd lose gold (a queued craft or the queue at a loss, or posting under what yours cost you), a warning in the middle of the screen too, even with sounds off.",
         "The game's own sounds, at your Sound effects volume.",
     },
     characters = {

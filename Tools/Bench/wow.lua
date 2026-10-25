@@ -408,6 +408,8 @@ HideUIPanel = function(f) if f then f:Hide() end end
 CloseDropDownMenus = function() end
 PlaySound = function(id) Record("PlaySound", id) end
 PlaySoundFile = function(f) Record("PlaySoundFile", f) end
+RaidWarningFrame = {}
+RaidNotice_AddMessage = function(_, msg) Record("RaidNotice", msg) end
 StopSound = function() end
 SOUNDKIT = setmetatable({}, { __index = function(_, k) return k end })
 InCombatLockdown = function() return world.combat end

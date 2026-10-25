@@ -708,14 +708,11 @@ end
 -- From a click or the key binding (the game only buys from one)
 function addon:BuyNext()
     if addon:TourBlocks("buy the next item for the queue") then return end
-    if not addon:Setting("ahScan") then
-        addon:Notify("info", "Buy next is in the AH scan panel, which is off (Settings > Crafting and prices).")
-        addon:Alert("stop")
-        return
-    end
+    -- Panel off: you don't use Buy next, so the key does nothing (user,
+    -- 2026-10-25). AH closed: a quiet line, no sound.
+    if not addon:Setting("ahScan") then return end
     if not ahOpen then
         addon:Notify("info", "Open the auction house first.")
-        addon:Alert("stop")
         return
     end
     if buying or asking then return end
@@ -1133,9 +1130,19 @@ events:SetScript("OnEvent", function(_, event, unit, total)
         if BuyWithoutAsking(quote, total) then
             Confirm(quote)
         else
-            -- Waits for a second click: louder when the queue would lose
+            -- Waits for a second click: a popup too when you'd lose gold
             local _, _, profitThen = Gap()
-            addon:Alert(((profitThen and profitThen < 0) or LossNeedsAsking(quote)) and "loss" or "stop")
+            local losers = LossNeedsAsking(quote)
+            -- The losing craft first: it names the cause
+            if losers then
+                addon:Alert("loss", string.format("%s loses %s at current prices.",
+                    addon:QueueRowName(losers[1]), Money(-NowProfit(losers[1].plan))))
+            elseif profitThen and profitThen < 0 then
+                addon:Alert("loss", string.format("buying %s puts the queue at %s.", quote.name,
+                    addon:FormatSignedMoney(profitThen)))
+            else
+                addon:Alert("stop")
+            end
             Update()
         end
     elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "COMMODITY_SEARCH_RESULTS_RECEIVED" then
