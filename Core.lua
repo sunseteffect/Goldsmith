@@ -596,7 +596,6 @@ local function PrintHelp()
     print("  /gsm cooldowns - craft cooldowns on every character")
     print("  /gsm gathered - what was counted as gathered today, and what was skipped")
     print("  /gsm buffs - your buffs, and the crafting buffs Goldsmith has seen")
-    print("  /gsm sound - try the game's sounds for Goldsmith's warnings (/gsm sound <word> to search)")
     print("  /gsm perf - time each tab and show memory use")
     print("  /gsm report - copy a bug report (versions, settings and recent errors) to paste in a comment")
     print("  /gsm reset - delete all transactions")
@@ -636,9 +635,11 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:DumpSalvageStats()
     elseif cmd == "cooldowns" or cmd == "cd" then
         addon:ListCooldowns()
-    elseif cmd == "sound" or cmd == "sounds" then
+    -- Developer tools, not for players (user, 2026-10-24: "just me. ill
+    -- decide what sound"). On with /run GoldsmithDB.devTools = true
+    elseif (cmd == "sound" or cmd == "sounds") and GoldsmithDB.devTools then
         addon:SampleSound(rest)
-    elseif cmd == "buylist" then
+    elseif cmd == "buylist" and GoldsmithDB.devTools then
         addon:PrintBuyList(rest)
     elseif cmd == "perf" then
         addon:RunPerfCheck()

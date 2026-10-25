@@ -108,9 +108,54 @@ end
 -- not for a pile worth a lot (user, 2026-10-23). The warband bank is
 -- already counted.
 local ALT_WORTH = 100 * 10000
+
+-- Who else an item on the list is for ("Maddoxius"), or nil when it's
+-- only for you
+local function ForWhom(entry)
+    local names = {}
+    for _, part in ipairs(entry and entry.parts or {}) do
+        if part.key ~= addon.charKey then table.insert(names, addon.QueueCharName(part.key)) end
+    end
+    return #names > 0 and table.concat(names, ", ") or nil
+end
+
+-- Whether a queued craft of yours uses the item: then what you hold may be
+-- spoken for, and isn't offered to someone else
+local function OwnQueueUses(itemID)
+    for _, e in ipairs(addon:GetQueue(addon.charKey)) do
+        local recipe = e.recipeID and GoldsmithDB.recipes[e.recipeID]
+        for _, r in ipairs(recipe and recipe.reagents or {}) do
+            for _, id in ipairs(r.itemIDs or {}) do
+                if id == itemID then return true end
+            end
+        end
+    end
+    return false
+end
+
+-- Bought here only for other characters' queues while you hold some
+-- yourself: mail yours instead. On Maddoxynn with 18 Azeroot, Buy next
+-- offered 7 more for Mysticmead (user, 2026-10-24: "it should probably
+-- say send to mysticmead"). Not the warband bank (their plan counts it).
+local function OwnStockNote(entry, unit)
+    for _, part in ipairs(entry.parts or {}) do
+        if part.key == addon.charKey then return nil end
+    end
+    local who = ForWhom(entry)
+    if not who or OwnQueueUses(entry.itemID) then return nil end
+    local have = (C_Item.GetItemCount(entry.itemID, true, false, true, false) or 0)
+        - (addon.ReservedCount and addon:ReservedCount(entry.itemID) or 0)
+    if have <= 0 then return nil end
+    local send = math.min(have, entry.quantity)
+    return string.format("You have %d %s: mail %d to %s instead of buying (saves about %s). Right-click Buy next to skip it.",
+        have, entry.name or "of these", send, who, Money(send * unit))
+end
+
 local function AltStockNote(entry)
     if not (entry and entry.quantity and entry.quantity > 0 and entry.cost) then return nil end
     local unit = entry.cost / entry.quantity
+    local mine = OwnStockNote(entry, unit)
+    if mine then return mine end
     local _, list = addon:GetStock(entry.itemID)
     -- Not the characters it's bought for: their plans already count what
     -- they hold ("Trypttamine has 22 ore" on Trypttamine's own ore; user,
@@ -130,15 +175,6 @@ local function AltStockNote(entry)
         best.name or "Another character", best.count, entry.name or "of these", Money(saves))
 end
 
--- Who else an item on the list is for ("Maddoxius"), or nil when it's
--- only for you
-local function ForWhom(entry)
-    local names = {}
-    for _, part in ipairs(entry and entry.parts or {}) do
-        if part.key ~= addon.charKey then table.insert(names, addon.QueueCharName(part.key)) end
-    end
-    return #names > 0 and table.concat(names, ", ") or nil
-end
 
 -- The first item on the queue's list not skipped this visit
 local function NextEntry()
@@ -797,6 +833,7 @@ function addon.UpdateShopSection()
         section.note:ClearAllPoints()
         section.note:SetPoint("TOPLEFT", 10, -26)
         section.note:SetPoint("RIGHT", -10, 0)
+        if section:GetWidth() > 60 then section.note:SetWidth(section:GetWidth() - 20) end
         section.note:SetText(other)
         section.note:SetTextColor(addon:Color("muted"))
         section.note:Show()
@@ -926,6 +963,10 @@ function addon.UpdateShopSection()
         section.note:ClearAllPoints()
         section.note:SetPoint("TOPLEFT", 10, -(y + 4))
         section.note:SetPoint("RIGHT", -10, 0)
+        -- A set width, so the height is measured for the wrap you see: a
+        -- three-line note was measured as two and ran over the list
+        -- (user, 2026-10-24)
+        if section:GetWidth() > 60 then section.note:SetWidth(section:GetWidth() - 20) end
         section.note:SetText(note)
         section.note:SetTextColor(addon:Color(color))
         section.note:Show()
@@ -1041,8 +1082,14 @@ events:SetScript("OnEvent", function(_, event, unit, total)
         for _, part in ipairs(buying.parts or {}) do
             if part.key ~= addon.charKey and part.quantity > 0 then
                 BoughtFor(part.key, buying.itemID, part.quantity)
-                addon:Notify("info", "Mail %d %s to %s: bought for their queue.", part.quantity,
-                    C_Item.GetItemNameByID(buying.itemID) or "of these", addon.QueueCharName(part.key))
+                -- After Core.lua's "Bought ..." line, which waits for your
+                -- gold to drop (it came first and read backwards; user,
+                -- 2026-10-24)
+                local itemID, quantity, who = buying.itemID, part.quantity, addon.QueueCharName(part.key)
+                C_Timer.After(2, function()
+                    addon:Notify("info", "Mail %d %s to %s: bought for their queue.", quantity,
+                        C_Item.GetItemNameByID(itemID) or "of these", who)
+                end)
             end
         end
         buying = nil

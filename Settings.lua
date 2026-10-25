@@ -514,9 +514,10 @@ end
 -- rare so they still mean something (user, 2026-10-23: "used thoughtfully
 -- and sparingly because they can get annoying"). The game's own sounds.
 --   "loss" - going on would lose gold (the quest-failed sound)
---   "stop" - look before you go on (a short alarm beep)
+--   "stop" - look before you go on (the raid warning: the beep was too
+--            soft, user's pick from /gsm sound, 2026-10-24)
 -- One at a time: a key held down or pressed again doesn't stack them.
-local ALERT_SOUNDS = { loss = "IG_QUEST_FAILED", stop = "ALARM_CLOCK_WARNING_3" }
+local ALERT_SOUNDS = { loss = "IG_QUEST_FAILED", stop = "RAID_WARNING" }
 local ALERT_GAP = 1.5
 local lastAlert = 0
 -- The sound for a kind: one picked with /gsm sound use, else the default
@@ -784,7 +785,7 @@ local HELP = {
     sounds = {
         "Sounds",
         "A sound only when Goldsmith stops you, so you look before going on. Never for news like a finished scan or a deal.",
-        "When Buy next waits because the AH asks more than the plan: a beep, or a failed-quest sound if the queue would lose gold. A beep when a purchase fails, or when Craft next or Buy next can't do anything.",
+        "When Buy next waits because the AH asks more than the plan: the raid warning, or a failed-quest sound if a craft would lose gold. The raid warning when a purchase fails, or when Craft next or Buy next can't do anything.",
         "The game's own sounds, at your Sound effects volume.",
     },
     characters = {

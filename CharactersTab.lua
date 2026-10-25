@@ -166,7 +166,8 @@ local function CreateTodoLine(card, i)
                 local queued = addon:FindQueueEntry(card.key, item.recipe.recipeID, item.row.tier, concentrate, nil, mix)
                 root:CreateButton(string.format(queued and "In the queue: set to %d craft%s%s" or "Add %d craft%s to the queue%s",
                     item.crafts, item.crafts == 1 and "" or "s", mix and (" (" .. addon:ShortMix(mix) .. ")") or ""), function()
-                    addon:QueueSuggestion(card.key, item.recipe, item.row.tier, concentrate, item.crafts, nil, mix)
+                    addon:QueueSuggestion(card.key, item.recipe, item.row.tier, concentrate, item.crafts, nil, mix,
+                        concentrate and not mix and item.row.description or nil)
                 end)
                 root:CreateDivider()
                 root:CreateButton("Not this: hide it for a day", function()

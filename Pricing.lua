@@ -647,6 +647,27 @@ end
 -- price more than SALE_HIGH_RATIO times that is capped at it.
 local OUTLIER_HIGH_RATIO = 5
 
+-- A low price that held for days is the price, not an undercut: TSM's
+-- market value is an average that trails a falling market. Petrified Root
+-- went 340g to 60g over two weeks, 126,000 listed from 59g, and plans
+-- bought it at TSM's 110.42g (user, 2026-10-24). Real when Goldsmith's own
+-- saved prices for the days before today (at least SUSTAINED_DAYS of the
+-- last SUSTAINED_LOOKBACK) have a median within SUSTAINED_RATIO of it; a
+-- lone undercut under a steady price still isn't.
+local SUSTAINED_DAYS, SUSTAINED_LOOKBACK, SUSTAINED_RATIO = 2, 4, 1.25
+local function SustainedLow(itemID, price)
+    local history = GoldsmithDB.priceHistory and GoldsmithDB.priceHistory[itemID]
+    if not history then return false end
+    local list = {}
+    for back = 1, SUSTAINED_LOOKBACK do
+        local p = history[date("%Y-%m-%d", time() - back * 86400)]
+        if p then table.insert(list, p) end
+    end
+    if #list < SUSTAINED_DAYS then return false end
+    table.sort(list)
+    return list[math.floor((#list + 1) / 2)] <= price * SUSTAINED_RATIO
+end
+
 function addon:CheckAgainstMarket(itemID, price, source, age, buying)
     local listed, note = price, nil
     local market = GetTSMValue("DBMarket", itemID)
@@ -664,7 +685,7 @@ function addon:CheckAgainstMarket(itemID, price, source, age, buying)
         end
         return price, source, age, note or soldNote
     end
-    if price < market * UNDERCUT_RATIO then
+    if price < market * UNDERCUT_RATIO and not SustainedLow(itemID, price) then
         price, source, age = market, "TSM market", nil
         note = string.format("lowest listing %s looked like a small undercut", FormatGold(listed))
     elseif market and price > market * OUTLIER_HIGH_RATIO then
@@ -1413,7 +1434,7 @@ function addon:EnchantScrollMissing(recipeID, name)
         return GoldsmithDB.pendingEnchants[recipeID] ~= nil and not GoldsmithDB.scrollOutputs[recipeID]
     end
     if not name then return false end
-    for id, pending in pairs(GoldsmithDB.pendingEnchants) do
+    for id, pending in pairs(GoldsmithDB.pendingEnchants or {}) do
         if pending.name == name and not GoldsmithDB.scrollOutputs[id] then return true end
     end
     return false
@@ -1446,7 +1467,7 @@ function addon:MatchEnchantScrolls()
         SaveRecipe(recipeID, true, 1, pending.profession, pending.unlearned)
         if pending.unlearned then unlearned = unlearned + 1 else matched = matched + 1 end
     end
-    for recipeID, pending in pairs(GoldsmithDB.pendingEnchants) do
+    for recipeID, pending in pairs(GoldsmithDB.pendingEnchants or {}) do
         local link = select(2, C_Item.GetItemInfo(pending.name))
         local itemID = link and C_Item.GetItemInfoInstant(link)
         local classID = itemID and select(6, C_Item.GetItemInfoInstant(itemID))
@@ -1458,7 +1479,7 @@ function addon:MatchEnchantScrolls()
     -- Item IDs next to known scrolls, matched by name (lowest ID per
     -- enchant; its tiers are found from it, Quality.lua)
     local byName = {}
-    for recipeID, pending in pairs(GoldsmithDB.pendingEnchants) do
+    for recipeID, pending in pairs(GoldsmithDB.pendingEnchants or {}) do
         if not GoldsmithDB.scrollOutputs[recipeID] then byName[pending.name] = recipeID end
     end
     if next(byName) then
@@ -3415,6 +3436,11 @@ end
 local function ScanLearnedRecipes()
     scanTimer = nil
     if scanning then return end
+    -- Not during the tour: the sample has no recipe tables of yours, and
+    -- what was saved would go with it ("bad argument to pairs" in
+    -- MatchEnchantScrolls with a profession open in the tour; user,
+    -- 2026-10-24). The next profession window after the tour reads them.
+    if TourPrices() then return end
 
     local ok, ids = pcall(C_TradeSkillUI.GetAllRecipeIDs)
     if not ok or not ids then return end

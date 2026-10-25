@@ -355,9 +355,18 @@ end
 -- least what this character holds now. The saved stock only covers
 -- materials your recipes use (a Nocturnal Lotus counted as none held, so
 -- only the newest, bought one, was looked at, 2026-10-09).
+-- Mail counts too: bought with Buy next and not taken out yet, or mailed
+-- from another of your characters. Without it, 7 Petrified Root in the
+-- mail between your characters left 13 held, so only the cheap newest
+-- purchases counted (69.58g each); taken out, 20 held reached back to the
+-- 118g ones (96.17g; user, 2026-10-24).
 function addon:HeldAnywhere(itemID)
     local here = C_Item.GetItemCount(itemID, true, false, true, true) or 0
-    return math.max(addon.GetHeld and addon:GetHeld(itemID) or 0, here)
+    local mail = 0
+    for key in pairs(GoldsmithDB.inMail or {}) do
+        mail = mail + (addon.InMailCountFor and addon:InMailCountFor(key, itemID) or 0)
+    end
+    return math.max(addon.GetHeld and addon:GetHeld(itemID) or 0, here) + mail
 end
 
 -- Lots from your own salvage runs (mill, prospect, crush), for

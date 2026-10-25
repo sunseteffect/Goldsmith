@@ -282,7 +282,8 @@ local function ConcentrationAction(conc)
         local mix = seen[id] and p.row.description or nil
         seen[id] = true
         table.insert(queue, { charKey = best.key, recipe = p.recipe, tier = p.row.tier, tierCount = p.tierCount,
-            itemID = p.row.itemID, concentrate = true, crafts = p.crafts, mix = mix })
+            itemID = p.row.itemID, concentrate = true, crafts = p.crafts, mix = mix,
+            prefMix = not mix and p.row.description or nil })
     end
     return {
         items = items,
@@ -583,14 +584,14 @@ local function QueueMenu(owner, queue)
             root:CreateButton(string.format("%s %s%s%s%s%s", count, tier, s.recipe.outputName,
                 s.mix and (", " .. addon:ShortMix(s.mix)) or "", OnWho(s.charKey),
                 queued and " (queued: set it)" or ""), function()
-                addon:QueueSuggestion(s.charKey, s.recipe, s.tier, s.concentrate, s.crafts, s.items, s.mix)
+                addon:QueueSuggestion(s.charKey, s.recipe, s.tier, s.concentrate, s.crafts, s.items, s.mix, s.prefMix)
             end)
         end
         if #queue > 1 then
             root:CreateDivider()
             root:CreateButton("All of these", function()
                 for _, s in ipairs(queue) do
-                    addon:QueueSuggestion(s.charKey, s.recipe, s.tier, s.concentrate, s.crafts, s.items, s.mix)
+                    addon:QueueSuggestion(s.charKey, s.recipe, s.tier, s.concentrate, s.crafts, s.items, s.mix, s.prefMix)
                 end
             end)
         end

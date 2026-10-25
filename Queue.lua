@@ -108,7 +108,9 @@ end
 function addon:AddToQueue(charKey, recipeID, quantity, tier, concentrate, mix)
     local e = addon:FindQueueEntry(charKey, recipeID, tier, concentrate, nil, mix)
     if e then
-        e.quantity, e.made = quantity, 0
+        -- Queued again (the plan screen, a suggestion): its own pick of mix
+        -- now, not an earlier suggestion's (QueueSuggestion sets it again)
+        e.quantity, e.made, e.prefMix = quantity, 0, nil
     else
         table.insert(Queue(charKey, true), { recipeID = recipeID, quantity = quantity, made = 0, tier = tier,
                                              concentrate = concentrate == true, mix = mix, added = time() })
@@ -122,10 +124,19 @@ end
 -- "less clicks once i know i can trust goldsmith"): `crafts` crafts, or
 -- `items` when the suggestion counts items, queued as the items those
 -- crafts are sure to make, the way the plan's Add to queue does.
-function addon:QueueSuggestion(charKey, recipe, tier, concentrate, crafts, items, mix)
+-- prefMix: the mix the suggestion was planned with, for its first line
+-- (a split's other mix is `mix`, which also tells the entries apart). The
+-- concentration plan fits a day's concentration with its picks; queued
+-- without one, the queue picked all silver (it "uses materials you have")
+-- and needed 693 with 586 (Gloaming Alloy) and 599 with 450 (Lightfused
+-- Mana Potion; user, 2026-10-24: "why are we recommending something we
+-- can't craft?"). The queue uses it while the game still offers it.
+function addon:QueueSuggestion(charKey, recipe, tier, concentrate, crafts, items, mix, prefMix)
     local quantity = items or addon:WithCharacter(charKey, addon.ItemsForCrafts, addon, recipe, crafts)
     quantity = math.max(math.floor(quantity + 0.0001), 1)
     local updated = addon:AddToQueue(charKey, recipe.recipeID, quantity, tier, concentrate == true, mix)
+    local e = addon:FindQueueEntry(charKey, recipe.recipeID, tier, concentrate == true, nil, mix)
+    if e and not mix then e.prefMix = prefMix end
     addon:Notify("info", "%s %d %s %s %s's queue.", updated and "Set" or "Added", quantity, recipe.outputName,
         updated and "in" or "to", CharName(charKey))
     if addon.RefreshWindow then addon.RefreshWindow() end
@@ -675,7 +686,7 @@ function addon:BuildQueue(charKey)
                     if row.tierInfo then
                         -- A set mix (a split's other mix) while the game
                         -- still offers it, else the usual pick
-                        local set = e.mix and addon:MixByDescription(row.tierInfo, e.mix)
+                        local set = (e.mix or e.prefMix) and addon:MixByDescription(row.tierInfo, e.mix or e.prefMix)
                         row.tierInfo = set or addon:WithCharacter(charKey, addon.ChooseMix, addon, row.recipe,
                             row.tierInfo, row.remaining)
                     end
@@ -729,6 +740,8 @@ function addon:BuildQueue(charKey)
         table.insert(q.rows, row)
     end
     q.buyAH, q.buyVendor = Sorted(ah), Sorted(vendor)
+    -- For hovers: what the vendor panel buys for your whole queue
+    if mine then addon.lastQueueVendor = q.buyVendor end
     q.spend = 0
     for _, entry in ipairs(q.buyAH) do q.spend = q.spend + entry.cost end
     return q
@@ -863,7 +876,7 @@ function addon:ShoppingBlocker(line, plan)
     local head, list = line:match("^(Missing for [^:]+): (.-)%.$")
     local vendor = plan and plan.buyVendor
     if not list or not vendor or #vendor == 0 then return line end
-    local fromVendor, other = {}, {}
+    local fromVendor, other, anyAll = {}, {}, false
     for part in list:gmatch("[^,]+") do
         part = part:gsub("^%s+", "")
         local name = part:match("^%d+ (.+)$") or part
@@ -875,10 +888,19 @@ function addon:ShoppingBlocker(line, plan)
         for _, entry in ipairs(vendor) do
             if entry.name == plain then total = entry.quantity end
         end
-        table.insert(total and fromVendor or other, total and (total .. " " .. name) or part)
+        -- The whole queue's, which the vendor panel buys: the hover said 3
+        -- Sunglass Vial and the vendor 18 (user, 2026-10-24)
+        local all
+        for _, entry in ipairs(addon.lastQueueVendor or {}) do
+            if entry.name == plain and total and entry.quantity > total then all = entry.quantity end
+        end
+        table.insert(total and fromVendor or other, total and (all and string.format("%d %s (%d for this craft)", all, name, total)
+            or (total .. " " .. name)) or part)
+        anyAll = anyAll or all ~= nil
     end
     if #fromVendor == 0 then return line end
-    local text = "Buy " .. table.concat(fromVendor, ", ") .. " from a vendor: enough for every step."
+    local text = "Buy " .. table.concat(fromVendor, ", ") .. " from a vendor: enough for "
+        .. (anyAll and "the whole queue." or "every step.")
     if #other > 0 then text = head .. ": " .. table.concat(other, ", ") .. ". " .. text end
     return text
 end
@@ -1014,7 +1036,8 @@ local function SetPanelPrep(row)
     buff = buff or nextLine
     panel.prep:SetShown(action ~= nil)
     if action then addon:SetPrepLabel(panel.prep, action) end
-    panel:SetHeight(30 + (panel.shownLines or 0) * LINE_HEIGHT + 64 + (action and 26 or 0) + (buff and 16 or 0))
+    local buffHeight = buff and math.max(math.ceil(panel.buff:GetStringHeight()) + 4, 16) or 0
+    panel:SetHeight(30 + (panel.shownLines or 0) * LINE_HEIGHT + 64 + (action and 26 or 0) + buffHeight)
 end
 addon.UpdateQueuePanelPrep = function()
     if panel and panel:IsShown() and panel.row then SetPanelPrep(panel.row) end
@@ -1101,6 +1124,9 @@ local function CreatePanel()
     panel.buff = UI.Text(panel, "small", "warning", "CENTER")
     panel.buff:SetPoint("BOTTOMLEFT", 10, 56)
     panel.buff:SetPoint("BOTTOMRIGHT", -10, 56)
+    -- Two lines rather than cut off ("for Gloaming..."; user, 2026-10-24)
+    panel.buff:SetWordWrap(true)
+    panel.buff:SetMaxLines(2)
     panel.prep = UI.Button(panel, "", PANEL_WIDTH - 20, 22, function() addon:RunPrep(panel.prepAction) end)
     panel.prep:SetPoint("BOTTOMLEFT", 10, 56)
     panel.prep.label:SetTextColor(addon:Color("warning"))

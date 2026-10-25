@@ -882,8 +882,13 @@ local function PlanTooltip(tooltip, node)
     end
     if o.cheapest and o.buy and o.cheapest ~= o.buy and o.buy.unit > o.cheapest.unit and savedUnits > 0 then
         tooltip:AddLine(" ")
-        Note(tooltip, string.format("%s it instead of buying saves %s here",
-            o.cheapest.method == "Mill" and Gerund(o.cheapest.verb or "Mill") or "Crafting", Money((o.buy.unit - o.cheapest.unit) * savedUnits)),
+        -- A vendor is buying too: "Crafting it instead" read wrong for
+        -- Cooking Spirits (user, 2026-10-24)
+        local saved = Money((o.buy.unit - o.cheapest.unit) * savedUnits)
+        Note(tooltip, o.cheapest.method == "Vendor"
+            and string.format("The vendor instead of the AH saves %s here", saved)
+            or string.format("%s it instead of buying saves %s here",
+                o.cheapest.method == "Mill" and Gerund(o.cheapest.verb or "Mill") or "Crafting", saved),
             "profit")
     end
     -- Held back by concentration: say how much of it can be crafted now
@@ -2363,7 +2368,7 @@ local function CreatePlanScreen(parent)
         end
         for _, line in ipairs(state.notes) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
         for _, line in ipairs(state.blockers) do
-            tooltip:AddLine(addon:ShoppingBlocker(line, screen.plan), 1, 0.6, 0.2, true)
+            tooltip:AddLine(addon:ShoppingBlocker(line, screen.builtPlan), 1, 0.6, 0.2, true)
         end
     end, "ANCHOR_TOP")
 
@@ -2413,6 +2418,7 @@ local function CreatePlanScreen(parent)
         screen.warnings = nil
         screen.spendLine:SetText("")
         screen.vendorLine:SetText("")
+        screen.builtPlan = nil
         screen.shop:Disable()
         screen.shop:SetAlpha(0.5)
         SetCraftState(nil)
@@ -2721,6 +2727,9 @@ local function CreatePlanScreen(parent)
         screen.spendLine:SetText(spendText)
         screen.spendLine:SetTextColor(addon:Color(short and "warning" or "muted"))
 
+        -- For the Craft button's hover (ShoppingBlocker): screen.plan is the
+        -- recipe row, with no vendor list, so it said "Missing" (user, 2026-10-24)
+        screen.builtPlan = plan
         if #plan.buyVendor > 0 then
             local parts = {}
             for _, entry in ipairs(plan.buyVendor) do table.insert(parts, entry.quantity .. " " .. entry.name) end
