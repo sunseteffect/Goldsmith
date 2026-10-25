@@ -13,6 +13,8 @@ local myst = db.characters["Mysticmead-Sargeras"]
 myst.stock[AZEROOT], myst.stock[AZEROOT + 1] = nil, nil
 
 local addon = bench.Login("Maddoxynn", { db = db })
+-- None held anywhere, whatever the last login saved
+bench.world.bank[AZEROOT], bench.world.bank[AZEROOT + 1] = nil, nil
 bench.SetBags({ [AZEROOT] = nil, [AZEROOT + 1] = nil })
 bench.OpenAH()
 bench.Has("Buy next names the item", bench.Screen(), "Buy 8 Azeroot")
@@ -44,12 +46,13 @@ bench.CloseAH()
 bench.OpenMail()
 bench.TakeMail()
 local screen = bench.Screen()
-bench.Has("mail panel lists it", screen, "Mysticmead: 8 Azeroot")
+-- Other things their queue would buy may be listed too (what you hold today)
+bench.Has("mail panel lists it", screen, "8 Azeroot")
 bench.Click("Fill in a mail to Mysticmead")
 bench.Equal("recipient filled in", SendMailNameEditBox:GetText(), "Mysticmead")
-local att = bench.world.sendItems[1]
-bench.Check("8 Azeroot attached", att and att[1] == AZEROOT and att[2] == 8,
-    att and (att[1] .. " x" .. att[2]) or "nothing attached")
+local att
+for _, a in pairs(bench.world.sendItems) do if a[1] == AZEROOT then att = a end end
+bench.Check("8 Azeroot attached", att and att[2] == 8, att and ("x" .. att[2]) or "no Azeroot attached")
 bench.Click("Send to Mysticmead")
 bench.Advance(2)
 bench.Has("mail sent", bench.Calls(), "SendMail(Mysticmead")

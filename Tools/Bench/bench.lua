@@ -336,9 +336,10 @@ function B.OpenMail()
 end
 function B.CloseMail() world.mailOpen = false Close(MailFrame, "MAIL_CLOSED") end
 
--- Click the shown button whose label matches (plain text, or a pattern).
--- Fails the check when no such button shows.
-function B.Click(label, mouseButton)
+-- Click the shown button whose label matches (plain text, or a pattern),
+-- then let `wait` seconds pass (default 1). Fails the check when no such
+-- button shows.
+function B.Click(label, mouseButton, wait)
     local plain = not label:find("[%%%[%]%^%$%*%+%-%?]")
     for _, f in ipairs(wow.frames) do
         if f._text and f:IsVisible() and wow.Strip(f._text):find(label, 1, plain) then
@@ -346,7 +347,7 @@ function B.Click(label, mouseButton)
             while b and not b._scripts.OnClick do b = b._parent end
             if b then
                 b:Click(mouseButton)
-                B.Advance(1)
+                B.Advance(wait or 1)
                 return B.Check("click " .. label, true)
             end
         end

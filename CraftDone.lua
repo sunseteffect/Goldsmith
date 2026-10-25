@@ -62,7 +62,8 @@ local function CreateToast()
 
     f.title = UI.Text(f, "heading", "gold")
     f.title:SetPoint("TOPLEFT", f.icon, "TOPRIGHT", 10, 0)
-    f.title:SetPoint("RIGHT", -12, 0)
+    f.title:SetPoint("RIGHT", -28, 0)
+    f.move = UI.MoveIcon(f, 8, 8)
 
     f.item = UI.Text(f, "body", "text")
     f.item:SetPoint("TOPLEFT", f.title, "BOTTOMLEFT", 0, -4)
@@ -86,7 +87,7 @@ local function CreateToast()
 
     f.hint = UI.Text(f, "label", "dim", "RIGHT")
     f.hint:SetPoint("BOTTOMRIGHT", -8, 6)
-    f.hint:SetText("click to close")
+    f.hint:SetText("drag to move, click to close")
 
     -- Stays while the mouse is over it, then fades
     f:SetScript("OnUpdate", function(self, elapsed)
@@ -106,7 +107,32 @@ local function CreateToast()
             end
         end
     end)
-    f:SetScript("OnClick", function(self)
+    -- Dragged somewhere, it shows there from then on (user, 2026-10-24:
+    -- "make ... draggable and then persists in that spot"):
+    -- GoldsmithDB.ui2.craftDonePos = { x, y } from the screen's top left.
+    -- Right-click puts it back by the Crafting Results window.
+    f:SetMovable(true)
+    f:RegisterForDrag("LeftButton")
+    f:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    f:SetScript("OnDragStart", function(self)
+        self.dragging = true
+        self:StartMoving()
+    end)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        GoldsmithDB.ui2.craftDonePos = { x = self:GetLeft(), y = self:GetTop() - UIParent:GetTop() }
+        self:ClearAllPoints()
+        self:SetPoint("TOPLEFT", UIParent, "TOPLEFT", GoldsmithDB.ui2.craftDonePos.x, GoldsmithDB.ui2.craftDonePos.y)
+        -- The button up that ends a drag isn't a click to close
+        C_Timer.After(0, function() self.dragging = false end)
+    end)
+    f:SetScript("OnClick", function(self, button)
+        if self.dragging then return end
+        if button == "RightButton" then
+            GoldsmithDB.ui2.craftDonePos = nil
+            if self.Place then self.Place(self) end
+            return
+        end
         self.pulse:Stop()
         self:Hide()
     end)
@@ -122,13 +148,21 @@ end
 local logHooked = false
 local function Place(f)
     f:ClearAllPoints()
+    f.Place = Place
+    local pos = GoldsmithDB.ui2 and GoldsmithDB.ui2.craftDonePos
+    if pos then
+        f:SetPoint("TOPLEFT", UIParent, "TOPLEFT", pos.x, pos.y)
+        return
+    end
     local page = ProfessionsFrame and ProfessionsFrame.CraftingPage
     local log = page and page.CraftingOutputLog
     if log and not logHooked then
         logHooked = true
         log:HookScript("OnShow", function() if f:IsShown() then Place(f) end end)
     end
-    if log and log:IsShown() then
+    -- Visible, not just shown: closing the profession window can leave the
+    -- log "shown" inside a hidden window, and the notice would sit there
+    if log and log:IsVisible() then
         f:SetPoint("TOPLEFT", log, "TOPRIGHT", 12, 0)
     else
         f:SetPoint("TOP", UIParent, "TOP", 0, -260)

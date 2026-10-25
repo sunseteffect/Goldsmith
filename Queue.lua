@@ -1103,6 +1103,8 @@ local function CreatePanel()
     panel.open = UI.IconButton(panel, 18, ">", "Open the Queue tab", function() addon:ShowTab("queue") end,
         { font = "small" })
     panel.open:SetPoint("TOPRIGHT", -6, -6)
+    -- Left of the > button, which has the corner
+    panel.move = UI.MoveIcon(panel, 28, 7)
 
     UI.SetTooltip(panel, function(tooltip)
         tooltip:AddLine("Goldsmith queue", 1, 1, 1)

@@ -37,6 +37,7 @@ QueueTab.lua
 Scan.lua
 Shop.lua
 Vendor.lua
+Mail.lua
 Items.lua
 History.lua
 CharactersTab.lua

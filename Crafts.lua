@@ -2026,6 +2026,12 @@ local function CreatePlanScreen(parent)
             if self.picked and not self.yours then return end
             addon:WithCharacter(p.charKey, addon.SetPlanMix, addon, p.recipe, base, e,
                 screen:PlannedItems())
+            -- The queued entry follows your click, as the queue uses your
+            -- pick once its Do this next mix is gone
+            if screen.queued and screen.queued.prefMix then
+                screen.queued.prefMix = nil
+                addon:QueueEntryChanged()
+            end
             screen:Update()
         end)
         row.hit = hit
@@ -2451,7 +2457,15 @@ local function CreatePlanScreen(parent)
         -- Using what you hold: a mix of the same tier that needs less buying,
         -- or the one you clicked (ChooseMix)
         screen.baseTierInfo = tierInfo
-        if tierInfo then
+        -- Queued with Do this next's mix: show that one, as the queue plans
+        -- and buys with it. The page picked another, so its "2 items to
+        -- buy" read as the queue's while Buy next had nothing (user,
+        -- 2026-10-24: Sienna Ink queued with 17 gold, shown with 20 gold)
+        local queued = tierInfo and addon:FindQueueEntry(p.charKey, recipe.recipeID, p.tier, tierInfo.concentrate == true)
+        local set = queued and queued.prefMix and addon:MixByDescription(tierInfo, queued.prefMix)
+        if set then
+            tierInfo = set
+        elseif tierInfo then
             tierInfo = addon:WithCharacter(p.charKey, addon.ChooseMix, addon, recipe, tierInfo,
                 screen:PlannedItems())
         end
@@ -2511,7 +2525,7 @@ local function CreatePlanScreen(parent)
                     -- Make 30 picked one using less of the gold dust you
                     -- hold, though 2 crafts were planned (user, 2026-10-12)
                     local base = screen.baseTierInfo
-                    local repick = base and addon:WithCharacter(p.charKey, addon.ChooseMix, addon, recipe, base, q)
+                    local repick = base and not set and addon:WithCharacter(p.charKey, addon.ChooseMix, addon, recipe, base, q)
                     if repick and repick.scenario ~= tierInfo.scenario then
                         local again = addon:WithChoices(screen:Choices(), addon.WithCharacter, addon, p.charKey,
                             addon.BuildPlan, addon, recipe, q, true, repick)

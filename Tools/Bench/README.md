@@ -72,7 +72,7 @@ Shared code for several scenarios goes in `lib\` (see
 | | |
 |---|---|
 | `bench.OpenAH()` / `CloseAH()`, `OpenMail()` / `CloseMail()`, `OpenVendor(items)` / `CloseVendor()` | |
-| `bench.Click("label")` | click the shown button with that text |
+| `bench.Click("label", mouseButton, wait)` | click the shown button with that text, then let `wait` seconds pass (default 1) |
 | `bench.Slash("/gsm data")` | |
 | `bench.QuotePrice(id, unitPrice, qty)` | the AH answers a purchase's price request |
 | `bench.PurchaseSucceeds(id, qty, total)` | gold comes off, the items go to the mailbox |

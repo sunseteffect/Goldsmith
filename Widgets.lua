@@ -403,6 +403,18 @@ function UI.RaiseAbove(panel, window)
     end
 end
 
+-- The game's move cursor (four arrows) in a corner of a panel you can
+-- drag, so it's plain it moves (user, 2026-10-24). Only a picture: drags
+-- on it go to the panel. x, y from the top right (default 6, 6).
+function UI.MoveIcon(panel, x, y)
+    local icon = panel:CreateTexture(nil, "OVERLAY")
+    icon:SetTexture("Interface\\CURSOR\\UI-Cursor-Move")
+    icon:SetSize(16, 16)
+    icon:SetPoint("TOPRIGHT", -(x or 6), -(y or 6))
+    icon:SetAlpha(0.8)
+    return icon
+end
+
 -- A flat button. onClick(self, mouseButton).
 function UI.Button(parent, text, width, height, onClick)
     local button = CreateFrame("Button", nil, parent, "BackdropTemplate")

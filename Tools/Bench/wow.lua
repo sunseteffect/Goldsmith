@@ -177,14 +177,32 @@ function methods:GetHeight() return self._h or 20 end
 function methods:GetSize() return self:GetWidth(), self:GetHeight() end
 function methods:GetScale() return 1 end
 function methods:GetEffectiveScale() return 1 end
-function methods:GetLeft() return 0 end
-function methods:GetRight() return self:GetWidth() end
-function methods:GetTop() return self:GetHeight() end
+function methods:GetLeft() return self._left or 0 end
+function methods:GetRight() return (self._left or 0) + self:GetWidth() end
+function methods:GetTop() return self._top or self:GetHeight() end
 function methods:GetBottom() return 0 end
 function methods:GetCenter() return self:GetWidth() / 2, self:GetHeight() / 2 end
 function methods:GetRect() return 0, 0, self:GetWidth(), self:GetHeight() end
-function methods:GetNumPoints() return 0 end
-function methods:GetPoint() return "CENTER", UIParent, "CENTER", 0, 0 end
+-- Anchors are kept (not laid out), so a scenario can see where a frame was put
+function methods:SetPoint(point, rel, relPoint, x, y)
+    self._points = self._points or {}
+    if type(rel) == "number" then rel, relPoint, x, y = nil, point, rel, relPoint end
+    table.insert(self._points, { point, rel or self._parent, relPoint or point, x or 0, y or 0 })
+end
+function methods:SetAllPoints(rel) self._points = { { "TOPLEFT", rel or self._parent, "TOPLEFT", 0, 0 } } end
+function methods:ClearAllPoints() self._points = {} end
+function methods:GetNumPoints() return #(self._points or {}) end
+function methods:GetPoint(i)
+    local p = (self._points or {})[i or 1]
+    if not p then return nil end
+    return p[1], p[2], p[3], p[4], p[5]
+end
+-- Dragging: a scenario sets where it lets go (world.dropAt = { left, top })
+function methods:StartMoving() self._moving = true end
+function methods:StopMovingOrSizing()
+    self._moving = false
+    if world.dropAt then self._left, self._top = world.dropAt[1], world.dropAt[2] end
+end
 -- Text sizes: 6 px a character, 14 px a line (wrapping by width)
 function methods:GetStringWidth() return #(Strip(self._text or "")) * 6 end
 function methods:GetUnboundedStringWidth() return self:GetStringWidth() end
@@ -332,6 +350,7 @@ CreateFrame = function(kind, name, parent, template)
 end
 
 UIParent = Widget("Frame", "UIParent")
+UIParent:SetSize(1920, 1080)
 WorldFrame = Widget("Frame", "WorldFrame")
 Minimap = Widget("Frame", "Minimap")
 GameTooltip = Widget("GameTooltip", "GameTooltip", UIParent)
@@ -511,14 +530,27 @@ local function Count(id, bank, _, _, warband)
     return n
 end
 
--- Bag slots are built from world.bags: one slot per stack of 1000
+-- Bag slots (all in bag 0) are built from world.bags: one slot per full
+-- stack (the item's `stack`, default 1000), or the sizes in
+-- world.stacks[itemID] = { 7, 20 } first. A stack split off into an empty
+-- slot is kept apart in world.splits[slot] = { itemID, count, lockedUntil }
+-- (still counted in world.bags), as the game puts it in its own slot.
+world.stacks, world.splits = {}, {}
 local function BagSlots()
     local slots = {}
     local ids = {}
     for id, n in pairs(world.bags) do if n > 0 then table.insert(ids, id) end end
     table.sort(ids)
+    local apart = {}
+    for _, s in pairs(world.splits) do apart[s[1]] = (apart[s[1]] or 0) + s[2] end
     for _, id in ipairs(ids) do
-        local left = world.bags[id]
+        local left = world.bags[id] - (apart[id] or 0)
+        for _, size in ipairs(world.stacks[id] or {}) do
+            if left <= 0 then break end
+            local n = math.min(size, left)
+            table.insert(slots, { itemID = id, stackCount = n })
+            left = left - n
+        end
         while left > 0 do
             local n = math.min(left, (world.items[id] and world.items[id].stack) or 1000)
             table.insert(slots, { itemID = id, stackCount = n })
@@ -529,7 +561,14 @@ local function BagSlots()
 end
 local function SlotAt(bag, slot)
     if bag ~= 0 then return nil end
+    local s = world.splits[slot]
+    if s then return { itemID = s[1], stackCount = s[2], locked = (s[3] or 0) > world.clock, split = true } end
     return BagSlots()[slot]
+end
+local function NumSlots()
+    local n = math.max(16, #BagSlots() + 8)
+    for slot in pairs(world.splits) do n = math.max(n, slot) end
+    return n
 end
 
 C_Item = {
@@ -588,25 +627,35 @@ Item = {
 Item.CreateFromItemLink = function(_, link) return Item.CreateFromItemID(nil, tonumber(link:match("item:(%d+)"))) end
 
 C_Container = {
-    GetContainerNumSlots = function(bag) if bag == 0 then return math.max(16, #BagSlots()) end return 0 end,
+    GetContainerNumSlots = function(bag) if bag == 0 then return NumSlots() end return 0 end,
     GetContainerItemInfo = function(bag, slot)
         local s = SlotAt(bag, slot)
         if not s then return nil end
         return { itemID = s.itemID, stackCount = s.stackCount, hyperlink = ItemLink(s.itemID), iconFileID = 134400,
-            quality = 1, isLocked = false, isBound = false }
+            quality = 1, isLocked = s.locked == true, isBound = false }
     end,
     GetContainerItemID = function(bag, slot) local s = SlotAt(bag, slot) return s and s.itemID end,
     GetContainerItemLink = function(bag, slot) local s = SlotAt(bag, slot) return s and ItemLink(s.itemID) end,
     GetContainerNumFreeSlots = function() return 20, 0 end,
+    -- With something on the cursor and an empty slot: put it down there (a
+    -- split lands as its own stack, locked for a moment). Else pick it up.
     PickupContainerItem = function(bag, slot)
         Record("PickupContainerItem", bag, slot)
         local s = SlotAt(bag, slot)
-        world.cursor = s and { itemID = s.itemID, count = s.stackCount } or nil
+        if world.cursor and not s and bag == 0 then
+            world.splits[slot] = { world.cursor.itemID, world.cursor.count, world.clock + 0.2 }
+            world.cursor = nil
+            C_Timer.After(0.2, function() _G.BenchFire("BAG_UPDATE_DELAYED") end)
+            return
+        end
+        world.cursor = s and { itemID = s.itemID, count = s.stackCount, slot = s.split and slot or nil } or nil
     end,
+    -- On the cursor, but the game still thinks of it as the stack it came
+    -- from: attached to a mail straight away, the whole stack goes in
     SplitContainerItem = function(bag, slot, n)
         Record("SplitContainerItem", bag, slot, n)
         local s = SlotAt(bag, slot)
-        world.cursor = s and { itemID = s.itemID, count = math.min(n, s.stackCount) } or nil
+        world.cursor = s and { itemID = s.itemID, count = math.min(n, s.stackCount), wholeStack = s.stackCount } or nil
     end,
     UseContainerItem = function(bag, slot) Record("UseContainerItem", bag, slot) end,
     GetBagName = function() return "Bag" end,
@@ -792,10 +841,16 @@ GetSendMailMoney = function() return 0 end
 GetSendMailPrice = function() return 30 end
 -- Attaching puts the item on the cursor into the slot; sending takes the
 -- attachments out of the bags a moment later, as the game does
-ClickSendMailItemButton = function(i)
-    Record("ClickSendMailItemButton", i)
-    if world.cursor then
-        world.sendItems[i] = { world.cursor.itemID, world.cursor.count }
+ClickSendMailItemButton = function(i, clear)
+    Record("ClickSendMailItemButton", i, clear and "clear" or nil)
+    if clear then
+        world.sendItems[i] = nil
+        C_Timer.After(0, function() _G.BenchFire("MAIL_SEND_INFO_UPDATE") end)
+    elseif world.cursor then
+        -- A split straight from its stack: the game attaches the whole stack
+        -- (7 Azeroot went for 3 in game, 2026-10-24)
+        local c = world.cursor
+        world.sendItems[i] = { c.itemID, c.wholeStack or c.count, c.slot }
         world.cursor = nil
         C_Timer.After(0, function() _G.BenchFire("MAIL_SEND_INFO_UPDATE") end)
     end
@@ -810,6 +865,7 @@ SendMail = function(to, subject, body)
         for _, it in pairs(sent) do
             world.bags[it[1]] = (world.bags[it[1]] or 0) - it[2]
             if world.bags[it[1]] <= 0 then world.bags[it[1]] = nil end
+            if it[3] then world.splits[it[3]] = nil end
         end
         _G.BenchFire("MAIL_SEND_SUCCESS")
         _G.BenchFire("BAG_UPDATE_DELAYED")

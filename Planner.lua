@@ -1339,6 +1339,22 @@ function addon:PreferHeldMix(recipe, tierInfo, quantity)
     end
 
     if best == tierInfo or pickedScore - bestScore < HELD_PICK_MIN_SAVING then return tierInfo end
+    -- Only for materials you hold: a mix using no more of them than the
+    -- pick won on AH prices alone, and the ranking already weighed those.
+    -- After a rescan, Gloaming Alloy switched to all silver, bought 8 more
+    -- ore than the 1-gold mix, and said it "uses materials you have"
+    -- (user, 2026-10-24)
+    local function HeldUsed(scenario)
+        local n = 0
+        for _, slot in ipairs(qslots) do
+            local high, ids = addon:ScenarioHighUnits(scenario, slot), slot.itemIDs
+            n = n + math.min((slot.quantity - high) * crafts, GetOnHand(ids[1]))
+                + math.min(high * crafts, GetOnHand(ids[#ids]))
+        end
+        return n
+    end
+    local chosen = built and { mix = built } or best.scenario
+    if HeldUsed(chosen) <= HeldUsed(tierInfo.scenario) then return tierInfo end
     local pick = {}
     if built then
         -- A mix built here: priced like the others

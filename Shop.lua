@@ -520,6 +520,68 @@ end
 -- What to mail from this character, a line per character: "Mail to
 -- Trypttamine: 38 Refulgent Copper Ore, 24 Umbral Tin Ore". One sentence
 -- for everyone was hard to read (user, 2026-10-24).
+-- What to mail from here, for the mailbox panel (Mail.lua): per
+-- character, what Buy next bought here for their queue, then what their
+-- queue would buy on the AH that you hold (when no queued craft of yours
+-- uses it). Returns { { key, name, items = { { itemID, name, quantity,
+-- bought } } } }, by name. Their queue is planned once per data change.
+local mailPlanCache
+function addon:MailJobs()
+    mailPlanCache = mailPlanCache or addon:NewCache()
+    local plans = mailPlanCache:Get()
+    local jobs, byKey = {}, {}
+    local function Add(key, itemID, quantity, bought, name)
+        if quantity <= 0 or key == addon.charKey then return end
+        local job = byKey[key]
+        if not job then
+            job = { key = key, name = addon.QueueCharName(key), items = {} }
+            byKey[key] = job
+            table.insert(jobs, job)
+        end
+        for _, it in ipairs(job.items) do
+            if it.itemID == itemID then
+                it.quantity = it.quantity + quantity
+                it.bought = it.bought or bought
+                return
+            end
+        end
+        table.insert(job.items, { itemID = itemID, quantity = quantity, bought = bought,
+                                  name = C_Item.GetItemNameByID(itemID) or name or ("item " .. itemID) })
+    end
+    for crafter in pairs(GoldsmithDB.boughtFor or {}) do
+        for itemID in pairs(GoldsmithDB.boughtFor[crafter]) do
+            local e = OnTheWay(crafter, itemID)
+            if e and e.holder == addon.charKey then Add(crafter, itemID, e.quantity, true, e.name) end
+        end
+    end
+    -- Yours, beyond what's set aside for others and already listed
+    local spare = {}
+    local function Spare(itemID)
+        if spare[itemID] == nil then
+            spare[itemID] = OwnQueueUses(itemID) and 0
+                or math.max((C_Item.GetItemCount(itemID, true, false, true, false) or 0) - addon:ReservedCount(itemID), 0)
+        end
+        return spare[itemID]
+    end
+    for _, key in ipairs(addon:GetQueuedCharacters()) do
+        if key ~= addon.charKey then
+            if plans[key] == nil then
+                local ok, plan = pcall(addon.BuildQueue, addon, key)
+                plans[key] = ok and plan or false
+            end
+            for _, entry in ipairs(plans[key] and plans[key].buyAH or {}) do
+                local n = math.min(Spare(entry.itemID), entry.quantity)
+                if n > 0 then
+                    spare[entry.itemID] = spare[entry.itemID] - n
+                    Add(key, entry.itemID, n, false, entry.name)
+                end
+            end
+        end
+    end
+    table.sort(jobs, function(a, b) return a.name < b.name end)
+    return jobs
+end
+
 local function ToMail()
     local lines = {}
     for crafter in pairs(GoldsmithDB.boughtFor or {}) do
@@ -577,10 +639,13 @@ local function MergeQueue(into, other, key)
     end
 end
 
+-- Excluded characters too: a queue is something you asked for. Leaving
+-- them out kept the All queues box hidden while the note said to tick it,
+-- so there was no way to buy for them (user, 2026-10-24)
 local function OtherQueueKeys()
     local keys = {}
     for _, key in ipairs(addon:GetQueuedCharacters()) do
-        if key ~= addon.charKey and addon:IsCharacterIncluded(key) then table.insert(keys, key) end
+        if key ~= addon.charKey then table.insert(keys, key) end
     end
     return keys
 end
@@ -822,6 +887,17 @@ function addon.UpdateShopSection()
         -- Only another character's queue: say so instead of no box at all
         -- (user, 2026-10-24: "i don't see any buy next")
         local other = OtherQueueNote()
+        -- Their queues have all they need: say that too, a missing panel
+        -- read as Buy next being broken (user, 2026-10-24: Maddoxynn's
+        -- Sienna Ink was covered by her pigments and Mana Lily to mill)
+        if not other and others then
+            local names = {}
+            for _, key in ipairs(OtherQueueKeys()) do table.insert(names, addon.QueueCharName(key) .. "'s") end
+            local who = #names == 1 and names[1] or (table.concat(names, ", ", 1, #names - 1) .. " and " .. names[#names])
+            other = string.format("Nothing to buy: %s %s everything %s from the AH.", who,
+                #names == 1 and "queue has" or "queues have", #names == 1 and "it needs" or "they need")
+            section.allQueues:Hide()
+        end
         if not other then
             section:Hide()
             return 0
@@ -1025,8 +1101,11 @@ for _, event in ipairs({ "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED", "COMMODIT
 end
 events:SetScript("OnEvent", function(_, event, unit, total)
     if event == "MAIL_SHOW" then
-        -- Bought here for another character's queue and not mailed yet
-        for _, line in ipairs(ToMail()) do addon:Notify("info", "%s", line) end
+        -- Bought here for another character's queue and not mailed yet:
+        -- in chat only when the mailbox panel (Mail.lua) can't show it
+        if not addon.MailPanelShown then
+            for _, line in ipairs(ToMail()) do addon:Notify("info", "%s", line) end
+        end
         return
     elseif event == "AUCTION_HOUSE_SHOW" then
         ahOpen = true
