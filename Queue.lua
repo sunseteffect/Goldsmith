@@ -872,13 +872,23 @@ end
 -- vendor materials given as the plan's whole amount: the step's 20 next to
 -- the plan's 26 and the shopping line's 54 confused (user, 2026-10-22: say
 -- what the whole craft needs)
+-- One item per line, under its heading: run together, "Missing for 2
+-- crafts: 12 Ominous Octopus, 2 Earthy Garnish. Buy 30 A Big Ol' Stick of
+-- Butter (6 for this craft) from a vendor…" was hard to read (user,
+-- 2026-10-25)
+local function ListLines(head, items)
+    return head .. "\n  " .. table.concat(items, "\n  ")
+end
+
 function addon:ShoppingBlocker(line, plan)
     local head, list = line:match("^(Missing for [^:]+): (.-)%.$")
+    if not list then return line end
+    local items = {}
+    for part in list:gmatch("[^,]+") do table.insert(items, (part:gsub("^%s+", ""))) end
     local vendor = plan and plan.buyVendor
-    if not list or not vendor or #vendor == 0 then return line end
+    if not vendor or #vendor == 0 then return ListLines(head .. ":", items) end
     local fromVendor, other, anyAll = {}, {}, false
-    for part in list:gmatch("[^,]+") do
-        part = part:gsub("^%s+", "")
+    for _, part in ipairs(items) do
         local name = part:match("^%d+ (.+)$") or part
         -- Without the quality icon and any "(20 in your mailbox)": "3 ◆
         -- Sunglass Vial" never matched the vendor list's "Sunglass Vial",
@@ -898,10 +908,10 @@ function addon:ShoppingBlocker(line, plan)
             or (total .. " " .. name)) or part)
         anyAll = anyAll or all ~= nil
     end
-    if #fromVendor == 0 then return line end
-    local text = "Buy " .. table.concat(fromVendor, ", ") .. " from a vendor: enough for "
-        .. (anyAll and "the whole queue." or "every step.")
-    if #other > 0 then text = head .. ": " .. table.concat(other, ", ") .. ". " .. text end
+    if #fromVendor == 0 then return ListLines(head .. ":", items) end
+    local text = ListLines("Buy from a vendor, enough for " .. (anyAll and "the whole queue:" or "every step:"),
+        fromVendor)
+    if #other > 0 then text = ListLines(head .. ":", other) .. "\n" .. text end
     return text
 end
 
