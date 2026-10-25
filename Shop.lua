@@ -708,13 +708,10 @@ end
 -- From a click or the key binding (the game only buys from one)
 function addon:BuyNext()
     if addon:TourBlocks("buy the next item for the queue") then return end
-    -- Panel off: you don't use Buy next, so the key does nothing (user,
-    -- 2026-10-25). AH closed: a quiet line, no sound.
-    if not addon:Setting("ahScan") then return end
-    if not ahOpen then
-        addon:Notify("info", "Open the auction house first.")
-        return
-    end
+    -- The key with the panel off (you don't use Buy next) or away from the
+    -- AH (nothing to buy, and everyone knows it) does nothing (user,
+    -- 2026-10-25)
+    if not addon:Setting("ahScan") or not ahOpen then return end
     if buying or asking then return end
     if addon:IsScanning() then
         addon:Notify("info", "Buy next waits for the Goldsmith scan to finish.")

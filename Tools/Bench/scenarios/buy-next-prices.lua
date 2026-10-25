@@ -23,7 +23,6 @@ local addon = bench.Login("Mysticmead", { db = db })
 bench.SetBags({ [AZEROOT] = nil, [AZEROOT + 1] = nil })
 
 addon:BuyNext()
-bench.Has("AH closed: says to open it", bench.Chat(), "Open the auction house first.")
 bench.OpenAH()
 bench.Click("Buy 8 Azeroot")
 bench.Has("asks the price", bench.Calls(), "StartCommoditiesPurchase(236774, 8)")
