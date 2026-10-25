@@ -770,7 +770,7 @@ function addon:PlainPriceSourceText(itemID, source, age)
         -- Made on another realm group: say where (only materials use it)
         local elsewhere = addon:OwnScanElsewhere()
         local from = elsewhere and (", from " .. elsewhere) or ""
-        if t and date("%Y-%m-%d", t) == date("%Y-%m-%d") then return "Goldsmith scan, " .. date("%H:%M", t) .. from end
+        if t then return "Goldsmith scan, " .. addon:WhenText(t, "") .. from end
         return "Goldsmith scan, " .. addon:FormatAge(math.max(1, age or 1)) .. from
     end
     if source == "TSM" then return "TSM" end
@@ -830,6 +830,23 @@ function addon:GetPriceSeenTime(itemID)
     if entry and date("%Y-%m-%d", entry[1]) == date("%Y-%m-%d") then
         return date("%H:%M", entry[1])
     end
+end
+
+-- When something happened, for a label: "at 14:32" today (`today` replaces
+-- "at "), "yesterday 23:35", else "3 days ago" in calendar days. Whole
+-- 24-hour days said "1 day ago" for a scan made half an hour before
+-- midnight (user, 2026-10-25: "when really i did it probably like an hour
+-- ago").
+local function DayNumber(t)
+    local d = date("*t", t)
+    return math.floor(time({ year = d.year, month = d.month, day = d.day, hour = 12 }) / 86400 + 0.5)
+end
+
+function addon:WhenText(ts, today)
+    local days = DayNumber(time()) - DayNumber(ts)
+    if days <= 0 then return (today or "at ") .. date("%H:%M", ts) end
+    if days == 1 then return "yesterday " .. date("%H:%M", ts) end
+    return string.format("%d days ago", days)
 end
 
 -- "from 14:32" (seen today, with itemID), "from today", "2 days old"

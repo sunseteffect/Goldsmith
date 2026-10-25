@@ -366,10 +366,9 @@ end)
 
 -- Panel by the AH window
 
+-- "today 14:32", "yesterday 23:35", "2 days ago" (Pricing.lua)
 local function When(ts)
-    if date("%Y-%m-%d", ts) == date("%Y-%m-%d") then return "today " .. date("%H:%M", ts) end
-    local days = math.max(1, math.floor((time() - ts) / 86400))
-    return string.format("%d day%s ago", days, days == 1 and "" or "s")
+    return addon:WhenText(ts, "today ")
 end
 
 -- Where you dragged it, else under the AH window, left edges lined up,

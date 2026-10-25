@@ -91,11 +91,9 @@ end
 -- Goldsmith Data this many days old turns the header orange
 local DATA_STALE_DAYS = 2
 
--- "at 14:32" today, else "2 days ago"
+-- "at 14:32" today, "yesterday 23:35", else "2 days ago" (Pricing.lua)
 local function When(ts)
-    if date("%Y-%m-%d", ts) == date("%Y-%m-%d") then return "at " .. date("%H:%M", ts) end
-    local days = math.max(1, math.floor((time() - ts) / 86400))
-    return string.format("%d day%s ago", days, days == 1 and "" or "s")
+    return addon:WhenText(ts)
 end
 
 -- Auctionator updates after full scans and after any AH search, so the
@@ -105,17 +103,24 @@ end
 -- Goldsmith's own scan counts as a full scan too, when it's newer: "Full
 -- scan 2 days ago" showed after several Goldsmith scans that day (user,
 -- 2026-10-23)
+-- A scan under a day old isn't stale (orange): by the hour, not the date,
+-- or one made before midnight turned orange at midnight (2026-10-25)
+local FRESH_SECONDS = 86400
+local function Fresh(ts)
+    return ts ~= nil and time() - ts < FRESH_SECONDS
+end
+
 local function AuctionatorText(scan)
     local full = GoldsmithDB.lastFullScan
     local own = addon.GetOwnScanTime and addon:GetOwnScanTime()
-    local fresh = full and date("%Y-%m-%d", full) == date("%Y-%m-%d")
+    local fresh = Fresh(full)
     if full and scan - full < 60 then
         return "Prices: Auctionator full scan " .. When(full), fresh
     end
     local second
     if own and (not full or own > full) then
         second = "\nGoldsmith scan " .. When(own)
-        fresh = date("%Y-%m-%d", own) == date("%Y-%m-%d")
+        fresh = Fresh(own)
     else
         second = full and ("\nFull scan " .. When(full)) or "\nNo full scan yet"
     end
@@ -144,7 +149,7 @@ local function PriceSourceText()
                 "warning"
         end
         return "Prices: Goldsmith scan " .. When(own),
-            date("%Y-%m-%d", own) == date("%Y-%m-%d") and "muted" or "warning"
+            Fresh(own) and "muted" or "warning"
     end
     if addon:ScannedThisSession() then
         -- Items this update didn't see use TSM when it's installed

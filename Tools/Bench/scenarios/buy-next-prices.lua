@@ -7,6 +7,8 @@ local db = bench.LoadSaved()
 db.settings.buyOver = 0
 db.queues["Mysticmead-Sargeras"] = { { recipeID = 1226197, quantity = 8, made = 0, added = os.time() } }
 local myst = db.characters["Mysticmead-Sargeras"]
+-- Nothing in her mailbox, whatever the last login saw
+db.inMail["Mysticmead-Sargeras"] = {}
 myst.stock[AZEROOT], myst.stock[AZEROOT + 1] = nil, nil
 local addon = bench.Login("Mysticmead", { db = db })
 bench.SetBags({ [AZEROOT] = nil, [AZEROOT + 1] = nil })

@@ -442,7 +442,7 @@ local function CheapTooltip(tooltip, item)
     if differs then
         local t = addon:GetOwnScanTime()
         tooltip:AddDoubleLine("Your Goldsmith scan", string.format("%s (%s)", Money(scanned),
-            t and (date("%Y-%m-%d", t) == date("%Y-%m-%d") and date("%H:%M", t) or addon:FormatAge(math.max(1, math.floor((time() - t) / 86400)))) or "?"),
+            t and addon:WhenText(t, "") or "?"),
             0.8, 0.8, 0.8, addon:Color("warning"))
     end
     if old or differs then
