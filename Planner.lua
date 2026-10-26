@@ -871,6 +871,16 @@ end
 -- what your own milling or crafts cost, gathered ones at today's price),
 -- the same basis as a craft's lot and the Craft complete notice;
 -- `fallback` (today's price) when Goldsmith never saw how you got it.
+-- A way's unit at today's prices as the to-do counts it: a craft that
+-- takes concentration with that concentration at CONC_POINT_COST
+-- (compareUnit). The gold vial Mysticmead held was 43.39g in the queue's
+-- today's prices and about 230g on the to-do, 177g apart on Light's
+-- Preservation with nothing to say why (2026-10-26). Not for marketCost:
+-- Buy next's warnings and the sell-the-materials note are about gold.
+local function TodayUnit(best)
+    return best.compareUnit or best.unit
+end
+
 local function HeldCost(itemID, name, units, fallback)
     if units <= 0 then return 0 end
     local own = addon:GetOwnCost(name, nil, itemID)
@@ -920,6 +930,8 @@ end
 --   cost      - cost of all materials: what you hold at what you paid,
 --               the rest at the cheapest way today (NodeCost)
 --   marketCost - the same, all at today's prices
+--   todayCost - marketCost with the concentration a material's craft takes
+--               counted (TodayUnit), as the to-do counts it (HeldGap)
 --   complete  - false if some material has no price at all
 --   buyAH     - { itemID, name, quantity, unit } to buy on the AH
 --   buyVendor - same, for vendor items
@@ -981,6 +993,7 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
             table.insert(plan.nodes, node)
             if node.best then
                 plan.marketCost = (plan.marketCost or 0) + node.best.unit * node.use
+                plan.todayCost = (plan.todayCost or 0) + TodayUnit(node.best) * node.use
                 local total = NodeCost(node)
                 plan.cost = plan.cost + (node.need > 0 and total * node.use / node.need or 0)
             else
@@ -1095,7 +1108,13 @@ local function NodeGaps(node, scale, out)
     if not best or scale == 0 then return end
     if (node.have or 0) > 0 and node.heldPaid then
         local name = node.name or "?"
-        out[name] = (out[name] or 0) + (node.heldPaid - node.have * best.unit) * scale
+        out[name] = (out[name] or 0) + (node.heldPaid - node.have * TodayUnit(best)) * scale
+    end
+    -- Made with concentration for this plan: gold only in what you pay,
+    -- its concentration too at today's prices
+    if (node.toGet or 0) > 0 and best.compareUnit and best.compareUnit > best.unit then
+        local name = node.name or "?"
+        out[name] = (out[name] or 0) + (best.unit - best.compareUnit) * node.toGet * scale
     end
     if (node.toGet or 0) > 0 and #(node.children or {}) > 0 then
         local made = best.split and node.craftItems or node.toGet
@@ -1122,8 +1141,9 @@ function addon:HeldGap(plans, always)
     local gap, today, byItem = 0, 0, {}
     for _, plan in ipairs(plans) do
         if plan.revenue and plan.marketCost then
-            gap = gap + plan.cost - plan.marketCost
-            today = today + plan.revenue - plan.marketCost
+            local todayCost = plan.todayCost or plan.marketCost
+            gap = gap + plan.cost - todayCost
+            today = today + plan.revenue - todayCost
             for _, node in ipairs(plan.nodes or {}) do
                 if (node.need or 0) > 0 then NodeGaps(node, (node.use or node.need) / node.need, byItem) end
             end
