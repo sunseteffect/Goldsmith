@@ -1114,8 +1114,8 @@ end
 -- (stock-ups, salvage without one) are left out, as the queue's profit
 -- leaves them out. Returns the gap (copper, more paid is positive) and the
 -- held item that makes most of it (or nil), or nil when it's too small.
--- always: any gap of a gold or more, for a queue whose rows have their
--- own (QueueTab.lua). Profit at today's prices is the shown profit plus
+-- always: any gap of a gold or more (a queue row, and the queue when a
+-- row has one; QueueTab.lua). Profit at today's prices is the shown profit plus
 -- the gap.
 function addon:HeldGap(plans, always)
     if plans.nodes then plans = { plans } end

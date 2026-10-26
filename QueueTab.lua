@@ -125,6 +125,14 @@ local function StockTooltip(tooltip, item)
     addon:ClickHint(tooltip, "Click to open its page. Right-click to move or remove it.")
 end
 
+-- A queued craft's gap from the to-do's profit (HeldGap, a gold or more),
+-- or nil: its profit is starred
+function addon:QueueRowGap(item)
+    local plan = item.plan
+    if not plan or plan.stock then return nil end
+    return addon:HeldGap(plan, true)
+end
+
 local function FillRow(row, item)
     local c = row.cells
     c.item:SetText(ItemText(item))
@@ -212,7 +220,8 @@ local function RowTooltip(tooltip, item)
             tooltip:AddDoubleLine("Sells for", Money(plan.revenue), 0.8, 0.8, 0.8, 1, 1, 1)
             local r, g, b = addon:Color(addon:MoneyColor(plan.profit))
             tooltip:AddDoubleLine("Profit", Signed(plan.profit), 0.8, 0.8, 0.8, r, g, b)
-            local gap, gapItem = addon:HeldGap(plan)
+            -- The same gaps as the star on its profit (QueueRowGap)
+            local gap, gapItem = addon:HeldGap(plan, true)
             if gap then
                 local today = plan.profit + gap
                 r, g, b = addon:Color(addon:MoneyColor(today))
@@ -543,13 +552,14 @@ local function Refresh(v)
             if have[prof] and byProf[prof] > have[prof] then row.concShort = true end
         end
     end
-    -- Rows whose own profit clearly differs from the to-do's because of
-    -- what you hold: Blooming Feast +148.51g against +126.60g, while the
-    -- whole queue's gap was too small to mention (user, 2026-10-26: "if
-    -- there is a mismatch we need to make it clear why")
+    -- Rows whose profit differs from the to-do's because of what you
+    -- hold, by a gold or more: Blooming Feast +148.51g against +126.60g,
+    -- while the whole queue's gap was too small to mention (user,
+    -- 2026-10-26: "if there is a mismatch we need to make it clear why").
+    -- Not only clear gaps: a 13g one under the 10% line went unexplained.
     local starred = false
     for _, row in ipairs(q.rows) do
-        row.heldGap = row.plan and not row.plan.stock and addon:HeldGap(row.plan) or nil
+        row.heldGap = addon:QueueRowGap(row)
         starred = starred or row.heldGap ~= nil
     end
     v.list:SetItems(q.rows)
