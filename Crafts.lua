@@ -2670,8 +2670,9 @@ local function CreatePlanScreen(parent)
             screen.profit.note:SetTextColor(addon:Color("muted"))
             -- What you hold cost clearly more or less than today: the
             -- to-do's number (today's prices) and why, in plain sight
-            -- (HeldGap, Planner.lua)
-            local gap, gapItem = addon:HeldGap(plan)
+            -- (HeldGap, Planner.lua). A gold or more, as the queue's star:
+            -- a starred feast opened a plan that said nothing (2026-10-26)
+            local gap, gapItem = addon:HeldGap(plan, true)
             if gap then
                 local today = plan.profit + gap
                 screen.profit.note:SetText(string.format("%s%s at today's prices\n%s",

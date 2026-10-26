@@ -348,6 +348,12 @@ local function Create(parent)
     view.profit.note:SetPoint("TOPLEFT", view.profit.value, "BOTTOMLEFT", 0, -4)
     view.profit.note:SetWidth(360)
     view.profit.note:SetWordWrap(false)
+    -- Why, on a line of its own: one text with a line break showed only
+    -- "+860.80g at today's prices..." in game (user, 2026-10-26)
+    view.profit.why = UI.Text(summary, "small", "text")
+    view.profit.why:SetPoint("TOPLEFT", view.profit.note, "BOTTOMLEFT", 0, -2)
+    view.profit.why:SetWidth(360)
+    view.profit.why:SetWordWrap(false)
     view.cost.label:SetText("COST")
     view.sells.label:SetText("SELLS FOR")
     view.profit.label:SetText("PROFIT")
@@ -595,14 +601,17 @@ local function Refresh(v)
     if not noTotals then gap, gapItem = addon:HeldGap(plans, starred) end
     if gap then
         local today = q.profit + gap
-        v.profit.note:SetText(string.format("%s at today's prices\n%s%s",
-            addon:Colorize(Signed(today), addon:MoneyColor(today)), starred and "* " or "",
-            addon:HeldGapText(gap, gapItem)))
+        -- "as on the to-do": what the star is measured against
+        v.profit.note:SetText(string.format("%s at today's prices, as on the to-do",
+            addon:Colorize(Signed(today), addon:MoneyColor(today))))
+        v.profit.why:SetText((starred and "* " or "") .. addon:HeldGapText(gap, gapItem))
     elseif starred and not noTotals then
         -- Rows that differ both ways, adding up to nothing
         v.profit.note:SetText("* What you hold changes these: hover for why")
+        v.profit.why:SetText("")
     else
         v.profit.note:SetText("")
+        v.profit.why:SetText("")
     end
 
     if empty then
