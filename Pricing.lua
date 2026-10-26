@@ -2751,6 +2751,15 @@ SlotCost = function(slot)
             best, bestSource, bestName, bestID = made, "craft it", slot.names[i], nil
         end
     end
+    -- Salvaging for it (milling, butchering) when that beats the rest by
+    -- the plan's margin, as the plan would (SalvageUnitCost)
+    for i, itemID in ipairs(slot.itemIDs or {}) do
+        local unit, margin
+        if addon.SalvageUnitCost then unit, margin = addon:SalvageUnitCost(itemID, slot.names[i]) end
+        if unit and (not best or unit * (1 + margin) < best) then
+            best, bestSource, bestName, bestID = unit, "salvage it", slot.names[i], nil
+        end
+    end
     if best then
         return best, bestSource, bestName, bestSource == "AH price" and bestID or nil
     end

@@ -242,9 +242,19 @@ GetOptions = function(itemID, name, depth, memo, visiting)
         local row, _, crafterKey = addon:CraftedTierRow(itemID, name)
         if row then
             -- unit is the gold it costs; compareUnit adds its concentration
-            -- at CONC_POINT_COST, for choosing between crafting and buying
+            -- at CONC_POINT_COST, for choosing between crafting and buying.
+            -- The row prices its materials as bought; the plan this craft
+            -- gets (CraftPlanUnit) mills them when that's cheaper, as its own
+            -- rows then say. A Missive's Sienna Ink cost 20.50g here with
+            -- its pigment rows saying "Mill", against 18.43g on the to-do
+            -- (user, 2026-10-25: "if there is a gap then it is explained").
+            local unit = row.cost
+            if not row.concentrate and not addon.craftUnitBusy then
+                local planned = addon:CraftPlanUnit(itemID, name)
+                if planned and planned < unit then unit = planned end
+            end
             local concCost = addon:ConcentrationPerItem(row) * addon.CONC_POINT_COST
-            options.craft = { method = "Craft", unit = row.cost, compareUnit = row.cost + concCost,
+            options.craft = { method = "Craft", unit = unit, compareUnit = unit + concCost,
                 recipe = recipe, tierRow = row, crafterKey = crafterKey,
                 verb = row.concentrate and "Craft + conc" or nil }
         end
@@ -436,6 +446,35 @@ function addon:CraftUnitCost(itemID, name)
     return cached or nil
 end
 
+-- Salvaging for an item (milling, prospecting, butchering) at today's
+-- prices, as a plan prices it: the unit cost and SALVAGE_MARGIN (a plan
+-- salvages only when that beats the other ways by the margin), or nil when
+-- you haven't salvaged for it enough to know the yield. For the Crafts
+-- list's material costs (SlotCost, QualityPrice): they left salvaging out,
+-- so Munsell Ink's pigments counted at the AH's price while its plan milled
+-- them, and the to-do and the queue disagreed (user, 2026-10-25: "if there
+-- is a gap then it is explained"). Kept until data changes.
+local salvageUnitBusy = {}
+function addon:SalvageUnitCost(itemID, name)
+    if not itemID or salvageUnitBusy[itemID] then return nil end
+    local store = craftUnitCache:Get()
+    store.salvage = store.salvage or {}
+    local cached = store.salvage[itemID]
+    if cached == nil then
+        store.memo = store.memo or {}
+        salvageUnitBusy[itemID] = true
+        local wasBusy = addon.craftUnitBusy
+        addon.craftUnitBusy = true
+        local options = GetOptions(itemID, name, 1, store.memo, {})
+        addon.craftUnitBusy = wasBusy
+        salvageUnitBusy[itemID] = nil
+        local mill = options.mill
+        cached = mill and mill.unit and not mill.noPrice and mill.unit or false
+        store.salvage[itemID] = cached
+    end
+    if cached then return cached, SALVAGE_MARGIN end
+end
+
 -- The cheapest way to make an item yourself: crafting it, priced by the
 -- plan its crafter would get (MAKE_SAMPLE of it, without concentration,
 -- nothing from your bags), or salvaging (with SALVAGE_MARGIN on top,
@@ -470,13 +509,31 @@ local function PlanUnitCost(itemID, name)
     end
 end
 
+-- PlanUnitCost alone (crafting, not salvaging), kept until data changes.
+-- nil while it's being worked out, so a plan that reaches the same item
+-- again doesn't go round in circles.
+local planUnitBusy = {}
+function addon:CraftPlanUnit(itemID, name)
+    if not itemID or planUnitBusy[itemID] then return nil end
+    local store = makeUnitCache:Get()
+    store.plans = store.plans or {}
+    local cached = store.plans[itemID]
+    if cached == nil then
+        planUnitBusy[itemID] = true
+        cached = PlanUnitCost(itemID, name) or false
+        planUnitBusy[itemID] = nil
+        store.plans[itemID] = cached
+    end
+    return cached or nil
+end
+
 function addon:MakeUnitCost(itemID, name)
     if addon.craftUnitBusy or not itemID then return nil end
     local store = makeUnitCache:Get()
     local cached = store[itemID]
     if cached == nil then
         cached = false
-        local unit = PlanUnitCost(itemID, name)
+        local unit = addon:CraftPlanUnit(itemID, name)
         if unit then cached = { unit = unit, way = "Craft" } end
         store.memo = store.memo or {}
         addon.craftUnitBusy = true
@@ -817,13 +874,15 @@ end
 -- for materials bought an hour before). What you still get is at today's
 -- price; a craft from held materials passes their paid share up (gold
 -- ingots from ore you bought). Buy or craft is still picked on today's
--- prices (GetOptions). Sets node.paidTotal.
+-- prices (GetOptions). Sets node.paidTotal, and node.heldPaid (what you
+-- hold of it, at what you paid; HeldGap).
 local function NodeCost(node)
     local best = node.best
     if not best then return nil end
     local goldUnits = node.gold and node.gold.units or 0
     local cost = HeldCost(node.itemID, node.name, node.have - goldUnits, best.unit)
     if goldUnits > 0 then cost = cost + HeldCost(node.gold.itemID, node.name, goldUnits, best.unit) end
+    node.heldPaid = cost
     if node.toGet > 0 then
         local made = best.split and node.craftItems or node.toGet
         local bought = best.split and best.split.buyItems or 0
@@ -1004,6 +1063,74 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
     plan.demand, plan.demandSource = addon:GetDemand((tier and tier.itemID) or recipe.outputItemID, recipe.outputName)
     plan.saleRate = addon:GetSaleRate((tier and tier.itemID) or recipe.outputItemID)
     return plan
+end
+
+-- What the materials you hold add to a plan's cost against today's prices,
+-- for saying why its profit isn't the to-do's: the to-do decides on
+-- today's prices, plans and the queue show what you paid. Flames of the
+-- Sin'dorei read +463.63g on the to-do and +341.67g in the queue, the 6
+-- Petrified Root held at 81g against 60g today, and nothing said so
+-- (user, 2026-10-25: "i just need to make sure the user isn't confused
+-- like i was"). Only when it's at least 10g and 10% of the profit at
+-- today's prices: 10% of the cost hid the Flames' 122g against a 1,342g
+-- cost, a quarter of its profit.
+local HELD_GAP_MIN = 100000
+local HELD_GAP_SHARE = 0.10
+-- The item named when it makes this much of the gap, else "what you hold"
+local HELD_GAP_NAME_SHARE = 0.6
+
+-- Each held material's part of the gap, by name, into out. A crafted
+-- material's children pass theirs up at the share NodeCost gives them.
+local function NodeGaps(node, scale, out)
+    local best = node.best
+    if not best or scale == 0 then return end
+    if (node.have or 0) > 0 and node.heldPaid then
+        local name = node.name or "?"
+        out[name] = (out[name] or 0) + (node.heldPaid - node.have * best.unit) * scale
+    end
+    if (node.toGet or 0) > 0 and #(node.children or {}) > 0 then
+        local made = best.split and node.craftItems or node.toGet
+        local madeUnit = best.split and node.options.best and node.options.best.unit or best.unit
+        local market = 0
+        for _, child in ipairs(node.children) do
+            if child.best then market = market + child.best.unit * child.need end
+        end
+        if market > 0 then
+            for _, child in ipairs(node.children) do NodeGaps(child, scale * made * madeUnit / market, out) end
+        end
+    end
+end
+
+-- plans: one plan or a list (the queue's). Plans without a sale price
+-- (stock-ups, salvage without one) are left out, as the queue's profit
+-- leaves them out. Returns the gap (copper, more paid is positive) and the
+-- held item that makes most of it (or nil), or nil when it's too small.
+-- Profit at today's prices is the shown profit plus the gap.
+function addon:HeldGap(plans)
+    if plans.nodes then plans = { plans } end
+    local gap, today, byItem = 0, 0, {}
+    for _, plan in ipairs(plans) do
+        if plan.revenue and plan.marketCost then
+            gap = gap + plan.cost - plan.marketCost
+            today = today + plan.revenue - plan.marketCost
+            for _, node in ipairs(plan.nodes or {}) do
+                if (node.need or 0) > 0 then NodeGaps(node, (node.use or node.need) / node.need, byItem) end
+            end
+        end
+    end
+    if math.abs(gap) < math.max(HELD_GAP_MIN, math.abs(today) * HELD_GAP_SHARE) then return nil end
+    local name, most = nil, 0
+    for item, d in pairs(byItem) do
+        if d * gap > 0 and math.abs(d) > most then name, most = item, math.abs(d) end
+    end
+    if most < math.abs(gap) * HELD_GAP_NAME_SHARE then name = nil end
+    return gap, name
+end
+
+-- "You paid 122.06g more for Petrified Root"
+function addon:HeldGapText(gap, name)
+    return string.format("You paid %s %s for %s", addon:FormatMoney(math.abs(gap)), gap > 0 and "more" or "less",
+        name or "what you hold")
 end
 
 -- Tree flattened into display rows, parents before children

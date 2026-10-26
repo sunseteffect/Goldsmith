@@ -520,8 +520,18 @@ end
 local function CraftedTierCost(itemID, name, sharing)
     local row, recipe = addon:CraftedTierRow(itemID, name)
     if row and sharing and row.concentrate and recipe and recipe.profession == sharing then return nil end
-    return row and (row.cost + addon:ConcentrationPerItem(row) * addon.CONC_POINT_COST)
+    if not row then return nil end
+    local unit = row.cost
+    if not row.concentrate and not addon.craftUnitBusy then
+        local planned = addon:CraftPlanUnit(itemID, name)
+        if planned and planned < unit then unit = planned end
+    end
+    return unit + addon:ConcentrationPerItem(row) * addon.CONC_POINT_COST
 end
+-- Without concentration, the plan the craft gets (CraftPlanUnit) when it's
+-- cheaper: the row prices its own materials as bought, so a Missive's
+-- Sienna Ink counted at the AH's 19.18g while its plan mills the pigments
+-- for 18.43g, and the to-do and the queue disagreed (user, 2026-10-25).
 
 -- The cheaper of buying a material quality and making it, else what you
 -- paid: a gold Sunglass Vial listed at 293g made the gold Draught of
@@ -530,8 +540,12 @@ end
 local function QualityPrice(itemID, name, sharing)
     local market = addon:GetMarketPrice(itemID, true)
     local crafted = CraftedTierCost(itemID, name, sharing)
-    if market and crafted then return math.min(market, crafted) end
-    return market or crafted or addon:GetOwnCost(name)
+    local best = market and crafted and math.min(market, crafted) or market or crafted
+    local salvage, margin = addon:SalvageUnitCost(itemID, name)
+    if salvage and (not best or salvage * (1 + margin) < best) then best = salvage end
+    return best or addon:GetOwnCost(name)
+-- Salvaging for it (milling pigments) too, when that beats the rest by the
+-- plan's margin, as the plan would (SalvageUnitCost; user, 2026-10-25)
 end
 
 -- Cost per crafted item for a scenario's materials: each quality material

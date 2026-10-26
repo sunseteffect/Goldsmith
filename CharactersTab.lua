@@ -206,10 +206,12 @@ local function CreateTodoLine(card, i)
                 l.crafts, l.row.description or "another mix"), 0.91, 0.76, 0.35, true)
         end
         tooltip:AddDoubleLine("Crafts", tostring(item.crafts), 0.8, 0.8, 0.8, 1, 1, 1)
-        tooltip:AddDoubleLine("Makes about", tostring(item.quantity), 0.8, 0.8, 0.8, 1, 1, 1)
+        local made = item.made or item.quantity
+        tooltip:AddDoubleLine("Makes about", string.format(made % 1 == 0 and "%d" or "%.1f", made),
+            0.8, 0.8, 0.8, 1, 1, 1)
         addon:Explain(tooltip, "The crafts times what each makes, with multicraft's extra items on average.")
-        tooltip:AddDoubleLine("Profit", Signed(item.profit), 0.8, 0.8, 0.8, 0.37, 0.81, 0.48)
-        addon:Explain(tooltip, "For all of them: the AH price after the 5% cut, minus what they cost to make.")
+        tooltip:AddDoubleLine("Profit at today's prices", Signed(item.profit), 0.8, 0.8, 0.8, 0.37, 0.81, 0.48)
+        addon:Explain(tooltip, "For all of them: the AH price after the 5% cut, minus what the materials sell for today. The queue counts what yours cost you.")
         local perPoint = item.concentration and item.row.concentrationValue
         if item.concentration then
             tooltip:AddDoubleLine("Concentration", tostring(math.floor(item.concentration + 0.5)),

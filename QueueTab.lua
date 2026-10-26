@@ -12,7 +12,8 @@ local UI = addon.UI
 -- profession filter doesn't apply: the queue is one list.
 
 local TOP_HEIGHT = 26
-local SUMMARY_HEIGHT = 144 -- room for the cost's concentration note
+-- Room for the cost's concentration note and the profit's two lines
+local SUMMARY_HEIGHT = 160
 local AH_CUT = 0.05
 
 local Money, Signed = function(c) return addon:FormatMoney(c) end, function(c) return addon:FormatSignedMoney(c) end
@@ -209,6 +210,13 @@ local function RowTooltip(tooltip, item)
             tooltip:AddDoubleLine("Sells for", Money(plan.revenue), 0.8, 0.8, 0.8, 1, 1, 1)
             local r, g, b = addon:Color(addon:MoneyColor(plan.profit))
             tooltip:AddDoubleLine("Profit", Signed(plan.profit), 0.8, 0.8, 0.8, r, g, b)
+            local gap, gapItem = addon:HeldGap(plan)
+            if gap then
+                local today = plan.profit + gap
+                r, g, b = addon:Color(addon:MoneyColor(today))
+                tooltip:AddDoubleLine("At today's prices", Signed(today), 0.8, 0.8, 0.8, r, g, b)
+                tooltip:AddLine(addon:HeldGapText(gap, gapItem), 0.8, 0.8, 0.8, true)
+            end
         end
         if #plan.buyAH > 0 then
             tooltip:AddLine(" ")
@@ -324,6 +332,11 @@ local function Create(parent)
     view.cost.note:SetPoint("TOPLEFT", view.cost.value, "BOTTOMLEFT", 0, -4)
     view.cost.note:SetWidth(360)
     view.cost.note:SetWordWrap(false)
+    -- Under the profit: at today's prices, and why it differs (HeldGap)
+    view.profit.note = UI.Text(summary, "small", "text")
+    view.profit.note:SetPoint("TOPLEFT", view.profit.value, "BOTTOMLEFT", 0, -4)
+    view.profit.note:SetWidth(360)
+    view.profit.note:SetWordWrap(false)
     view.cost.label:SetText("COST")
     view.sells.label:SetText("SELLS FOR")
     view.profit.label:SetText("PROFIT")
@@ -551,6 +564,21 @@ local function Refresh(v)
     v.sells.value:SetText(noTotals and "-" or Money(q.revenue))
     v.profit.value:SetText(noTotals and "-" or Signed(q.profit))
     v.profit.value:SetTextColor(addon:Color(noTotals and "dim" or addon:MoneyColor(q.profit)))
+    -- The to-do counts today's prices; the queue, what you paid. When what
+    -- you hold makes them clearly differ, say by how much and why.
+    local plans = {}
+    for _, row in ipairs(q.rows) do
+        if row.plan and not row.plan.stock then table.insert(plans, row.plan) end
+    end
+    local gap, gapItem
+    if not noTotals then gap, gapItem = addon:HeldGap(plans) end
+    if gap then
+        local today = q.profit + gap
+        v.profit.note:SetText(string.format("%s at today's prices\n%s",
+            addon:Colorize(Signed(today), addon:MoneyColor(today)), addon:HeldGapText(gap, gapItem)))
+    else
+        v.profit.note:SetText("")
+    end
 
     if empty then
         v.spendLine:SetText("")

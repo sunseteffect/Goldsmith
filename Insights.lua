@@ -1153,7 +1153,7 @@ function addon:GetCharacterTodo(prof, conc)
             local item = {
                 recipe = p.recipe, row = p.row, itemID = itemID, tierCount = p.tierCount,
                 crafts = p.crafts, quantity = quantity, profit = p.profit, concentration = p.points,
-                planCrafts = p.crafts, leftovers = {},
+                planCrafts = p.crafts, leftovers = {}, made = p.crafts * (p.row.outputPerCraft or 1),
             }
             local first = byItem[id]
             if first then
@@ -1172,19 +1172,26 @@ function addon:GetCharacterTodo(prof, conc)
     for _, c in ipairs(addon:GetCooldownCrafts(prof)) do
         local quantity = math.max(math.floor(c.crafts * (c.outputPerCraft or 1)), 1)
         if c.itemID then planned[c.itemID] = (planned[c.itemID] or 0) + quantity end
+        -- Profit for what the crafts make on average, as the queue counts it
+        -- (and the concentration lines above)
         Add(c.charKey, {
             recipe = c.recipe, row = c.row, itemID = c.itemID, tierCount = c.row.tierCount,
-            crafts = c.crafts, quantity = quantity, profit = c.profit * quantity, cooldown = c.cooldown,
+            crafts = c.crafts, quantity = quantity, profit = c.profit * c.crafts * (c.outputPerCraft or 1),
+            made = c.crafts * (c.outputPerCraft or 1), cooldown = c.cooldown,
         })
     end
 
     for _, c in ipairs(addon:GetBestCrafts(prof, math.huge)) do
         local make = c.make - (c.itemID and planned[c.itemID] or 0)
         if make > 0 then
+            -- Profit for what the crafts make on average, not the items
+            -- asked for: 1 Missive's +49.29g was 1 craft making about 1.3,
+            -- +72.61g in the queue (user, 2026-10-25)
+            local crafts = math.max(math.ceil(make / c.outputPerCraft), 1)
             Add(c.charKey, {
                 recipe = c.recipe, row = c.row, itemID = c.itemID, tierCount = c.row.tierCount,
-                crafts = math.max(math.ceil(make / c.outputPerCraft), 1), quantity = make,
-                profit = c.profit * make, why = c.makeReason,
+                crafts = crafts, quantity = make, made = crafts * c.outputPerCraft,
+                profit = c.profit * crafts * c.outputPerCraft, why = c.makeReason,
             })
         end
     end

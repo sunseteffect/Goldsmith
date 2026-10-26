@@ -2668,6 +2668,17 @@ local function CreatePlanScreen(parent)
                     Money(sellMats)))
                 screen.profit.note:SetTextColor(addon:Color("warning"))
             end
+            -- What you hold cost clearly more or less than today: the
+            -- to-do's number (today's prices) and why, in plain sight
+            -- (HeldGap, Planner.lua)
+            local gap, gapItem = addon:HeldGap(plan)
+            if gap then
+                local today = plan.profit + gap
+                screen.profit.note:SetText(string.format("%s%s at today's prices\n%s",
+                    plan.margin and (Roi(plan.margin) .. " ROI · ") or "",
+                    addon:Colorize(Signed(today), addon:MoneyColor(today)), addon:HeldGapText(gap, gapItem)))
+                screen.profit.note:SetTextColor(addon:Color("text"))
+            end
         else
             screen.sells.value:SetText("-")
             screen.sells.value:SetTextColor(addon:Color("dim"))
