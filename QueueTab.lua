@@ -263,9 +263,6 @@ local function Create(parent)
 
     view.title = UI.Text(parent, "heading")
     view.title:SetPoint("TOPLEFT", 0, -4)
-    view.note = UI.Text(parent, "label", "dim")
-    view.note:SetPoint("LEFT", view.title, "RIGHT", 10, -1)
-    view.note:SetText("shop once for everything, then craft it all with Craft next")
 
     view.clear = UI.Button(parent, "Clear", 70, 24, function()
         if view.q and #view.q.rows > 0 then
