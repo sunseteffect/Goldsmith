@@ -430,9 +430,12 @@ function addon:CraftUnitCost(itemID, name)
     local cached = store[itemID]
     if cached == nil then
         store.memo = store.memo or {}
+        -- No pausing for a frame while busy is set: other code would see it
+        addon.noYield = addon.noYield + 1
         addon.craftUnitBusy = true
         local options = GetOptions(itemID, name, 1, store.memo, {})
         addon.craftUnitBusy = false
+        addon.noYield = addon.noYield - 1
         -- Not when it takes concentration: that isn't free, and the
         -- craft using it may need it all. Gold inks priced as crafted
         -- with concentration made gold Missives look +490g for 2 crafts;
@@ -462,12 +465,14 @@ function addon:SalvageUnitCost(itemID, name)
     local cached = store.salvage[itemID]
     if cached == nil then
         store.memo = store.memo or {}
+        addon.noYield = addon.noYield + 1
         salvageUnitBusy[itemID] = true
         local wasBusy = addon.craftUnitBusy
         addon.craftUnitBusy = true
         local options = GetOptions(itemID, name, 1, store.memo, {})
         addon.craftUnitBusy = wasBusy
         salvageUnitBusy[itemID] = nil
+        addon.noYield = addon.noYield - 1
         local mill = options.mill
         cached = mill and mill.unit and not mill.noPrice and mill.unit or false
         store.salvage[itemID] = cached
@@ -519,9 +524,11 @@ function addon:CraftPlanUnit(itemID, name)
     store.plans = store.plans or {}
     local cached = store.plans[itemID]
     if cached == nil then
+        addon.noYield = addon.noYield + 1
         planUnitBusy[itemID] = true
         cached = PlanUnitCost(itemID, name) or false
         planUnitBusy[itemID] = nil
+        addon.noYield = addon.noYield - 1
         store.plans[itemID] = cached
     end
     return cached or nil
@@ -536,9 +543,11 @@ function addon:MakeUnitCost(itemID, name)
         local unit = addon:CraftPlanUnit(itemID, name)
         if unit then cached = { unit = unit, way = "Craft" } end
         store.memo = store.memo or {}
+        addon.noYield = addon.noYield + 1
         addon.craftUnitBusy = true
         local options = GetOptions(itemID, name, 1, store.memo, {})
         addon.craftUnitBusy = false
+        addon.noYield = addon.noYield - 1
         local mill = options.mill
         if mill and mill.unit then
             local unit = mill.unit * (1 + SALVAGE_MARGIN)

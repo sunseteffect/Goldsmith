@@ -831,6 +831,11 @@ local function BuildTierRows(recipe)
 
     local evaluated = {}
     for _, s in ipairs(td.scenarios) do
+        -- Between mixes too: a craft with many mixes was one long frame on
+        -- the laptop (Characters 29 ms, Crafts 25 ms; 2026-10-26). Nothing
+        -- is stored until all are done, and the costing helpers that set
+        -- busy flags don't pause inside (Planner.lua, addon.noYield).
+        addon:Yield()
         local cost, complete, outputPerCraft = ScenarioCost(recipe, s)
         local price, source, age, itemID, note = GetTierPrice(td, s.tier)
         -- Valued at its usual price when the listing jumped (PriceJump)

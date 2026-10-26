@@ -204,9 +204,13 @@ function addon:RunWork(fn, onSlow, onDone, label, keep)
         -- The work's own stats while it runs (see the rules above)
         local outside, outsideChoices = addon.statsChar, addon.planChoices
         addon.statsChar, addon.planChoices = work.statsChar, work.planChoices
+        local noYield = addon.noYield
         local ok, err = coroutine.resume(work.co)
         work.statsChar, work.planChoices = addon.statsChar, addon.planChoices
         addon.statsChar, addon.planChoices = outside, outsideChoices
+        -- An error inside a no-pausing part (Planner.lua's costing helpers)
+        -- would leave it counted, and no work would pause again
+        if not ok then addon.noYield = noYield end
         local ms = debugprofilestop() - work.sliceStart
         work.totalMs, work.frames = work.totalMs + ms, work.frames + 1
         work.longestMs = math.max(work.longestMs, ms)
