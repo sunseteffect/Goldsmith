@@ -19,6 +19,19 @@ for _, label in ipairs({ "Help", "Support and feedback", "Take the tour", "Getti
         "VERSION", "LAST AH SCAN", "KEY TO OPEN", "0 of 16", "Everything is on its recommended setting." }) do
     bench.Has("dashboard shows " .. label, screen, label)
 end
+-- Last AH scan: the day alone in the tile, its time on the line under it
+-- ("Yesterday 22:52" was cut off; user, 2026-10-26)
+local scanTime = GoldsmithDB.ownScan and GoldsmithDB.ownScan.time
+if scanTime then
+    local when = addon:WhenText(scanTime, "today ")
+    local day, clock = when:match("^(%a+) (%d+:%d+)$")
+    if day then
+        bench.Has("scan tile: the day alone", screen, "^" .. day:gsub("^%l", string.upper) .. "$", false)
+        bench.Has("scan tile: the time under it", screen, "^" .. clock .. " · [%d,]+ items$", false)
+    else
+        bench.Has("scan tile: days ago", screen, "^%d+ days ago$", false)
+    end
+end
 for _, label in ipairs({ "Suggestions", "Ignored crafts", "Characters", "Prices and scan", "Buy next",
         "Display", "Chat and sounds", "Keys", "History" }) do
     bench.Has("nav lists " .. label, screen, label)

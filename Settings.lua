@@ -1454,8 +1454,12 @@ function addon:CreateSettingsPanel(parent)
         if not addon:Setting("ahScan") then
             tiles[2]:Set("Last AH scan", "Off", "muted", "Scan turned off")
         elseif scan and scan.time then
-            tiles[2]:Set("Last AH scan", (addon:WhenText(scan.time, "today "):gsub("^%l", string.upper)), "text",
-                BreakUpLargeNumbers(scan.items or 0) .. " items")
+            -- The day on top, its time underneath: "Yesterday 22:52" was cut
+            -- off in the tile (user, 2026-10-26)
+            local when = addon:WhenText(scan.time, "today ")
+            local day, clock = when:match("^(%a+) (%d+:%d+)$")
+            tiles[2]:Set("Last AH scan", ((day or when):gsub("^%l", string.upper)), "text",
+                (clock and (clock .. " · ") or "") .. BreakUpLargeNumbers(scan.items or 0) .. " items")
         else
             tiles[2]:Set("Last AH scan", "None yet", "muted", "Scan at the auctioneer")
         end
