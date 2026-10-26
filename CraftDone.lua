@@ -87,7 +87,7 @@ local function CreateToast()
 
     f.hint = UI.Text(f, "label", "dim", "RIGHT")
     f.hint:SetPoint("BOTTOMRIGHT", -8, 6)
-    f.hint:SetText("drag to move, click to close")
+    f.hint:SetText("click to close")
 
     -- Stays while the mouse is over it, then fades
     f:SetScript("OnUpdate", function(self, elapsed)
@@ -236,13 +236,13 @@ local function Describe(b)
     if price and b.made > 0 then
         local revenue = b.made * price * (1 - AH_CUT)
         local amount = revenue - b.cost
-        profit = string.format("%s %s", b.partial and "Estimated profit (at most):" or "Estimated profit:",
+        profit = string.format("%s %s", b.partial and "Profit (at most):" or "Estimated profit:",
             Colored(addon:FormatSignedMoney(amount), addon:MoneyColor(amount)))
         -- Selling the materials today would clearly have made more: the
         -- same 10% (and 10g) as the plan's note
         local sellMats = not b.marketPartial and (b.market or 0) * (1 - AH_CUT) - revenue
         if sellMats and sellMats >= math.max(100000, (b.market or 0) * 0.10) then
-            table.insert(details, Colored(string.format("Selling the materials would have made about %s more today.",
+            table.insert(details, Colored(string.format("Selling the materials makes %s more today.",
                 Money(sellMats)), "warning"))
         end
     end
@@ -306,7 +306,7 @@ function addon:ShowSalvageDone(itemID, entry)
     local price = addon:GetMarketPrice(itemID, true)
     if price and #outs > 0 then
         local amount = worth - price * entry.made
-        profit = string.format("%s %s", partial and "Estimated profit (at most):" or "Estimated profit:",
+        profit = string.format("%s %s", partial and "Profit (at most):" or "Estimated profit:",
             Colored(addon:FormatSignedMoney(amount), addon:MoneyColor(amount)))
     end
     ShowLines(C_Item.GetItemIconByID(itemID), verb .. " complete", "gold", item, table.concat(lines, "\n"), profit)

@@ -12,7 +12,7 @@ TSM_API = { IsUIVisible = function(ui) return ui == "MAILING" and tsmMail end }
 bench.Login("Maddoxynn", { db = db })
 bench.SetBags({ [AZEROOT] = 8 })
 
-local function Shown() return #bench.Screen() > 0 and table.concat(bench.Screen(), "\n"):find("MAIL TO YOUR CHARACTERS", 1, true) ~= nil end
+local function Shown() return #bench.Screen() > 0 and table.concat(bench.Screen(), "\n"):find("GOLDSMITH: MAIL", 1, true) ~= nil end
 
 -- TSM opens its window instead of the game's
 tsmMail = true

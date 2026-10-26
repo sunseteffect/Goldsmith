@@ -505,8 +505,8 @@ UpdatePanel = function()
     if run and run.borrowed then
         panel.status:SetText("Reading Auctionator's scan too")
     elseif scan and scan.time then
-        panel.status:SetText(string.format("Last scan %s, %s items%s", When(scan.time),
-            BreakUpLargeNumbers(scan.items or 0), scan.method == "pages" and " (page by page)" or ""))
+        panel.status:SetText(string.format("Last scan %s, %s items", When(scan.time),
+            BreakUpLargeNumbers(scan.items or 0)))
     else
         panel.status:SetText("No scan yet")
     end

@@ -39,5 +39,5 @@ bench.Has("sent", bench.Calls(), "SendMail(Mysticmead")
 -- Closing TSM's window hides the panel on the next frame
 tsmMail = false
 bench.Advance(0.1)
-bench.HasNot("hidden at once when TSM's window closes", bench.Screen(), "MAIL TO YOUR CHARACTERS")
+bench.HasNot("hidden at once when TSM's window closes", bench.Screen(), "GOLDSMITH: MAIL")
 bench.Done()

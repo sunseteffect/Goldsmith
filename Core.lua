@@ -141,10 +141,10 @@ local function RecordSale(sale)
     addon:AuctionSold(sale.itemName, sale.count, itemID)
 
     if prof == "Unassigned" then
-        addon:Notify("money", "Sold %s x%d for %.2fg after AH cut, incl. deposit refund (not a tracked item, saved as Unassigned)",
+        addon:Notify("money", "Sold %s x%d for %.2fg (untracked, saved as Unassigned)",
             sale.itemName, sale.count, sale.net / 10000)
     else
-        addon:Notify("money", "Sold %s x%d for %.2fg after AH cut, incl. deposit refund (%.2fg each)",
+        addon:Notify("money", "Sold %s x%d for %.2fg (%.2fg each)",
             sale.itemName, sale.count, sale.net / 10000, (sale.net / sale.count) / 10000)
     end
     if costBasis then
@@ -302,7 +302,7 @@ local function CheckPostPrice(itemLocation, quantity, unitPrice)
     if not cost or cost <= 0 or (source ~= "crafted" and source ~= "paid") then return end
     local breakEven = cost / (1 - AH_CUT)
     if unitPrice >= breakEven then return end
-    addon:Notify("info", "%s posted at %s each, under your break-even of %s (what yours cost you, after the AH cut). Cancel it in the AH if that's a mistake.",
+    addon:Notify("info", "%s posted at %s, under break-even (%s). Cancel it if that's a mistake.",
         name or "An item", addon:FormatMoney(unitPrice), addon:FormatMoney(breakEven))
     addon:Alert("loss", string.format("%s posted under your break-even of %s.", name or "An item",
         addon:FormatMoney(breakEven)))

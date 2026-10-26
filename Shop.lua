@@ -93,12 +93,8 @@ local function OtherQueueNote(also)
     local who = #names == 1 and names[1] or (table.concat(names, ", ", 1, #names - 1) .. " and " .. names[#names])
     -- Your queue is covered: a reminder that theirs isn't shopped here
     -- (user, 2026-10-24)
-    if also then
-        return string.format("%s %s a queue too: tick All queues to buy for it here.", who,
-            #names == 1 and "has" or "each have")
-    end
-    return string.format("Nothing queued on %s. %s %s a queue: tick All queues to buy for it here, or log in on %s.",
-        addon.QueueCharName(addon.charKey), who, #names == 1 and "has" or "each have", #names == 1 and names[1] or "one of them")
+    if also then return string.format("Tick All queues to buy for %s too.", who) end
+    return string.format("Nothing queued here. Tick All queues to buy for %s.", who)
 end
 
 -- Your other characters holding the next item, when mailing it over would
@@ -147,8 +143,8 @@ local function OwnStockNote(entry, unit)
         - (addon.ReservedCount and addon:ReservedCount(entry.itemID) or 0)
     if have <= 0 then return nil end
     local send = math.min(have, entry.quantity)
-    return string.format("You have %d %s: mail %d to %s instead of buying (saves about %s). Right-click Buy next to skip it.",
-        have, entry.name or "of these", send, who, Money(send * unit))
+    return string.format("You have %d %s: mail them to %s (saves %s). Right-click to skip.",
+        have, entry.name or "of these", who, Money(send * unit))
 end
 
 local function AltStockNote(entry)
@@ -171,7 +167,7 @@ local function AltStockNote(entry)
     local saves = math.min(best.count, entry.quantity) * unit
     if saves < ALT_WORTH then return nil end
     -- How to act on it, right there (user, 2026-10-24: "i can't skip it")
-    return string.format("%s has %d %s: mailing them over saves about %s. Right-click Buy next to skip it, then mail them.",
+    return string.format("%s has %d %s (saves %s). Right-click to skip.",
         best.name or "Another character", best.count, entry.name or "of these", Money(saves))
 end
 
@@ -244,7 +240,7 @@ local function LossNote(rows)
     local row = rows[1]
     local more = #rows > 1 and string.format(" (and %d more queued craft%s)", #rows - 1, #rows == 2 and "" or "s") or ""
     local whose = row.charKey and (" (" .. addon.QueueCharName(row.charKey) .. "'s queue)") or ""
-    return string.format("%s%s loses %s at current prices%s: what it sells for has dropped. Click again to buy anyway, or check the Queue tab.",
+    return string.format("%s%s loses %s now%s. Click again to buy anyway.",
         addon:QueueRowName(row), whose, Money(-NowProfit(row.plan)), more)
 end
 
@@ -886,11 +882,7 @@ function addon.UpdateShopSection()
         -- read as Buy next being broken (user, 2026-10-24: Maddoxynn's
         -- Sienna Ink was covered by her pigments and Mana Lily to mill)
         if not other and others then
-            local names = {}
-            for _, key in ipairs(OtherQueueKeys()) do table.insert(names, addon.QueueCharName(key) .. "'s") end
-            local who = #names == 1 and names[1] or (table.concat(names, ", ", 1, #names - 1) .. " and " .. names[#names])
-            other = string.format("Nothing to buy: %s %s everything %s from the AH.", who,
-                #names == 1 and "queue has" or "queues have", #names == 1 and "it needs" or "they need")
+            other = "Nothing to buy."
             section.allQueues:Hide()
         end
         if not other then
@@ -965,13 +957,13 @@ function addon.UpdateShopSection()
         local others = OtherQueueNote(true)
         if others then note = note .. " " .. others end
     elseif not nextEntry then
-        note = "Everything left was skipped. Open the AH again to try them again."
+        note = "All skipped. Reopen the AH to retry."
     elseif quote then
         local extra, warn, profitThen = Gap()
         if warn then
             -- "(0%)" read oddly for 1.75g over 820.75g (2026-10-19)
             local pct = math.floor(extra / quote.planCost * 100 + 0.5)
-            note = string.format("%s: the AH asks %s more than the plan (%s).", quote.name, Money(extra),
+            note = string.format("%s over plan (%s).", Money(extra),
                 pct < 1 and "under 1%" or (pct .. "%"))
             if profitThen then
                 -- "Queue profit then" was unclear (user, 2026-10-25)
@@ -988,7 +980,7 @@ function addon.UpdateShopSection()
     elseif AltStockNote(nextEntry) then
         note, color = AltStockNote(nextEntry), "warning"
     elseif ForWhom(nextEntry) then
-        note = string.format("For %s's queue: mail it to them after.", ForWhom(nextEntry))
+        note = string.format("For %s: mail after.", ForWhom(nextEntry))
     elseif mailed then
         note = mailed
     end
@@ -1174,7 +1166,7 @@ events:SetScript("OnEvent", function(_, event, unit, total)
                 -- 2026-10-24)
                 local itemID, quantity, who = buying.itemID, part.quantity, addon.QueueCharName(part.key)
                 C_Timer.After(2, function()
-                    addon:Notify("info", "Mail %d %s to %s: bought for their queue.", quantity,
+                    addon:Notify("info", "Mail %d %s to %s.", quantity,
                         C_Item.GetItemNameByID(itemID) or "of these", who)
                 end)
             end
@@ -1183,7 +1175,7 @@ events:SetScript("OnEvent", function(_, event, unit, total)
         UpdateSoon()
     elseif event == "COMMODITY_PURCHASE_FAILED" then
         if not buying then return end
-        addon:Notify("info", "Couldn't buy %s: the price may have changed. Buy next asks again.", buying.name)
+        addon:Notify("info", "Couldn't buy %s (price changed). Try again.", buying.name)
         addon:Alert("stop")
         buying = nil
         Update()

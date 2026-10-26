@@ -18,6 +18,6 @@ end
 bench.Login("Mysticmead", { db = db })
 bench.OpenAH()
 bench.Advance(2)
-bench.Has("says their queue needs nothing", bench.Screen(), "Nothing to buy: Maddoxynn's queue has everything it needs from the AH.")
+bench.Has("says their queue needs nothing", bench.Screen(), "Nothing to buy.")
 bench.HasNot("no All queues box with nothing to buy", bench.Screen(), "All queues")
 bench.Done()

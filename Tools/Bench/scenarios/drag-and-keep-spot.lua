@@ -36,7 +36,7 @@ end
 bench.OpenMail()
 local panel
 for _, f in ipairs(bench.wow.frames) do
-    if f._text == "GOLDSMITH: MAIL TO YOUR CHARACTERS" then panel = f._parent end
+    if f._text == "GOLDSMITH: MAIL" then panel = f._parent end
 end
 bench.Check("mail panel shows", panel and panel:IsVisible())
 bench.Equal("beside the mailbox at first", Point(panel), "TOPLEFT MailFrame TOPRIGHT 4 0")
@@ -69,7 +69,7 @@ bench.CloseMail()
 addon:ShowSalvageDone(AZEROOT, { made = 5, got = {} })
 local toast = GoldsmithCraftDone
 bench.Check("notice shows", toast and toast:IsShown())
-bench.Has("says it can be dragged", bench.TextOf(toast), "drag to move, click to close")
+bench.Has("says click to close", bench.TextOf(toast), "click to close")
 bench.Equal("upper middle at first", Point(toast), "TOP UIParent TOP 0 -260")
 Drag(toast, 800, 900)
 toast:Click("LeftButton")

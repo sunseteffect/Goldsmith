@@ -215,7 +215,7 @@ local function Fill(job)
     if splitting then return end
     if not SendTabShown() and MailFrameTab2 and MailFrame:IsShown() then MailFrameTab2:Click() end
     if AttachmentCount() > 0 and filled ~= job then
-        addon:Notify("info", "Your mail already has items in it. Send it or take them out first.")
+        addon:Notify("info", "Mail isn't empty: send or clear it first.")
         return
     end
     SendMailNameEditBox:SetText(job.name)
@@ -299,7 +299,7 @@ local function CreatePanel()
 
     panel.title = UI.Text(panel, "label", "gold")
     panel.title:SetPoint("TOPLEFT", 10, -10)
-    panel.title:SetText("GOLDSMITH: MAIL TO YOUR CHARACTERS")
+    panel.title:SetText("GOLDSMITH: MAIL")
     panel.move = UI.MoveIcon(panel)
 
     panel.rows = {}
@@ -323,8 +323,7 @@ local function CreatePanel()
             if not job then return end
             tooltip:AddLine("Mail to " .. job.name, 1, 1, 1)
             for _, it in ipairs(job.items) do
-                tooltip:AddLine(string.format("%s: %s", ItemText(it.itemID, it.quantity, it.name),
-                    it.bought and "bought for their queue" or "yours; their queue would buy it"), 0.8, 0.8, 0.8, true)
+                tooltip:AddLine(ItemText(it.itemID, it.quantity, it.name), 0.8, 0.8, 0.8, true)
             end
             if filled and filled.key == job.key then
                 addon:Explain(tooltip, "Check what's in the mail above, then click to send it. Right-click to take the items out again.",

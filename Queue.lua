@@ -172,8 +172,8 @@ function addon:AddStockToQueue(charKey, itemID, quantity, name)
         table.insert(Queue(charKey, true), { stockID = itemID, quantity = quantity, made = 0, name = name, added = time() })
     end
     Changed()
-    addon:Notify("info", "%s stocking up on %d %s in %s's queue. Buy next buys it at the AH.",
-        e and "Set" or "Added", quantity, name or "items", CharName(charKey))
+    addon:Notify("info", "Stocking up%s: %d %s.",
+        charKey ~= addon.charKey and (" for " .. CharName(charKey)) or "", quantity, name or "items")
     return e ~= nil
 end
 
@@ -318,8 +318,7 @@ function addon:AddOrderToQueue(order, preview)
         expires = expires and expires > time() and expires or nil, added = time(),
     })
     Changed()
-    addon:Notify("info", "Added the order for %s to %s's queue. Buy next shops for it; craft it in the order window.",
-        recipe.outputName, CharName(addon.charKey))
+    addon:Notify("info", "Queued the order for %s.", recipe.outputName)
 end
 
 -- A crafting order for this recipe in this character's queue, or nil
