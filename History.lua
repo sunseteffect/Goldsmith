@@ -145,9 +145,9 @@ local function Tooltip(tooltip, row)
             else
                 Line("The box cost you", "not known", "dim")
             end
-            addon:Explain(tooltip, "What came out of a box you crafted. It cost what the box cost to make, shared over the materials by their value, so each counts at its share, like a purchase.")
+            addon:Explain(tooltip, "From a box you crafted. The box's cost is shared over what came out by value, like a purchase.")
         else
-            addon:Explain(tooltip, "Materials you got without buying them: gathering, loot, and bags you opened (patron order rewards, caches). Costs count them at the AH price, since you could sell them instead, and what you paid for others no longer gets spread over them.", 0.6, 0.6, 0.6, true)
+            addon:Explain(tooltip, "Materials you got without buying: gathering, loot and opened bags (patron rewards, caches). They count at the AH price, since you could sell them instead.", 0.6, 0.6, 0.6, true)
         end
         Line("When", row.time > 0 and date("%Y-%m-%d", row.time) or "?")
         tooltip:AddLine(" ")
@@ -173,7 +173,7 @@ local function Tooltip(tooltip, row)
         else
             addon:Explain(tooltip, "Crafted before Goldsmith recorded commissions, so the gold isn't known.", 0.6, 0.6, 0.6, true)
         end
-        addon:Explain(tooltip, "Crafted for a crafting order: the item went to the customer, so it isn't in your stock and doesn't count toward what yours cost you.", 0.6, 0.6, 0.6, true)
+        addon:Explain(tooltip, "Crafted for an order: it went to the customer, so it isn't in your stock or your costs.", 0.6, 0.6, 0.6, true)
     elseif row.kind == "Craft" then
         Line("Materials cost", Money(row.cost) .. (row.partial and "+" or "") .. " each")
         addon:Explain(tooltip, "Crafts are kept for working out costs, so they can't be deleted here.", 0.6, 0.6, 0.6, true)

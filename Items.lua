@@ -1223,7 +1223,7 @@ local function Create(parent)
     view.cheap:SetPoint("LEFT", view.inBags, "RIGHT", 16, 0)
     UI.SetTooltip(view.cheap, function(tooltip)
         tooltip:AddLine("Cheap materials", 1, 1, 1)
-        addon:Explain(tooltip, string.format("Materials %d%% or more below their usual price (Settings > Cheap materials), what you have, how many your crafts use a week, its last 30 days as a line, how many to stock up on (right-click to queue it for Buy next) and the crafts they go into.",
+        addon:Explain(tooltip, string.format("Materials %d%% or more below their usual price (Settings > Cheap materials). Right-click a row to queue the stock-up for Buy next.",
             addon:Setting("dealPercent")), 0.6, 0.6, 0.6, true)
     end)
     view.note = UI.Text(landing, "label", "dim", "RIGHT")

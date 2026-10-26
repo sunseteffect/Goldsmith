@@ -119,7 +119,7 @@ local function StockTooltip(tooltip, item)
     if plan and plan.complete then
         tooltip:AddDoubleLine("About", Money(plan.cost), 0.8, 0.8, 0.8, 1, 1, 1)
     end
-    addon:Explain(tooltip, "Stocking up on a cheap material (from Items > Cheap materials). Buy next buys it on top of what your crafts need; it leaves the queue once that many are bought. It isn't in the queue's cost or profit: it's for crafts later.")
+    addon:Explain(tooltip, "A cheap material to stock up on (Items > Cheap materials). Buy next buys it on top of what your crafts need, and it leaves the queue once bought. Not in the queue's cost or profit: it's for later crafts.")
     tooltip:AddLine(" ")
     addon:ClickHint(tooltip, "Click to open its page. Right-click to move or remove it.")
 end
@@ -444,7 +444,7 @@ local function Create(parent)
     view.craft:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderGold")) end)
     UI.SetTooltip(view.craft, function(tooltip)
         tooltip:AddLine("Craft next", 1, 1, 1)
-        addon:Explain(tooltip, "One step per click: mill, make materials, then the craft, down the queue. Crafts for the profession that's open go first. The same button sits next to the profession window, and you can set a key for it (Options > Keybindings > Goldsmith).",
+        addon:Explain(tooltip, "One step per click: mill, make materials, then the craft, down the queue. Crafts for the open profession go first. Set a key in Options > Keybindings > Goldsmith.",
             0.8, 0.8, 0.8, true)
         local row = view.next
         if row and row.state then

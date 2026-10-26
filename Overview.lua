@@ -404,7 +404,7 @@ local function CraftsAction(crafts, prof)
         detail = table.concat(parts, "\n"),
         tooltip = function(tooltip)
             tooltip:AddLine("Best crafts right now", 1, 1, 1)
-            addon:Explain(tooltip, string.format("Current-expansion items with a %d%%+ ROI (profit as a share of cost; see Settings) that sell at least once a day, with no unknown costs. A craft drops off once you've made it, and comes back when you've sold them all (bags, banks and AH listings on every character).",
+            addon:Explain(tooltip, string.format("Current-expansion crafts with %d%%+ ROI (Settings) that sell at least once a day, with every cost known. A craft drops off once made and comes back when all have sold.",
                 addon:Setting("minROI")), 0.6, 0.6, 0.6, true)
             for _, c in ipairs(crafts) do
                 tooltip:AddLine(" ")
@@ -469,7 +469,7 @@ local function SalvageAction(prof)
         detail = table.concat(parts, "\n"),
         tooltip = function(tooltip)
             tooltip:AddLine("Worth salvaging", 1, 1, 1)
-            addon:Explain(tooltip, "Milling, prospecting and crushing that pays: yields measured from 200+ of your own salvages, every output priced, a 20%+ ROI (or your Worth crafting at setting, if higher) and 1g+ profit a salvage. Profit is per salvage, after the AH cut on what comes out.",
+            addon:Explain(tooltip, "Milling, prospecting and crushing that pays: yields measured from 200+ of your own salvages, every output priced, 20%+ ROI (or your Worth crafting setting) and 1g+ profit per salvage, after the AH cut.",
                 0.6, 0.6, 0.6, true)
             for _, r in ipairs(rows) do
                 tooltip:AddDoubleLine(r.recipe.outputName .. OnWho(r.charKey),

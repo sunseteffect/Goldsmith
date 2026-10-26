@@ -238,14 +238,14 @@ local function CreateTodoLine(card, i)
                 0.8, 0.8, 0.8, r, g, b)
             addon:Explain(tooltip, source == "your sales"
                 and "How many you've sold a day lately. The whole market sells more."
-                or "TSM: the average sold per day across your region by players who use TSM, shared by every seller.")
+                or "TSM: average sold per day in your region by TSM users, shared by every seller.")
         end
         local saleRate = item.row.saleRate or addon:GetSaleRate(item.itemID)
         if saleRate then
             local r, g, b = addon:Color(addon:SaleRateColor(saleRate))
             tooltip:AddDoubleLine("Sale rate", addon:FormatSaleRate(saleRate) .. " of listings sell",
                 0.8, 0.8, 0.8, r, g, b)
-            addon:Explain(tooltip, "TSM: of the auctions TSM players post, the share that sell. The rest expire or are cancelled.")
+            addon:Explain(tooltip, "TSM: the share of TSM players' auctions that sell. A low rate means listings often sit.")
         end
         if item.cooldown then
             tooltip:AddLine(item.cooldown.maxCharges

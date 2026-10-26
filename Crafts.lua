@@ -482,7 +482,7 @@ local function CraftTooltip(tooltip, item)
             (stale or addon:PriceAdjusted(info.priceNote)) and "warning" or "muted")
         addon:AddPriceNote(tooltip, info.priceNote)
         if info.unconfirmed then Note(tooltip, addon:UnconfirmedPriceText(info), "warning") end
-        Why(tooltip, "What it sells for now: the lowest listing, or the usual price when the lowest is far below it (a stray cheap listing) or far above what it sells for (a shelf price). A ~ before the price in the list means it was adjusted. Price data says where it came from and how old it is.")
+        Why(tooltip, "The lowest listing, or the usual price when the lowest is far below it (a stray cheap listing) or far above what sells (a shelf price). A ~ before the price means it was adjusted.")
         Line(tooltip, "Profit each", string.format("%s%s", Signed(info.profit),
             info.margin and (" (" .. Roi(info.margin) .. " ROI)") or ""), addon:MoneyColor(info.profit))
         Why(tooltip, "AH price after the 5% cut, minus the cost. ROI is that profit as a share of the cost: 100% doubles your gold.")
@@ -507,12 +507,12 @@ local function CraftTooltip(tooltip, item)
             addon:DemandColor(info.demand, item.itemID))
         Why(tooltip, info.demandSource == "your sales"
             and "How many you've sold a day lately. The whole market sells more."
-            or "TSM: the average sold per day across your region by players who use TSM, shared by every seller.")
+            or "TSM: average sold per day in your region by TSM users, shared by every seller.")
     end
     if info.saleRate then
         Line(tooltip, "Sale rate", addon:FormatSaleRate(info.saleRate) .. " of listings sell",
             addon:SaleRateColor(info.saleRate))
-        Why(tooltip, "TSM: of the auctions TSM players post, the share that sell. The rest expire or are cancelled, so a low rate means listings often sit.")
+        Why(tooltip, "TSM: the share of TSM players' auctions that sell. A low rate means listings often sit.")
     end
     local have = item.itemID and addon:GetStock(item.itemID) or 0
     if have > 0 then
@@ -3518,7 +3518,7 @@ local function Create(parent)
         tooltip:AddLine("Concentration", 1, 1, 1)
         Why(tooltip, "Adds the ways to craft with concentration: how much each uses (Conc) and the extra gold it earns per point (g/conc).")
         Why(tooltip, "The bar at the bottom shows your concentration on all characters and the best way to spend it.")
-        Why(tooltip, "Goldsmith tries mixes of lower and higher quality materials. Better materials cost more but need less concentration, so the same concentration can make more crafts. It picks the mix that earns the most.", "gold")
+        Why(tooltip, "Better materials cost more but need less concentration, so the same concentration makes more crafts. Goldsmith picks the mix that earns the most.", "gold")
     end)
     Explain(view.show, function(tooltip)
         -- One short line per choice; the detail is in each craft's hover
@@ -3533,12 +3533,12 @@ local function Create(parent)
     end)
     Explain(view.searchBox, function(tooltip)
         tooltip:AddLine("Find a craft", 1, 1, 1)
-        Why(tooltip, "Type two letters or more. Matches crafts by name, and salvage by what's salvaged or what it gives, across every expansion and whether or not they're profitable.")
+        Why(tooltip, "Two letters or more. Matches crafts by name and salvage by what goes in or comes out, in every expansion, profitable or not.")
         Why(tooltip, "Only " .. (addon.char.name or "me") .. " and the profession picked at the top still apply. Escape clears it.")
     end)
     Explain(view.onlyMine, function(tooltip)
         tooltip:AddLine(view.onlyMine.label and view.onlyMine.label:GetText() or "Only this character", 1, 1, 1)
-        Why(tooltip, "Shows only the crafts the character you're logged in on knows, costed with their own stats, even where another character makes it better.")
+        Why(tooltip, "Only crafts this character knows, costed with their stats, even where another character makes it better.")
         Why(tooltip, "Untick to see every character's crafts, each made by whoever makes it best.")
     end)
     view.count = UI.Text(list, "label", "dim", "RIGHT")
