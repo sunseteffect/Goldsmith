@@ -974,7 +974,10 @@ function addon.UpdateShopSection()
             note = string.format("%s: the AH asks %s more than the plan (%s).", quote.name, Money(extra),
                 pct < 1 and "under 1%" or (pct .. "%"))
             if profitThen then
-                note = note .. string.format(" Queue profit then: %s.", addon:FormatSignedMoney(profitThen))
+                -- "Queue profit then" was unclear (user, 2026-10-25)
+                note = note .. (profitThen >= 0
+                    and string.format(" Queue still makes %s.", addon:FormatSignedMoney(profitThen))
+                    or string.format(" Queue would lose %s.", Money(-profitThen)))
             end
             color = profitThen and profitThen < 0 and "loss" or "warning"
         elseif LossNeedsAsking(quote) then
