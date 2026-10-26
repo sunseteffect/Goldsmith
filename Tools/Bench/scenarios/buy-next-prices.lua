@@ -31,7 +31,7 @@ bench.Has("asks the price", bench.Calls(), "StartCommoditiesPurchase(236774, 8)"
 bench.QuotePrice(AZEROOT, bench.Gold(30), 8)
 bench.HasNot("not bought over plan", bench.Calls(), "Confirm")
 bench.Has("button shows the price", bench.Screen(), "Buy 8 Azeroot for 240")
-bench.Has("says what the queue makes", bench.Screen(), "Queue still makes +")
+bench.Has("says the queue would lose", bench.Screen(), "Queue would lose ")
 bench.Click("Buy 8 Azeroot for 240")
 bench.Has("second click buys", bench.Calls(), "ConfirmCommoditiesPurchase(236774, 8)")
 bench.PurchaseSucceeds(AZEROOT, 8, bench.Gold(240))
