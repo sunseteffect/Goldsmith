@@ -642,6 +642,8 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:SampleSound(rest)
     elseif cmd == "buylist" and GoldsmithDB.devTools then
         addon:PrintBuyList(rest)
+    elseif cmd == "prep" and GoldsmithDB.devTools then
+        addon:PrintPrepCheck()
     elseif cmd == "perf" then
         addon:RunPerfCheck()
     elseif cmd == "report" or cmd == "bug" then

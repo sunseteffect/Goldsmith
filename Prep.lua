@@ -68,7 +68,10 @@ end
 -- The stats this step could want, best first
 local function Wanted(kind, recipe, concentrate)
     if kind == "salvage" then return { "RESOURCEFULNESS" } end
-    local has = RecipeStats(recipe.recipeID, concentrate)
+    -- Asked with concentration, the game answers nothing (Munsell Ink,
+    -- /gsm prep, 2026-10-26), so no swap was offered for any concentration
+    -- craft; without it the list has Ingenuity too
+    local has = RecipeStats(recipe.recipeID, concentrate) or RecipeStats(recipe.recipeID, false)
     if not has then return nil end
     local order = concentrate and { "INGENUITY", "MULTICRAFT", "RESOURCEFULNESS" }
         or { "MULTICRAFT", "RESOURCEFULNESS" }
@@ -327,3 +330,60 @@ watch:SetScript("OnEvent", function()
     if addon.UpdateQueuePanelPrep then addon.UpdateQueuePanelPrep() end
     if addon.UpdateQueueTabPrep then addon.UpdateQueueTabPrep() end
 end)
+
+-- /gsm prep (dev tools only): each step of the tool choice for the first
+-- craft in this character's queue, to see why a swap is or isn't offered
+-- (user, 2026-10-26: no multicraft quill offered back for Munsell Ink
+-- with concentration)
+function addon:PrintPrepCheck()
+    local entry
+    for _, e in ipairs(addon:GetQueue(addon.charKey)) do
+        if (e.quantity or 0) > (e.made or 0) and e.recipeID then entry = e break end
+    end
+    local recipe = entry and GoldsmithDB.recipes[entry.recipeID]
+    if not recipe then print("Goldsmith prep: nothing queued here") return end
+    local conc = entry.concentrate == true
+    local function Names(set)
+        if not set then return "nil (profession not open?)" end
+        local list = {}
+        for name in pairs(set) do table.insert(list, name) end
+        table.sort(list)
+        return #list > 0 and table.concat(list, ", ") or "none"
+    end
+    print(string.format("Goldsmith prep: %s (%s), concentration %s", recipe.outputName or recipe.name or "?",
+        recipe.profession or "?", tostring(conc)))
+    print("  Stats without concentration: " .. Names(RecipeStats(recipe.recipeID, false)))
+    print("  Stats with concentration: " .. Names(RecipeStats(recipe.recipeID, true)))
+    local wanted = Wanted("craft", recipe, conc)
+    print("  Wanted: " .. (wanted and table.concat(wanted, ", ") or "nil"))
+    local subclass = SUBCLASS[recipe.profession]
+    local function Describe(where, itemID, data, level)
+        local parts = {}
+        for _, key in ipairs({ "INGENUITY", "MULTICRAFT", "RESOURCEFULNESS" }) do
+            local v, e = StatOn(data, StatName(key))
+            if v > 0 or e then table.insert(parts, string.format("%s %d%s", StatName(key), v, e and " +enchant" or "")) end
+        end
+        print(string.format("  %s: %s, item level %s, %s", where, ItemName(itemID), tostring(level),
+            #parts > 0 and table.concat(parts, ", ") or "no stats read"))
+    end
+    for _, s in ipairs(TOOL_SLOTS) do
+        local id = GetInventoryItemID("player", s)
+        if id and IsTool(id, subclass) then
+            local ok, data = pcall(C_TooltipInfo.GetInventoryItem, "player", s)
+            Describe("Slot " .. s, id, ok and data,
+                C_Item.GetCurrentItemLevel(ItemLocation:CreateFromEquipmentSlot(s)))
+        end
+    end
+    for bag = 0, NUM_BAG_SLOTS or 4 do
+        for bagSlot = 1, C_Container.GetContainerNumSlots(bag) do
+            local info = C_Container.GetContainerItemInfo(bag, bagSlot)
+            if info and info.itemID and IsTool(info.itemID, subclass) then
+                local ok, data = pcall(C_TooltipInfo.GetBagItem, bag, bagSlot)
+                Describe(string.format("Bag %d/%d", bag, bagSlot), info.itemID, ok and data,
+                    C_Item.GetCurrentItemLevel(ItemLocation:CreateFromBagAndSlot(bag, bagSlot)))
+            end
+        end
+    end
+    local action = ToolAction(recipe.profession, "craft", recipe, conc)
+    print("  Offered: " .. (action and action.label or "nothing"))
+end
