@@ -1114,8 +1114,10 @@ end
 -- (stock-ups, salvage without one) are left out, as the queue's profit
 -- leaves them out. Returns the gap (copper, more paid is positive) and the
 -- held item that makes most of it (or nil), or nil when it's too small.
--- Profit at today's prices is the shown profit plus the gap.
-function addon:HeldGap(plans)
+-- always: any gap of a gold or more, for a queue whose rows have their
+-- own (QueueTab.lua). Profit at today's prices is the shown profit plus
+-- the gap.
+function addon:HeldGap(plans, always)
     if plans.nodes then plans = { plans } end
     local gap, today, byItem = 0, 0, {}
     for _, plan in ipairs(plans) do
@@ -1127,7 +1129,8 @@ function addon:HeldGap(plans)
             end
         end
     end
-    if math.abs(gap) < math.max(HELD_GAP_MIN, math.abs(today) * HELD_GAP_SHARE) then return nil end
+    local least = always and 10000 or math.max(HELD_GAP_MIN, math.abs(today) * HELD_GAP_SHARE)
+    if math.abs(gap) < least then return nil end
     local name, most = nil, 0
     for item, d in pairs(byItem) do
         if d * gap > 0 and math.abs(d) > most then name, most = item, math.abs(d) end

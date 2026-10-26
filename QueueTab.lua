@@ -149,7 +149,9 @@ local function FillRow(row, item)
         c.crafts:SetText(tostring(plan.crafts))
         c.cost:SetText(Money(plan.cost) .. (plan.complete and "" or "+"))
         if plan.profit then
-            c.profit:SetText(Signed(plan.profit))
+            -- * : what you hold makes it differ from the to-do (the
+            -- footer and the hover say why)
+            c.profit:SetText(Signed(plan.profit) .. (item.heldGap and addon:Colorize("*", "muted") or ""))
             c.profit:SetTextColor(addon:Color(addon:MoneyColor(plan.profit)))
         else
             c.profit:SetText("-")
@@ -541,6 +543,15 @@ local function Refresh(v)
             if have[prof] and byProf[prof] > have[prof] then row.concShort = true end
         end
     end
+    -- Rows whose own profit clearly differs from the to-do's because of
+    -- what you hold: Blooming Feast +148.51g against +126.60g, while the
+    -- whole queue's gap was too small to mention (user, 2026-10-26: "if
+    -- there is a mismatch we need to make it clear why")
+    local starred = false
+    for _, row in ipairs(q.rows) do
+        row.heldGap = row.plan and not row.plan.stock and addon:HeldGap(row.plan) or nil
+        starred = starred or row.heldGap ~= nil
+    end
     v.list:SetItems(q.rows)
 
     local empty = #q.rows == 0
@@ -571,11 +582,15 @@ local function Refresh(v)
         if row.plan and not row.plan.stock then table.insert(plans, row.plan) end
     end
     local gap, gapItem
-    if not noTotals then gap, gapItem = addon:HeldGap(plans) end
+    if not noTotals then gap, gapItem = addon:HeldGap(plans, starred) end
     if gap then
         local today = q.profit + gap
-        v.profit.note:SetText(string.format("%s at today's prices\n%s",
-            addon:Colorize(Signed(today), addon:MoneyColor(today)), addon:HeldGapText(gap, gapItem)))
+        v.profit.note:SetText(string.format("%s at today's prices\n%s%s",
+            addon:Colorize(Signed(today), addon:MoneyColor(today)), starred and "* " or "",
+            addon:HeldGapText(gap, gapItem)))
+    elseif starred and not noTotals then
+        -- Rows that differ both ways, adding up to nothing
+        v.profit.note:SetText("* What you hold changes these: hover for why")
     else
         v.profit.note:SetText("")
     end
