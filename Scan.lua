@@ -275,7 +275,7 @@ function addon:ScanAH(auto)
         return
     end
     if not addon:Setting("ahScan") then
-        if not auto then addon:Notify("info", "Goldsmith's AH scan is off (Settings > Crafting and prices).") end
+        if not auto then addon:Notify("info", "Goldsmith's AH scan is off (Settings > Prices and scan).") end
         return
     end
     if not ahOpen then

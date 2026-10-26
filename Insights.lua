@@ -101,7 +101,7 @@ end
 
 WhyNotBase = function(recipe, row, shownExpansions)
     if addon:IsIgnored(recipe.outputItemID) then
-        return "You're ignoring this item. Right-click it to stop, or Settings > Ignored items."
+        return "You're ignoring this item. Right-click it to stop, or Settings > Ignored crafts."
     end
     local snoozed, untilTime = addon:IsSnoozed(recipe.outputItemID)
     if snoozed then
@@ -1221,7 +1221,7 @@ end
 --                    ones with unknown costs, whose profit is at most that)
 -- Costs are the estimate from your stats.
 --   showExpansion  - function(expansionID) -> whether to include it
---   showIgnored    - include ignored items (Settings > Ignored items)
+--   showIgnored    - include ignored items (Settings > Ignored crafts)
 --   shownExpansions - older crafts from expansions picked in the header are
 --                    judged on sales, not left out for their age
 --   match          - function(names) -> whether to include it, checked

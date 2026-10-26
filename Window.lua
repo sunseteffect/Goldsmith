@@ -340,7 +340,7 @@ function addon:CreateWindow()
             frame:SetAlpha(1)
         end
     end
-    -- The modifier is a setting (Settings > See through Goldsmith); any
+    -- The modifier is a setting (Settings > Keys > See through Goldsmith); any
     -- other key is the binding Hold to see through (Bindings.xml)
     local MODIFIERS = { alt = IsAltKeyDown }
     local peekBound = false
@@ -584,6 +584,9 @@ function addon:CreateWindow()
     -- so the button stays visible to close it again.
     local settings = addon:CreateSettingsPanel(frame)
     settings:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -8, -(HEADER_HEIGHT + TAB_HEIGHT + 4))
+    -- Down to the window's bottom and no further, for small screens; the
+    -- page scrolls inside (user, 2026-10-25)
+    settings:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -8, 8)
     local settingsButton = UI.Button(tabArea, "Settings", 80, 24, function()
         -- Help, Support and the bug report sit in the same spot
         if GoldsmithHelp then GoldsmithHelp:Hide() end

@@ -312,7 +312,7 @@ local function SetCharacterIncluded(charKey, included) addon:SetCharacterInclude
 -- Right-click a craft on the Crafts tab > Ignore this item. They're left
 -- out of Do this next (WhyNotRecommended) and the Crafts list (unless Show
 -- ignored is ticked there). Undo from the same menu, or Settings > Ignored
--- items. Keyed by the recipe's item ID, so every quality tier goes:
+-- crafts. Keyed by the recipe's item ID, so every quality tier goes:
 -- GoldsmithDB.ignored[itemID] = { name, time }
 function addon:IsIgnored(itemID)
     return itemID ~= nil and GoldsmithDB.ignored ~= nil and GoldsmithDB.ignored[itemID] ~= nil
@@ -324,7 +324,7 @@ function addon:SetIgnored(itemID, name, ignored)
     GoldsmithDB.ignored[itemID] = ignored and { name = name, time = time() } or nil
     if ignored then
         print("|cFF00FF00[Goldsmith]|r Ignoring " .. (name or "that item")
-            .. ". To undo: right-click it on Crafts (tick Show ignored in the Show menu), or Settings > Ignored items.")
+            .. ". To undo: right-click it on Crafts (tick Show ignored in the Show menu), or Settings > Ignored crafts.")
     else
         print("|cFF00FF00[Goldsmith]|r No longer ignoring " .. (name or "that item") .. ".")
     end
@@ -662,11 +662,23 @@ function addon:OpenKeybindings()
 end
 
 -- Panel
+--
+-- Categories down the left and the page on the right, Dashboard first
+-- (user, 2026-10-25, after EnhanceQoL's settings): help, support, the
+-- tour, the version, and what's changed from recommended with a reset.
+-- Window.lua anchors the top under the tabs and the bottom to the
+-- window's, so it never runs below Goldsmith on a small screen; the page
+-- scrolls when it's taller.
 
-local COLUMN_WIDTH = 400
-local WIDTH = 2 * COLUMN_WIDTH + 16
-local ROW_HEIGHT = 74
-local ROWS_TOP = -78
+local WIDTH = 816
+local NAV_WIDTH = 188
+local PAD = 16
+local SCROLL_BAR = 8
+-- The scroll area: right of the list and its 1px edge, left of the bar
+local PAGE_WIDTH = WIDTH - NAV_WIDTH - 1 - 2 * PAD - SCROLL_BAR - 10
+local ROW_HEIGHT = 62
+local ROW_GAP = 6
+local CONTROL_WIDTH = 170
 
 local CHOICES = {
     priceSource = {
@@ -797,36 +809,30 @@ local HELP = {
         "The game's own sounds, at your Sound effects volume.",
     },
     characters = {
-        "Exclude characters",
-        "Tick a character to leave it out of Gold in stock, concentration, total gold, the Crafts tab and Do this next: a bank alt, or one you've stopped playing.",
+        "Characters",
+        "Off leaves a character out of Gold in stock, concentration, total gold, the Crafts tab and Do this next: a bank alt, or one you've stopped playing.",
         "Its sales and purchases still count, and Goldsmith keeps recording it while you play it.",
         "The Characters tab has the same switch, and can remove a character you've deleted.",
     },
     ignored = {
-        "Ignored items",
+        "Ignored crafts",
         "Crafts you've told Goldsmith to ignore: they're never suggested in Do this next and are hidden on the Crafts tab.",
-        "Untick one here to stop ignoring it. To ignore a craft, right-click it on the Crafts tab. Tick Show ignored in the Crafts tab's Show menu to see ignored crafts there.",
+        "Turn one off to stop ignoring it. To ignore a craft, right-click it on the Crafts tab. Tick Show ignored in the Crafts tab's Show menu to see ignored crafts there.",
     },
     showMinimap = {
         "Minimap button",
         "The Goldsmith button on the edge of the minimap: click to show or hide Goldsmith, right-click for these settings, drag to move it.",
-        "Other ways to open Goldsmith: /gsm, a key (Options > Keybindings > Goldsmith), or the addons button by the minimap.",
-    },
-    -- The row's hover: each box's name in gold, then what it does
-    ahScanRow = {
-        "Auction House scan",
-        "|cffe8c25aOn:|r a panel by the AH window with Scan the AH and Buy next. Off: no scans.",
-        "|cffe8c25aAuto scan:|r scans when you open the AH and the last scan is over an hour old.",
+        "Other ways to open Goldsmith: /gsm, a key (Settings > Keys), or the addons button by the minimap.",
     },
     ahScan = {
-        "On",
-        "A panel by the AH window with Scan the AH and Buy next.",
+        "Auction House scan",
+        "On: a panel by the AH window with Scan the AH and Buy next.",
         "Off: no panel and no scans. Prices come from Auctionator, TSM and Goldsmith Data.",
     },
     autoScan = {
         "Auto scan",
         "Scans when you open the AH and the last scan is over an hour old. About a minute; you can keep using the AH.",
-        "If Auctionator scans too, Goldsmith reads its scan instead.",
+        "If Auctionator scans too, Goldsmith reads its scan instead. Needs Auction House scan on.",
     },
     buyOver = {
         "Buy without asking",
@@ -860,43 +866,147 @@ local HELP = {
 
 local function AddHelp(tooltip, key)
     local help = HELP[key]
+    if not help then return end
     tooltip:AddLine(help[1], 1, 1, 1)
     for i = 2, #help do
         tooltip:AddLine(help[i], 0.8, 0.8, 0.8, true)
     end
 end
 
--- A setting row: name and a one-line description on the left, the control
--- on the right; hovering anywhere on the row explains it in full
--- (placed by panel:Update, which skips rows that don't apply)
-local function Row(panel, key, title, description)
-    local row = CreateFrame("Frame", nil, panel)
-    row:SetSize(COLUMN_WIDTH - 32, ROW_HEIGHT - 8)
+-- The categories, in order. group: a heading in the list. rows: the
+-- settings on the page (made in CreateSettingsPanel). list: a page made
+-- from your data, one toggle each (characters, ignored crafts).
+local PAGES = {
+    { key = "dashboard", label = "Dashboard", title = "Goldsmith settings",
+      intro = "Saved for all your characters. Hover any setting for what it does." },
+    { group = "Goldmaking" },
+    { key = "suggestions", label = "Suggestions",
+      intro = "What counts as worth crafting, a cheap material, or held too long.",
+      rows = { "minROI", "minLine", "dealPercent", "heldDays" } },
+    { key = "ignored", label = "Ignored crafts", list = "ignored",
+      intro = "Never suggested, and hidden on the Crafts tab. Turn one off to stop ignoring it. To ignore a craft, right-click it on the Crafts tab." },
+    { key = "characters", label = "Characters", list = "characters",
+      intro = "Turn a character off to leave it out of Gold in stock, concentration, total gold, the Crafts tab and Do this next: a bank alt, or one you've stopped playing. Its sales and purchases still count." },
+    { group = "Auction House" },
+    { key = "prices", label = "Prices and scan",
+      intro = "Where Goldsmith's AH prices come from.",
+      rows = { "priceSource", "ahScan", "autoScan" } },
+    { key = "buying", label = "Buy next",
+      intro = "How Buy next shops at the AH.",
+      rows = { "buyFor", "buyOver" } },
+    { group = "Interface" },
+    { key = "display", label = "Display",
+      intro = "Goldsmith's lines in the game's own windows, and its minimap button.",
+      rows = { "tooltips", "craftCost", "showMinimap" } },
+    { key = "alerts", label = "Chat and sounds",
+      intro = "What Goldsmith tells you as things happen.",
+      rows = { "chat", "sounds" } },
+    { key = "keys", label = "Keys",
+      intro = "Keys to open Goldsmith and to see through it.",
+      rows = { "keybind", "peekKey" } },
+    { group = "Data" },
+    { key = "history", label = "History",
+      intro = "How long Goldsmith keeps what it records.",
+      rows = { "keepDays" } },
+}
+local PAGE_BY_KEY, PAGE_OF_ROW = {}, {}
+for _, page in ipairs(PAGES) do
+    if page.key then PAGE_BY_KEY[page.key] = page end
+    for _, key in ipairs(page.rows or {}) do PAGE_OF_ROW[key] = page end
+end
+
+-- Settings that differ from recommended, in page order
+local function ChangedKeys()
+    local list = {}
+    for _, page in ipairs(PAGES) do
+        for _, key in ipairs(page.rows or {}) do
+            if DEFAULTS[key] ~= nil and addon:Setting(key) ~= DEFAULTS[key] then table.insert(list, key) end
+        end
+    end
+    return list
+end
+
+local SETTING_COUNT = 0
+for _ in pairs(DEFAULTS) do SETTING_COUNT = SETTING_COUNT + 1 end
+
+-- A setting's value as its control shows it ("Short", "On")
+local function ValueText(key)
+    local value = addon:Setting(key)
+    if CHOICES[key] then return (LabelFor(CHOICES[key], value):gsub(" %(recommended%)", "")) end
+    return value and "On" or "Off"
+end
+
+-- Every setting back to recommended. Excluded characters and ignored
+-- crafts are your data, not settings, so they stay.
+function addon:ResetSettings()
+    GoldsmithDB.settings = GoldsmithDB.settings or {}
+    for key in pairs(DEFAULTS) do GoldsmithDB.settings[key] = nil end
+    if addon.UpdateMinimapButton then addon:UpdateMinimapButton() end
+    if addon.UpdateScanPanel then addon.UpdateScanPanel() end
+    if addon.UpdateCraftCostLines then addon:UpdateCraftCostLines() end
+    if addon.Refresh then addon.Refresh() end
+end
+
+StaticPopupDialogs["GOLDSMITH_RESET_SETTINGS"] = {
+    text = "Put every setting back to recommended?\n\nExcluded characters and ignored crafts stay as they are.",
+    button1 = YES,
+    button2 = NO,
+    OnAccept = function(_, data) addon:ResetSettings(); if data and data.Update then data:Update() end end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
+-- A setting row: a box with the name and a short description on the
+-- left and the control on the right. Hovering it explains it in full.
+local function Row(parent, key, title, description)
+    local row = UI.Panel(parent, "panel")
+    row:SetSize(PAGE_WIDTH, ROW_HEIGHT)
     row:EnableMouse(true)
+    row.key, row.titleText = key, title
     row.title = UI.Text(row, "body", "text")
-    row.title:SetPoint("TOPLEFT", 0, -4)
     row.title:SetText(title)
     row.description = UI.Text(row, "small", "muted")
-    row.description:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -5)
-    row.description:SetWidth(COLUMN_WIDTH - 32 - 180)
+    row.description:SetPoint("TOPLEFT", row.title, "BOTTOMLEFT", 0, -4)
+    row.description:SetWidth(PAGE_WIDTH - CONTROL_WIDTH - 44)
     row.description:SetWordWrap(true)
-    row.description:SetMaxLines(3)
-    row.description:SetText(description)
+    row.description:SetMaxLines(2)
+    -- No description: the name sits in the middle
+    function row:SetDescription(text)
+        self.descriptionText = text or ""
+        self.description:SetText(self.descriptionText)
+        self.title:ClearAllPoints()
+        if self.descriptionText ~= "" then
+            self.title:SetPoint("TOPLEFT", 14, -11)
+        else
+            self.title:SetPoint("LEFT", 14, 0)
+        end
+    end
+    row:SetDescription(description)
     UI.SetTooltip(row, function(tooltip) AddHelp(tooltip, key) end, "ANCHOR_LEFT")
+    row:HookScript("OnEnter", function(self) self:SetBackdropBorderColor(addon:Color("borderStrong")) end)
+    row:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("border")) end)
     return row
 end
 
+-- The control at the row's right, explained on hover like the row
+local function PlaceControl(row, control, key)
+    control:SetPoint("RIGHT", row, "RIGHT", -14, 0)
+    UI.SetTooltip(control, function(tooltip) AddHelp(tooltip, key) end, "ANCHOR_LEFT")
+    row.control = control
+end
+
 local function Dropdown(row, key, build)
-    local dropdown = UI.Dropdown(row, 170, build)
-    dropdown:SetPoint("TOPRIGHT", 0, 0)
-    UI.SetTooltip(dropdown, function(tooltip) AddHelp(tooltip, key) end, "ANCHOR_LEFT")
+    local dropdown = UI.Dropdown(row, CONTROL_WIDTH, build)
+    PlaceControl(row, dropdown, key)
     return dropdown
 end
 
 -- A row whose dropdown picks one of CHOICES[key]
-local function ChoiceRow(panel, key, title, description)
-    local row = Row(panel, key, title, description)
-    row.control = Dropdown(row, key, function(root)
+local function ChoiceRow(parent, panel, key, title, description)
+    local row = Row(parent, key, title, description)
+    Dropdown(row, key, function(root)
         for _, c in ipairs(CHOICES[key]) do
             root:CreateRadio(c.label, function() return addon:Setting(key) == c.value end,
                 function() addon:SetSetting(key, c.value); panel:Update() end)
@@ -906,10 +1016,35 @@ local function ChoiceRow(panel, key, title, description)
     return row
 end
 
+-- A row with an on/off toggle; clicking anywhere on the row flips it.
+-- onChange(on) runs after it's saved, for what has to follow (the
+-- minimap button showing, say). nil key: the toggle saves nothing itself.
+local function ToggleRow(parent, panel, key, title, description, onChange)
+    local row = Row(parent, key, title, description)
+    PlaceControl(row, UI.Toggle(row, function(on)
+        if DEFAULTS[key] ~= nil then addon:SetSetting(key, on) end
+        if onChange then onChange(on, row) end
+        panel:Update()
+    end), key)
+    row:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" then self.control:Click() end
+    end)
+    function row:Update() row.control:SetOn(addon:Setting(key)) end
+    return row
+end
+
 local function CharacterLabel(entry)
     local c = entry.data
     local realm = c.realm ~= GetRealmName() and (" (" .. (c.realm or "?") .. ")") or ""
     return (c.name or entry.key) .. realm .. (entry.key == addon.charKey and ", you" or "")
+end
+
+-- Its professions, for the line under a character's name
+local function ProfessionList(c)
+    local names = {}
+    for name in pairs(c.professions or {}) do table.insert(names, name) end
+    table.sort(names)
+    return #names > 0 and table.concat(names, ", ") or "No crafting professions seen yet"
 end
 
 -- Keep history for: a shorter time deletes old transactions, so it asks
@@ -945,10 +1080,51 @@ local function SetKeepDays(value, panel)
     end
 end
 
-local COLUMNS = {
-    { title = "Crafting and prices", rows = { "priceSource", "autoScan", "buyOver", "buyFor", "minROI", "minLine", "dealPercent", "heldDays", "keepDays" } },
-    { title = "Display", rows = { "ignored", "tooltips", "chat", "sounds", "characters", "showMinimap", "craftCost", "peekKey", "keybind" } },
-}
+-- A scrolling area: the mouse wheel or the bar moves it, and the bar only
+-- shows when there's something to scroll. area:SetContentHeight(h) after
+-- laying out; keepPlace leaves it where it was (a redraw after a click)
+local function ScrollArea(panel)
+    local scroll = CreateFrame("ScrollFrame", nil, panel)
+    local content = CreateFrame("Frame", nil, scroll)
+    content:SetSize(PAGE_WIDTH, 1)
+    scroll:SetScrollChild(content)
+    local bar = CreateFrame("Slider", nil, panel, "BackdropTemplate")
+    bar:SetOrientation("VERTICAL")
+    bar:SetWidth(SCROLL_BAR)
+    -- Starts below the close button
+    bar:SetPoint("TOPLEFT", scroll, "TOPRIGHT", 10, -26)
+    bar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", 10, 0)
+    UI.Style(bar, "panelRaised")
+    local thumb = bar:CreateTexture(nil, "OVERLAY")
+    thumb:SetColorTexture(addon:Color("borderStrong"))
+    thumb:SetSize(SCROLL_BAR, 40)
+    bar:SetThumbTexture(thumb)
+    bar:SetMinMaxValues(0, 0)
+    bar:SetValue(0)
+    bar:SetScript("OnValueChanged", function(_, value) scroll:SetVerticalScroll(value) end)
+    local function Wheel(_, delta)
+        local low, high = bar:GetMinMaxValues()
+        bar:SetValue(math.max(low, math.min(high, bar:GetValue() - delta * 40)))
+    end
+    for _, f in ipairs({ scroll, bar }) do
+        f:EnableMouseWheel(true)
+        f:SetScript("OnMouseWheel", Wheel)
+    end
+
+    local area = { scroll = scroll, content = content }
+    function area:SetContentHeight(height, keepPlace)
+        content:SetHeight(math.max(height, 1))
+        local overflow = math.max(height - (scroll:GetHeight() or 0), 0)
+        local place = keepPlace and math.min(bar:GetValue(), overflow) or 0
+        bar:SetMinMaxValues(0, overflow)
+        bar:SetValue(place)
+        scroll:SetVerticalScroll(place)
+        bar:SetShown(overflow > 0)
+    end
+    -- The visible height changes with the window
+    scroll:SetScript("OnSizeChanged", function() if area.onResize then area.onResize() end end)
+    return area
+end
 
 function addon:CreateSettingsPanel(parent)
     local panel = CreateFrame("Frame", "GoldsmithSettings", parent, "BackdropTemplate")
@@ -958,205 +1134,495 @@ function addon:CreateSettingsPanel(parent)
     panel:EnableMouse(true)
     panel:Hide()
 
-    local title = UI.Text(panel, "heading")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Settings")
+    local current = "dashboard"
+    local query = ""
+    local Open, Layout -- below
+
     local close = UI.IconButton(panel, 26, "X", "Close", function() panel:Hide() end, { hoverColor = "loss" })
     close:SetPoint("TOPRIGHT", -8, -8)
 
-    for i, column in ipairs(COLUMNS) do
-        local heading = UI.Text(panel, "label", "dim")
-        heading:SetPoint("TOPLEFT", 16 + (i - 1) * COLUMN_WIDTH, -50)
-        heading:SetText(column.title:upper())
+    -- The category list
+    local nav = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+    nav:SetPoint("TOPLEFT", 1, -1)
+    nav:SetPoint("BOTTOMLEFT", 1, 1)
+    nav:SetWidth(NAV_WIDTH)
+    UI.Style(nav, "header")
+    if nav.SetClipsChildren then nav:SetClipsChildren(true) end
+    local edge = UI.Line(panel, "borderGold")
+    edge:SetWidth(1)
+    edge:SetPoint("TOPLEFT", nav, "TOPRIGHT", 0, 0)
+    edge:SetPoint("BOTTOMLEFT", nav, "BOTTOMRIGHT", 0, 0)
+
+    local logo = nav:CreateTexture(nil, "ARTWORK")
+    logo:SetTexture("Interface\\AddOns\\Goldsmith\\Media\\Logo")
+    logo:SetSize(30, 30)
+    logo:SetPoint("TOPLEFT", 14, -14)
+    local brand = UI.Text(nav, "title")
+    brand:SetPoint("TOPLEFT", logo, "TOPRIGHT", 8, -1)
+    brand:SetText("Goldsmith")
+    local brandNote = UI.Text(nav, "label", "muted")
+    brandNote:SetPoint("TOPLEFT", brand, "BOTTOMLEFT", 0, -2)
+    brandNote:SetText("SETTINGS")
+
+    local search = UI.SearchBox(nav, NAV_WIDTH - 24, "Search settings", function(text)
+        query = text or ""
+        Layout()
+    end)
+    search:SetPoint("TOPLEFT", 12, -56)
+
+    local navButtons = {}
+    local function MarkNav()
+        for key, b in pairs(navButtons) do
+            local on = query == "" and key == current
+            b.bg:SetColorTexture(addon:Color(on and "highlight" or "hover"))
+            b.bg:SetShown(on or b:IsMouseOver())
+            b.bar:SetShown(on)
+            b.label:SetTextColor(addon:Color(on and "gold" or "text"))
+        end
+    end
+    local y = -92
+    for _, page in ipairs(PAGES) do
+        if page.group then
+            y = y - 8
+            local heading = UI.Text(nav, "label", "gold")
+            heading:SetPoint("TOPLEFT", PAD, y)
+            heading:SetText(page.group:upper())
+            y = y - 18
+        else
+            local b = CreateFrame("Button", nil, nav)
+            b:SetSize(NAV_WIDTH - 16, 24)
+            b:SetPoint("TOPLEFT", 8, y)
+            b.bg = b:CreateTexture(nil, "BACKGROUND")
+            b.bg:SetAllPoints()
+            b.bar = b:CreateTexture(nil, "ARTWORK")
+            b.bar:SetPoint("TOPLEFT")
+            b.bar:SetPoint("BOTTOMLEFT")
+            b.bar:SetWidth(3)
+            b.bar:SetColorTexture(addon:Color("gold"))
+            b.label = UI.Text(b, "body", "text")
+            b.label:SetPoint("LEFT", 14, 0)
+            b.label:SetText(page.label)
+            b:SetScript("OnClick", function() Open(page.key) end)
+            b:SetScript("OnEnter", MarkNav)
+            b:SetScript("OnLeave", function() C_Timer.After(0, MarkNav) end)
+            navButtons[page.key] = b
+            y = y - 26
+        end
     end
 
-    -- A gold bar between the columns, from the headings to above the footer
-    local divider = UI.Line(panel, "borderGold")
-    divider:SetWidth(2)
-    divider:SetPoint("TOPLEFT", COLUMN_WIDTH - 1, -46)
-    divider:SetPoint("BOTTOMLEFT", COLUMN_WIDTH - 1, 44)
+    -- The page
+    local area = ScrollArea(panel)
+    area.scroll:SetPoint("TOPLEFT", NAV_WIDTH + 1 + PAD, -PAD)
+    area.scroll:SetPoint("BOTTOMRIGHT", -(PAD + SCROLL_BAR + 10), PAD)
+    local content = area.content
 
+    local pageTitle = UI.Text(content, "title")
+    pageTitle:SetPoint("TOPLEFT", 0, -2)
+    local pageIntro = UI.Text(content, "small", "muted")
+    pageIntro:SetPoint("TOPLEFT", pageTitle, "BOTTOMLEFT", 0, -8)
+    pageIntro:SetWidth(PAGE_WIDTH - 30)
+    pageIntro:SetWordWrap(true)
+    pageIntro:SetSpacing(2)
+    local emptyText = UI.Text(content, "body", "muted")
+    emptyText:SetWidth(PAGE_WIDTH)
+    emptyText:SetWordWrap(true)
+
+    -- The settings
     local rows = {}
 
-    rows.priceSource = ChoiceRow(panel, "priceSource", "Price source", "Where AH prices come from when both Auctionator and TSM have one.")
-    rows.minROI = ChoiceRow(panel, "minROI", "Worth crafting at", "The ROI a craft needs for Recommended and Best crafts.")
-    rows.minLine = ChoiceRow(panel, "minLine", "Worth a to-do at", "The gold a suggested batch must make in all.")
-    rows.dealPercent = ChoiceRow(panel, "dealPercent", "Cheap materials", "How far below usual a material's price counts as cheap.")
-    rows.heldDays = ChoiceRow(panel, "heldDays", "Held too long", "Days unsold before a crafted item is flagged.")
-    rows.buyOver = ChoiceRow(panel, "buyOver", "Buy without asking", "How much over the plan Buy next pays without a second click.")
-    rows.buyFor = ChoiceRow(panel, "buyFor", "Buy next for", "Whose queues Buy next shops for at the AH.")
-    rows.keepDays = Row(panel, "keepDays", "Keep history for", "How long purchases, sales and deposits are kept.")
-    rows.keepDays.control = Dropdown(rows.keepDays, "keepDays", function(root)
+    rows.minROI = ChoiceRow(content, panel, "minROI", "Worth crafting at", "The ROI a craft needs for Recommended and Best crafts.")
+    rows.minLine = ChoiceRow(content, panel, "minLine", "Worth a to-do at", "The gold a suggested batch must make in all.")
+    rows.dealPercent = ChoiceRow(content, panel, "dealPercent", "Cheap materials", "How far below usual a material's price counts as cheap.")
+    rows.heldDays = ChoiceRow(content, panel, "heldDays", "Held too long", "Days unsold before a crafted item is flagged.")
+
+    rows.priceSource = ChoiceRow(content, panel, "priceSource", "Price source", "Where AH prices come from when both Auctionator and TSM have one.")
+    rows.ahScan = ToggleRow(content, panel, "ahScan", "Auction House scan", "Goldsmith's own scan and Buy next, in a panel by the AH.",
+        function() if addon.UpdateScanPanel then addon.UpdateScanPanel() end end)
+    rows.autoScan = ToggleRow(content, panel, "autoScan", "Auto scan", "Scans when you open the AH and the last scan is over an hour old.")
+    function rows.autoScan:Update()
+        local on = addon:Setting("ahScan")
+        self.control:SetOn(on and addon:Setting("autoScan"))
+        self.control:SetUsable(on)
+        self:SetDescription(on and "Scans when you open the AH and the last scan is over an hour old."
+            or "Needs Auction House scan on.")
+    end
+
+    rows.buyFor = ChoiceRow(content, panel, "buyFor", "Buy next for", "Whose queues Buy next shops for at the AH.")
+    rows.buyOver = ChoiceRow(content, panel, "buyOver", "Buy without asking", "How much over the plan Buy next pays without a second click.")
+
+    rows.tooltips = ChoiceRow(content, panel, "tooltips", "Item tooltips", "Goldsmith's lines in the game's item tooltips.")
+    rows.craftCost = ToggleRow(content, panel, "craftCost", "Cost in the profession window", "Your materials and Profit under a recipe's materials.",
+        function() if addon.UpdateCraftCostLines then addon:UpdateCraftCostLines() end end)
+    rows.showMinimap = ToggleRow(content, panel, "showMinimap", "Minimap button", "A button by the minimap that opens Goldsmith.",
+        function() addon:UpdateMinimapButton() end)
+
+    rows.chat = ChoiceRow(content, panel, "chat", "Chat messages", "What Goldsmith says in chat as things happen.")
+    rows.sounds = ToggleRow(content, panel, "sounds", "Sounds", "A sound when Goldsmith stops you, so you look first.",
+        -- What it sounds like
+        function(on) if on then addon:Alert("stop") end end)
+
+    rows.keybind = Row(content, "keybind", "Key to open Goldsmith", "")
+    PlaceControl(rows.keybind, UI.Button(rows.keybind, "Set key", CONTROL_WIDTH, 24, function() addon:OpenKeybindings() end), "keybind")
+    function rows.keybind:Update()
+        local key = addon:ToggleKeyText()
+        self:SetDescription(key and ("Opens with " .. key .. ".") or "No key set yet.")
+        self.control:SetLabel(key and "Change key" or "Set key")
+    end
+    rows.peekKey = ChoiceRow(content, panel, "peekKey", "See through Goldsmith", "Hold it to click the auctioneer or a mailbox behind the window.")
+
+    rows.keepDays = Row(content, "keepDays", "Keep history for", "How long purchases, sales and deposits are kept.")
+    Dropdown(rows.keepDays, "keepDays", function(root)
         for _, c in ipairs(CHOICES.keepDays) do
             root:CreateRadio(c.label, function() return addon:Setting("keepDays") == c.value end,
                 function() SetKeepDays(c.value, panel) end)
         end
     end)
     function rows.keepDays:Update() self.control:SetLabel(LabelFor(CHOICES.keepDays, addon:Setting("keepDays"))) end
-    rows.tooltips = ChoiceRow(panel, "tooltips", "Item tooltips", "Goldsmith's lines in the game's item tooltips.")
-    rows.chat = ChoiceRow(panel, "chat", "Chat messages", "What Goldsmith says in chat as things happen.")
-    rows.peekKey = ChoiceRow(panel, "peekKey", "See through Goldsmith", "Hold it to click the auctioneer or a mailbox behind the window.")
 
-    rows.characters = Row(panel, "characters", "Exclude characters", "Characters left out of stock, concentration, Crafts and Do this next.")
-    rows.characters.control = Dropdown(rows.characters, "characters", function(root)
-        root:CreateTitle("Tick to exclude")
-        for _, entry in ipairs(addon:GetCharacters()) do
-            root:CreateCheckbox(CharacterLabel(entry),
-                function() return not addon:IsCharacterIncluded(entry.key) end,
-                function()
-                    SetCharacterIncluded(entry.key, not addon:IsCharacterIncluded(entry.key))
-                    panel:Update()
-                end)
-        end
-    end)
-    function rows.characters:Update()
-        local excluded = 0
-        for _, entry in ipairs(addon:GetCharacters()) do
-            if not addon:IsCharacterIncluded(entry.key) then excluded = excluded + 1 end
-        end
-        self.control:SetLabel(excluded == 0 and "None excluded" or string.format("%d excluded", excluded))
+    -- Price source only matters with both price addons installed. Asked
+    -- each time: TSM can finish loading after Goldsmith.
+    local function Applies(key)
+        if key == "priceSource" then return addon:HasAuctionator() and addon:HasTSM() and true or false end
+        return true
     end
 
-    rows.ignored = Row(panel, "ignored", "Ignored items", "Crafts never suggested and hidden on Crafts. Untick to undo.")
-    rows.ignored.control = Dropdown(rows.ignored, "ignored", function(root)
-        local list = addon:GetIgnoredItems()
-        if #list == 0 then
-            root:CreateTitle("Nothing ignored. Right-click a craft on the Crafts tab to ignore it.")
-            return
-        end
-        root:CreateTitle("Untick to stop ignoring")
-        -- Ten at a time, with a scroll bar, once the list gets long
-        if #list > 10 and root.SetScrollMode then root:SetScrollMode(11 * 20) end
-        for _, entry in ipairs(list) do
-            root:CreateCheckbox(entry.name,
-                function() return addon:IsIgnored(entry.itemID) end,
-                function()
-                    addon:SetIgnored(entry.itemID, entry.name, not addon:IsIgnored(entry.itemID))
-                    panel:Update()
-                end)
-        end
-    end)
-    function rows.ignored:Update()
-        local count = #addon:GetIgnoredItems()
-        self.control:SetLabel(count == 0 and "None ignored" or string.format("%d ignored", count))
+    -- Characters and ignored crafts: a toggle each, made as needed
+    local listRows = { characters = {}, ignored = {} }
+    local function ListRow(kind, i)
+        local pool = listRows[kind]
+        if pool[i] then return pool[i] end
+        local row = Row(content, kind, "", "")
+        PlaceControl(row, UI.Toggle(row, function(on)
+            if kind == "characters" then
+                addon:SetCharacterIncluded(row.charKey, on)
+            else
+                addon:SetIgnored(row.itemID, row.titleText, on)
+            end
+            panel:Update()
+        end), kind)
+        row:SetScript("OnMouseUp", function(self, button)
+            if button == "LeftButton" then self.control:Click() end
+        end)
+        pool[i] = row
+        return row
     end
+    -- Ignored crafts are listed as they were when the page opened, so one
+    -- turned off stays there to turn back on
+    local ignoredShown = {}
 
-    rows.showMinimap = Row(panel, "showMinimap", "Minimap button", "A button by the minimap that opens Goldsmith.")
-    rows.showMinimap.control = UI.Checkbox(rows.showMinimap, "Show", function(checked)
-        addon:SetSetting("showMinimap", checked)
-        addon:UpdateMinimapButton()
-        panel:Update()
-    end)
-    rows.showMinimap.control:SetPoint("TOPRIGHT", 0, 0)
-    UI.SetTooltip(rows.showMinimap.control, function(tooltip) AddHelp(tooltip, "showMinimap") end, "ANCHOR_LEFT")
-    function rows.showMinimap:Update() self.control:SetChecked(addon:Setting("showMinimap")) end
-
-    -- Two boxes: the scan at all, and scanning when you open the AH
-    rows.autoScan = Row(panel, "ahScanRow", "Auction House scan", "Goldsmith's own scan and Buy next, in a panel by the AH.")
-    rows.autoScan.on = UI.Checkbox(rows.autoScan, "On", function(checked)
-        addon:SetSetting("ahScan", checked)
-        if addon.UpdateScanPanel then addon.UpdateScanPanel() end
-        panel:Update()
-    end)
-    rows.autoScan.on:SetPoint("TOPLEFT", rows.autoScan, "TOPRIGHT", -170, 0)
-    UI.SetTooltip(rows.autoScan.on, function(tooltip) AddHelp(tooltip, "ahScan") end, "ANCHOR_LEFT")
-    rows.autoScan.control = UI.Checkbox(rows.autoScan, "Auto scan", function(checked)
-        if not addon:Setting("ahScan") then return end
-        addon:SetSetting("autoScan", checked)
-        panel:Update()
-    end)
-    rows.autoScan.control:SetPoint("TOPLEFT", rows.autoScan.on, "BOTTOMLEFT", 0, 0)
-    UI.SetTooltip(rows.autoScan.control, function(tooltip) AddHelp(tooltip, "autoScan") end, "ANCHOR_LEFT")
-    function rows.autoScan:Update()
-        local on = addon:Setting("ahScan")
-        self.on:SetChecked(on)
-        self.control:SetChecked(on and addon:Setting("autoScan"))
-        self.control:SetAlpha(on and 1 or 0.4)
-    end
-
-    rows.sounds = Row(panel, "sounds", "Sounds", "A sound when Goldsmith stops you, so you look first.")
-    rows.sounds.control = UI.Checkbox(rows.sounds, "On", function(checked)
-        addon:SetSetting("sounds", checked)
-        -- What it sounds like
-        if checked then addon:Alert("stop") end
-        panel:Update()
-    end)
-    rows.sounds.control:SetPoint("TOPRIGHT", 0, 0)
-    UI.SetTooltip(rows.sounds.control, function(tooltip) AddHelp(tooltip, "sounds") end, "ANCHOR_LEFT")
-    function rows.sounds:Update() self.control:SetChecked(addon:Setting("sounds")) end
-
-    rows.craftCost = Row(panel, "craftCost", "Cost in the profession window", "Your materials and Profit under a recipe's materials.")
-    rows.craftCost.control = UI.Checkbox(rows.craftCost, "Show", function(checked)
-        addon:SetSetting("craftCost", checked)
-        if addon.UpdateCraftCostLines then addon:UpdateCraftCostLines() end
-        panel:Update()
-    end)
-    rows.craftCost.control:SetPoint("TOPRIGHT", 0, 0)
-    UI.SetTooltip(rows.craftCost.control, function(tooltip) AddHelp(tooltip, "craftCost") end, "ANCHOR_LEFT")
-    function rows.craftCost:Update() self.control:SetChecked(addon:Setting("craftCost")) end
-
-    rows.keybind = Row(panel, "keybind", "Key to open Goldsmith", "")
-    rows.keybind.control = UI.Button(rows.keybind, "Set key", 170, 24, function() addon:OpenKeybindings() end)
-    rows.keybind.control:SetPoint("TOPRIGHT", 0, 0)
-    UI.SetTooltip(rows.keybind.control, function(tooltip) AddHelp(tooltip, "keybind") end, "ANCHOR_LEFT")
-    function rows.keybind:Update()
-        local key = addon:ToggleKeyText()
-        self.description:SetText(key and ("Opens with " .. key .. ".") or "No key set yet.")
-        self.control:SetLabel(key and "Change key" or "Set key")
+    -- The dashboard
+    local dash = CreateFrame("Frame", nil, content)
+    dash:SetWidth(PAGE_WIDTH)
+    local CARD_WIDTH = (PAGE_WIDTH - 10) / 2
+    local function Card(icon, title, onClick)
+        local card = CreateFrame("Button", nil, dash, "BackdropTemplate")
+        card:SetSize(CARD_WIDTH, 66)
+        UI.Style(card, "panel", "border")
+        card.icon = card:CreateTexture(nil, "ARTWORK")
+        card.icon:SetSize(38, 38)
+        card.icon:SetPoint("LEFT", 14, 0)
+        card.icon:SetTexture(icon)
+        card.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+        card.title = UI.Text(card, "heading")
+        card.title:SetPoint("TOPLEFT", card.icon, "TOPRIGHT", 12, -1)
+        card.title:SetText(title)
+        card.text = UI.Text(card, "small", "muted")
+        card.text:SetPoint("TOPLEFT", card.title, "BOTTOMLEFT", 0, -5)
+        card.text:SetWidth(CARD_WIDTH - 38 - 14 - 12 - 12)
+        card.text:SetWordWrap(true)
+        card.text:SetMaxLines(2)
+        card:SetScript("OnClick", onClick)
+        card:HookScript("OnEnter", function(self) self:SetBackdropBorderColor(addon:Color("gold")) end)
+        card:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("border")) end)
+        return card
     end
 
     local help = addon:CreateHelpPanel(parent, panel)
-    local helpButton = UI.Button(panel, "Help", 80, 24, function()
-        panel:Hide()
-        help:Show()
-    end)
-    helpButton:SetPoint("BOTTOMRIGHT", -16, 10)
-    UI.SetTooltip(helpButton, function(tooltip)
-        tooltip:AddLine("Help", 1, 1, 1)
-        tooltip:AddLine("How to get started, what each tab is for, and the /gsm commands.", 0.8, 0.8, 0.8, true)
-    end, "ANCHOR_LEFT")
-
     local support = addon:CreateSupportPanel(parent, panel)
-    local supportButton = UI.Button(panel, "Support and feedback", 160, 24, function()
-        panel:Hide()
-        support:Show()
+    local cards = {
+        Card("Interface\\Icons\\INV_Misc_Book_09", "Help", function() panel:Hide(); help:Show() end),
+        Card("Interface\\Icons\\INV_Letter_15", "Support and feedback", function() panel:Hide(); support:Show() end),
+        Card("Interface\\Icons\\INV_Misc_Map_01", "Take the tour", function() panel:Hide(); addon:StartTour() end),
+        Card("Interface\\Icons\\INV_Misc_Note_01", "Getting started", function() panel:Hide(); addon:ShowSetup() end),
+    }
+    cards[1].text:SetText("Getting started, what each tab is for, and the /gsm commands.")
+    cards[3].text:SetText("A guided walk through the window, a step at a time.")
+    cards[4].text:SetText("The setup checklist: professions, prices and your first craft.")
+
+    local statusHeading = UI.Text(dash, "label", "dim")
+    statusHeading:SetText("STATUS")
+    local TILE_WIDTH = (PAGE_WIDTH - 3 * 8) / 4
+    local tiles = {}
+    for i = 1, 4 do
+        local tile = UI.StatTile(dash, "raised")
+        tile:SetWidth(TILE_WIDTH)
+        tile.value:SetFontObject(addon:Font("value"))
+        tile.value:SetPoint("RIGHT", tile, "RIGHT", -10, 0)
+        tile.note:SetWordWrap(false)
+        tiles[i] = tile
+    end
+    -- A tile that opens a page
+    local function TileOpens(tile, key, what)
+        tile:SetScript("OnMouseUp", function() Open(key) end)
+        tile.tooltip = function(tooltip) addon:ClickHint(tooltip, "Click for " .. what, true) end
+    end
+    TileOpens(tiles[2], "prices", "Prices and scan")
+    TileOpens(tiles[3], "keys", "Keys")
+    tiles[1].tooltip = function(tooltip)
+        tooltip:AddLine("Goldsmith " .. addon:GetVersion(), 1, 1, 1)
+        tooltip:AddLine("/gsm news shows what's new in this version.", 0.8, 0.8, 0.8, true)
+    end
+    tiles[4].tooltip = function(tooltip)
+        tooltip:AddLine("Settings changed from recommended", 1, 1, 1)
+        tooltip:AddLine("Listed below, with a button to put them all back.", 0.8, 0.8, 0.8, true)
+    end
+
+    local changedHeading = UI.Text(dash, "label", "dim")
+    changedHeading:SetText("CHANGED FROM RECOMMENDED")
+    local reset = UI.Button(dash, "Reset to recommended", CONTROL_WIDTH, 24, function()
+        StaticPopup_Show("GOLDSMITH_RESET_SETTINGS", nil, nil, panel)
     end)
-    supportButton:SetPoint("RIGHT", helpButton, "LEFT", -8, 0)
-    UI.SetTooltip(supportButton, function(tooltip)
-        tooltip:AddLine("Support and feedback", 1, 1, 1)
-        tooltip:AddLine("Report a bug or suggest an idea on Goldsmith's CurseForge page.", 0.8, 0.8, 0.8, true)
-        local errors = #addon:GetErrors()
-        if errors > 0 then
-            tooltip:AddLine(string.format("Goldsmith has saved %d error%s. Copy bug report there includes them.",
-                errors, errors == 1 and "" or "s"), 1, 0.6, 0.2, true)
-        end
+    UI.SetTooltip(reset, function(tooltip)
+        tooltip:AddLine("Reset to recommended", 1, 1, 1)
+        tooltip:AddLine("Every setting back to what most players want. Excluded characters and ignored crafts stay as they are.", 0.8, 0.8, 0.8, true)
     end, "ANCHOR_LEFT")
+    local changedNone = UI.Text(dash, "small", "muted")
+    changedNone:SetText("Everything is on its recommended setting.")
+    local changedLines = {}
+    local function ChangedLine(i)
+        if changedLines[i] then return changedLines[i] end
+        local line = CreateFrame("Button", nil, dash)
+        line:SetSize(PAGE_WIDTH, 20)
+        line.label = UI.Text(line, "body", "text")
+        line.label:SetPoint("LEFT", 0, 0)
+        line:SetScript("OnClick", function(self) Open(self.page) end)
+        line:SetScript("OnEnter", function(self) self.label:SetTextColor(addon:Color("gold")) end)
+        line:SetScript("OnLeave", function(self) self.label:SetTextColor(addon:Color("text")) end)
+        changedLines[i] = line
+        return line
+    end
 
-    local footer = UI.Text(panel, "label", "dim")
-    footer:SetPoint("BOTTOMLEFT", 16, 16)
-    footer:SetText("Saved for all your characters. Hover a setting for details.")
+    -- Fills the dashboard and lays it out; returns its height
+    local function LayoutDashboard()
+        local errors = #addon:GetErrors()
+        cards[2].text:SetText(errors > 0
+            and string.format("%d error%s saved: a bug report includes them.", errors, errors == 1 and "" or "s")
+            or "Report a bug or suggest an idea.")
+        cards[2].text:SetTextColor(addon:Color(errors > 0 and "warning" or "muted"))
+        for i, card in ipairs(cards) do
+            card:ClearAllPoints()
+            card:SetPoint("TOPLEFT", dash, "TOPLEFT", ((i - 1) % 2) * (CARD_WIDTH + 10), -math.floor((i - 1) / 2) * 76)
+        end
+        local dy = -2 * 76 - 10
 
-    function panel:Update()
-        for _, row in pairs(rows) do row:Update() end
-        supportButton.label:SetTextColor(addon:Color(#addon:GetErrors() > 0 and "warning" or "text"))
+        statusHeading:ClearAllPoints()
+        statusHeading:SetPoint("TOPLEFT", dash, "TOPLEFT", 0, dy)
+        dy = dy - 18
+        local scan = GoldsmithDB.ownScan
+        local key = addon:ToggleKeyText()
+        local changed = ChangedKeys()
+        tiles[1]:Set("Version", addon:GetVersion(), "text", "/gsm news: what's new")
+        if not addon:Setting("ahScan") then
+            tiles[2]:Set("Last AH scan", "Off", "muted", "Scan turned off")
+        elseif scan and scan.time then
+            tiles[2]:Set("Last AH scan", (addon:WhenText(scan.time, "today "):gsub("^%l", string.upper)), "text",
+                BreakUpLargeNumbers(scan.items or 0) .. " items")
+        else
+            tiles[2]:Set("Last AH scan", "None yet", "muted", "Scan at the auctioneer")
+        end
+        tiles[3]:Set("Key to open", key or "Not set", key and "text" or "warning", key and "Change in Keys" or "Set one in Keys")
+        tiles[4]:Set("Changed", string.format("%d of %d", #changed, SETTING_COUNT), #changed > 0 and "gold" or "text",
+            "from recommended")
+        for i, tile in ipairs(tiles) do
+            tile:ClearAllPoints()
+            tile:SetPoint("TOPLEFT", dash, "TOPLEFT", (i - 1) * (TILE_WIDTH + 8), dy)
+        end
+        dy = dy - 76 - 18
 
-        -- Price source only matters with both price addons installed. Laid
-        -- out here rather than once: TSM can finish loading after Goldsmith.
-        rows.priceSource:SetShown(addon:HasAuctionator() and addon:HasTSM() and true or false)
-        local lowest = ROWS_TOP
-        for i, column in ipairs(COLUMNS) do
-            local top = ROWS_TOP
-            for _, key in ipairs(column.rows) do
-                local row = rows[key]
-                if row:IsShown() then
-                    row:ClearAllPoints()
-                    row:SetPoint("TOPLEFT", 16 + (i - 1) * COLUMN_WIDTH, top)
-                    top = top - ROW_HEIGHT
+        changedHeading:ClearAllPoints()
+        changedHeading:SetPoint("TOPLEFT", dash, "TOPLEFT", 0, dy - 6)
+        reset:ClearAllPoints()
+        reset:SetPoint("TOPRIGHT", dash, "TOPRIGHT", 0, dy)
+        reset:SetEnabled(#changed > 0)
+        reset:SetAlpha(#changed > 0 and 1 or 0.5)
+        dy = dy - 30
+        for _, line in ipairs(changedLines) do line:Hide() end
+        changedNone:SetShown(#changed == 0)
+        if #changed == 0 then
+            changedNone:ClearAllPoints()
+            changedNone:SetPoint("TOPLEFT", dash, "TOPLEFT", 0, dy)
+            dy = dy - 20
+        end
+        for i, settingKey in ipairs(changed) do
+            local line = ChangedLine(i)
+            line.page = PAGE_OF_ROW[settingKey].key
+            line.label:SetText(rows[settingKey].titleText .. ": " .. addon:Colorize(ValueText(settingKey), "gold")
+                .. addon:Colorize("   " .. PAGE_OF_ROW[settingKey].label, "dim"))
+            line:ClearAllPoints()
+            line:SetPoint("TOPLEFT", dash, "TOPLEFT", 0, dy)
+            line:Show()
+            dy = dy - 22
+        end
+        dash:SetHeight(-dy)
+        return -dy
+    end
+
+    -- Search results: a heading for each page with a match (click to open
+    -- it), then its matching settings
+    local headings = {}
+    local function Heading(i)
+        if headings[i] then return headings[i] end
+        local h = CreateFrame("Button", nil, content)
+        h:SetSize(PAGE_WIDTH, 22)
+        h.label = UI.Text(h, "heading")
+        h.label:SetPoint("LEFT", 0, 0)
+        h:SetScript("OnClick", function(self) Open(self.page) end)
+        h:SetScript("OnEnter", function(self) self.label:SetTextColor(addon:Color("text")) end)
+        h:SetScript("OnLeave", function(self) self.label:SetTextColor(addon:Color("gold")) end)
+        headings[i] = h
+        return h
+    end
+    local function Matches(text, words)
+        text = (text or ""):lower()
+        return text:find(words, 1, true) ~= nil
+    end
+    local function RowMatches(key, words)
+        local row = rows[key]
+        if Matches(row.titleText, words) or Matches(row.descriptionText, words) then return true end
+        for _, line in ipairs(HELP[key] or {}) do
+            if Matches(line, words) then return true end
+        end
+        return false
+    end
+    local function ListNames(page)
+        local names = {}
+        if page.list == "characters" then
+            for _, entry in ipairs(addon:GetCharacters()) do table.insert(names, CharacterLabel(entry)) end
+        elseif page.list == "ignored" then
+            for _, entry in ipairs(addon:GetIgnoredItems()) do table.insert(names, entry.name) end
+        end
+        return names
+    end
+    local function PageMatches(page, words)
+        if Matches(page.label, words) or Matches(page.intro, words) then return true end
+        for _, name in ipairs(ListNames(page)) do
+            if Matches(name, words) then return true end
+        end
+        return false
+    end
+
+    -- Lays out the page (or the search results) from the top
+    local pageY
+    local function Place(frame, height, gap)
+        frame:ClearAllPoints()
+        frame:SetPoint("TOPLEFT", content, "TOPLEFT", 0, pageY)
+        frame:Show()
+        pageY = pageY - height - (gap or ROW_GAP)
+    end
+
+    function Layout(keepPlace)
+        for _, row in pairs(rows) do row:Hide() end
+        for _, pool in pairs(listRows) do for _, row in ipairs(pool) do row:Hide() end end
+        for _, h in ipairs(headings) do h:Hide() end
+        dash:Hide()
+        emptyText:Hide()
+        MarkNav()
+
+        local page = PAGE_BY_KEY[current]
+        local searching = query:gsub("^%s+", ""):gsub("%s+$", "") ~= ""
+        if searching then
+            pageTitle:SetText("Search")
+            pageIntro:SetText(string.format("Settings that mention \"%s\". Click a heading for its page.", query))
+        else
+            pageTitle:SetText(page.title or page.label)
+            pageIntro:SetText(page.intro or "")
+        end
+        pageY = -2 - 20 - 8 - pageIntro:GetStringHeight() - 16
+
+        if searching then
+            local words = query:lower():gsub("^%s+", ""):gsub("%s+$", "")
+            local n = 0
+            for _, p in ipairs(PAGES) do
+                if p.key and p.key ~= "dashboard" then
+                    local found = {}
+                    for _, key in ipairs(p.rows or {}) do
+                        if Applies(key) and RowMatches(key, words) then table.insert(found, key) end
+                    end
+                    if #found > 0 or PageMatches(p, words) then
+                        n = n + 1
+                        local h = Heading(n)
+                        h.page = p.key
+                        h.label:SetText(p.label)
+                        h.label:SetTextColor(addon:Color("gold"))
+                        Place(h, 22, 4)
+                        for _, key in ipairs(found) do Place(rows[key], ROW_HEIGHT) end
+                        pageY = pageY - 10
+                    end
                 end
             end
-            lowest = math.min(lowest, top)
+            if n == 0 then
+                emptyText:SetText("No setting matches. Try another word.")
+                Place(emptyText, 20)
+            end
+        elseif current == "dashboard" then
+            Place(dash, LayoutDashboard())
+        elseif page.list == "characters" then
+            for i, entry in ipairs(addon:GetCharacters()) do
+                local row = ListRow("characters", i)
+                row.charKey = entry.key
+                row.titleText = CharacterLabel(entry)
+                row.title:SetText(row.titleText)
+                local color = RAID_CLASS_COLORS and entry.data.class and RAID_CLASS_COLORS[entry.data.class]
+                if color then row.title:SetTextColor(color.r, color.g, color.b) else row.title:SetTextColor(addon:Color("text")) end
+                row:SetDescription(ProfessionList(entry.data))
+                row.control:SetOn(addon:IsCharacterIncluded(entry.key))
+                Place(row, ROW_HEIGHT)
+            end
+        elseif page.list == "ignored" then
+            for i, entry in ipairs(ignoredShown) do
+                local row = ListRow("ignored", i)
+                row.itemID = entry.itemID
+                row.titleText = entry.name
+                row.title:SetText(entry.name)
+                row:SetDescription("")
+                row.control:SetOn(addon:IsIgnored(entry.itemID))
+                Place(row, ROW_HEIGHT)
+            end
+            if #ignoredShown == 0 then
+                emptyText:SetText("Nothing ignored.")
+                Place(emptyText, 20)
+            end
+        else
+            for _, key in ipairs(page.rows) do
+                if Applies(key) then Place(rows[key], ROW_HEIGHT) end
+            end
         end
-        panel:SetHeight(-lowest + 40)
+        area:SetContentHeight(-pageY, keepPlace)
+    end
+    area.onResize = function() if panel:IsShown() then Layout(true) end end
+
+    local function UpdateRows()
+        for _, row in pairs(rows) do row:Update() end
+    end
+
+    -- A page from the top, with its values as they are now (a key set in
+    -- the game's Keybindings, say)
+    function Open(key)
+        current = PAGE_BY_KEY[key] and key or "dashboard"
+        if current == "ignored" then ignoredShown = addon:GetIgnoredItems() end
+        query = ""
+        search:SetText("")
+        search:ClearFocus()
+        UpdateRows()
+        Layout()
+    end
+    panel.Open = function(_, key) Open(key) end
+    panel.Search = function(_, text) query = text or ""; UpdateRows(); Layout() end
+
+    -- Values changed (a click here, or data elsewhere): redraw in place
+    function panel:Update()
+        UpdateRows()
+        Layout(true)
     end
     panel:SetScript("OnShow", function() panel:Update() end)
     return panel
@@ -1173,7 +1639,7 @@ local HELP_SECTIONS = {
     { "Getting started",
       "Open each profession once on every crafter (press K) so Goldsmith loads its recipes and crafting stats. Prices come with Goldsmith Data from the start; scan the AH with Auctionator for live ones. From then on, purchases, sales, crafts and AH deposits are recorded by themselves." },
     { "Opening Goldsmith",
-      "/gsm, the Goldsmith button on the minimap, the addons button by the minimap, or a key of your own (Settings > Key to open Goldsmith)." },
+      "/gsm, the Goldsmith button on the minimap, the addons button by the minimap, or a key of your own (Settings > Keys)." },
     -- One line per tab, its name in the text color (Theme.lua loads first)
     { "The tabs", table.concat({
         addon:Colorize("Overview", "text") .. ": what to do next on the character you're on, which of your other characters has the most waiting, and how you're doing across all of them. \"followed\" by Do this next adds up what the suggestions you crafted have made; Set a goal on the Total gold chart gives you a gold goal.",
@@ -1185,13 +1651,13 @@ local HELP_SECTIONS = {
         addon:Colorize("Stats", "text") .. ": lifetime stats and your Goldsmith title; Share in chat to brag.",
       }, "\n") },
     { "Getting to the AH and the mailbox",
-      "Hold Alt and Goldsmith fades almost away: clicks go through it, so you can click the auctioneer or the mailbox behind it without moving the window. Let go and it's back. Pick another key in Settings > See through Goldsmith. The game's Interact key works too: turn on Options > Gameplay > Controls > Enable Interact Key, bind Interact with Target in Keybindings, and press it beside the auctioneer or a mailbox." },
+      "Hold Alt and Goldsmith fades almost away: clicks go through it, so you can click the auctioneer or the mailbox behind it without moving the window. Let go and it's back. Pick another key in Settings > Keys. The game's Interact key works too: turn on Options > Gameplay > Controls > Enable Interact Key, bind Interact with Target in Keybindings, and press it beside the auctioneer or a mailbox." },
     { "In the game's windows",
       "Under the reagents in a profession window, Goldsmith shows what your materials cost and the profit, the same as on Crafts; hover it for the breakdown. On a crafting order, only the materials you supply count, with the commission and rewards (a payout bag at what's usually inside). Above Goldsmith's Craft button, a note reminds you when a crafting buff such as Everburning Ignition or Shattered Essence is off." },
     { "Hovers and clicks",
       "Click ? at the top right, then any part of the window, to see what it's for. Hovers show the numbers. Hold Ctrl over one to see what each number means, how it's worked out and what clicking does; let go and they're gone. The line along the bottom of the window says what clicking, right-clicking and shift-clicking do on the screen you're on. A gold Filtered button by Settings means something is hiding part of the list: click it to see everything." },
     { "When a suggestion isn't for you",
-      "The x on a Do this next card, or right-clicking a to-do on Characters, hides a suggestion for a day; it comes back after that if it's still a good bet, and the \"hidden\" button brings it back sooner. To hide something for good, right-click it on Crafts and pick Ignore; to undo that, untick it in Settings > Ignored items, or tick Show ignored in the Crafts Show menu and right-click it. Deleted something in History by mistake? It stays greyed in the list until you leave History: click it to undo. Too many small suggestions? Settings > Worth a to-do at sets the least gold a batch must make." },
+      "The x on a Do this next card, or right-clicking a to-do on Characters, hides a suggestion for a day; it comes back after that if it's still a good bet, and the \"hidden\" button brings it back sooner. To hide something for good, right-click it on Crafts and pick Ignore; to undo that, turn it off in Settings > Ignored crafts, or tick Show ignored in the Crafts Show menu and right-click it. Deleted something in History by mistake? It stays greyed in the list until you leave History: click it to undo. Too many small suggestions? Settings > Worth a to-do at sets the least gold a batch must make." },
     { "Item tooltips",
       "Show your cost, profit and break-even price. Hold Shift for each material's cost. Settings > Item tooltips makes them shorter or turns them off." },
     { "Recommended: Auctionator",

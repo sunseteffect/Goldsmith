@@ -908,6 +908,48 @@ function UI.Switch(parent, text, onToggle)
     return switch
 end
 
+-- An on/off toggle for settings (user, 2026-10-25: toggles over
+-- checkboxes): a track with a knob, gold when on, and On or Off beside it.
+-- toggle:SetOn(on) shows the state; toggle:SetUsable(false) greys it out
+-- and ignores clicks; onToggle(newState) runs when it's clicked.
+function UI.Toggle(parent, onToggle)
+    local toggle = CreateFrame("Button", nil, parent)
+    toggle:SetSize(76, 24)
+    toggle.track = CreateFrame("Frame", nil, toggle, "BackdropTemplate")
+    toggle.track:SetSize(40, 20)
+    toggle.track:SetPoint("RIGHT", 0, 0)
+    toggle.knob = toggle.track:CreateTexture(nil, "OVERLAY")
+    toggle.knob:SetSize(14, 14)
+    toggle.state = UI.Text(toggle, "small", "muted", "RIGHT")
+    toggle.state:SetPoint("RIGHT", toggle.track, "LEFT", -8, 0)
+    toggle.usable = true
+
+    function toggle:SetOn(on)
+        self.on = on and true or false
+        UI.Style(self.track, self.on and "gold" or "barEmpty", self.on and "gold" or "borderStrong")
+        self.knob:SetColorTexture(addon:Color(self.on and "window" or "muted"))
+        self.knob:ClearAllPoints()
+        self.knob:SetPoint(self.on and "RIGHT" or "LEFT", self.on and -3 or 3, 0)
+        self.state:SetText(self.on and "On" or "Off")
+        self.state:SetTextColor(addon:Color(self.on and "gold" or "muted"))
+    end
+    function toggle:SetUsable(usable)
+        self.usable = usable and true or false
+        self:SetAlpha(self.usable and 1 or 0.4)
+    end
+    toggle:SetScript("OnClick", function(self)
+        if self.usable then onToggle(not self.on) end
+    end)
+    toggle:HookScript("OnEnter", function(self)
+        if self.usable then self.track:SetBackdropBorderColor(addon:Color("text")) end
+    end)
+    toggle:HookScript("OnLeave", function(self)
+        self.track:SetBackdropBorderColor(addon:Color(self.on and "gold" or "borderStrong"))
+    end)
+    toggle:SetOn(false)
+    return toggle
+end
+
 -- A checkbox with a label. box:SetChecked(checked); onToggle(newState).
 function UI.Checkbox(parent, text, onToggle)
     local check = CreateFrame("Button", nil, parent)
