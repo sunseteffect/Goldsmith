@@ -35,7 +35,13 @@ local UI = addon.UI
 --   buyFor      - whose queues Buy next shops for: "me" (the character
 --                 you're on) or "all" (every character's, for buying on a
 --                 bank alt; Shop.lua; user, 2026-10-24)
---   sounds      - a sound when Goldsmith stops you (addon:Alert)
+--   auctionatorButton - Send to Auctionator on the queue and plans. Off by
+--                 default: Buy next does the shopping, with its price
+--                 warnings, and one way to shop is clearer (user,
+--                 2026-10-26: "we don't need auctionator and shouldn't
+--                 encourage using it"). Kept as a fallback if a patch
+--                 breaks buying, and for players who shop that way
+--   sounds     - a sound when Goldsmith stops you (addon:Alert)
 --   peekKey     - the modifier held to see through the window (Window.lua):
 --                 "alt" or "off" (the key binding only). Not Shift or Ctrl:
 --                 shift-clicks and Ctrl-to-explain would peek (user, 2026-10-17)
@@ -58,6 +64,7 @@ local DEFAULTS = {
     autoScan = true,
     buyOver = 2,
     buyFor = "me",
+    auctionatorButton = false,
     sounds = true,
     peekKey = "alt",
 }
@@ -857,6 +864,11 @@ local HELP = {
         "Every character's queue: it also shops for your other characters' queues, so you can buy on a bank alt for your crafters. Each item says whose queue it's for. What's bought for another character is kept for them (neither queue buys it again) until you mail it; the mailbox reminds you what to send.",
         "Either way, Buy next's All queues box flips it for one shopping trip, then goes back to this.",
     },
+    auctionatorButton = {
+        "Send to Auctionator button",
+        "On: the queue and plans get a Send to Auctionator button, which makes a shopping list in Auctionator's Shopping tab. Needs Auctionator.",
+        "Buy next does the same shopping without it, and warns you when the AH asks more than the plan.",
+    },
     craftCost = {
         "Cost in the profession window",
         "Goldsmith's Your materials and Profit lines in the game's profession and crafting orders windows, under the materials. Hover them for the breakdown.",
@@ -904,7 +916,7 @@ local PAGES = {
       rows = { "priceSource", "ahScan", "autoScan" } },
     { key = "buying", label = "Buy next",
       intro = "How Buy next shops at the AH.",
-      rows = { "buyFor", "buyOver" } },
+      rows = { "buyFor", "buyOver", "auctionatorButton" } },
     { group = "Interface" },
     { key = "display", label = "Display",
       intro = "Goldsmith's lines in the game's own windows, and its minimap button.",
@@ -1271,6 +1283,9 @@ function addon:CreateSettingsPanel(parent)
 
     rows.buyFor = ChoiceRow(content, panel, "buyFor", "Buy next for", "Whose queues Buy next shops for at the AH.")
     rows.buyOver = ChoiceRow(content, panel, "buyOver", "Buy without asking", "How much over the plan Buy next pays without a second click.")
+    rows.auctionatorButton = ToggleRow(content, panel, "auctionatorButton", "Send to Auctionator button",
+        "A shopping list in Auctionator, on the queue and plans.",
+        function() if addon.RefreshWindow then addon.RefreshWindow() end end)
 
     rows.tooltips = ChoiceRow(content, panel, "tooltips", "Item tooltips", "Goldsmith's lines in the game's item tooltips.")
     rows.craftCost = ToggleRow(content, panel, "craftCost", "Cost in the profession window", "Your materials and Profit under a recipe's materials.",
@@ -1699,8 +1714,8 @@ local HELP_SECTIONS = {
       "The x on a Do this next card, or right-clicking a to-do on Characters, hides a suggestion for a day; it comes back after that if it's still a good bet, and the \"hidden\" button brings it back sooner. To hide something for good, right-click it on Crafts and pick Ignore; to undo that, turn it off in Settings > Ignored crafts, or tick Show ignored in the Crafts Show menu and right-click it. Deleted something in History by mistake? It stays greyed in the list until you leave History: click it to undo. Too many small suggestions? Settings > Worth a to-do at sets the least gold a batch must make." },
     { "Item tooltips",
       "Show your cost, profit and break-even price. Hold Shift for each material's cost. Settings > Item tooltips makes them shorter or turns them off." },
-    { "Recommended: Auctionator",
-      "Goldsmith works without it: Goldsmith Data brings the region's AH prices, refreshed with each daily update, and how well each item sells. Auctionator adds two things. Its scans give live prices for the moment you buy and sell. And its Shopping tab is where Goldsmith's shopping lists go: Send to Auctionator in a plan or the Queue makes a list there, and Auctionator searches the AH for every item on it. The game's own AH has no shopping lists." },
+    { "Using Auctionator?",
+      "Not needed: Goldsmith scans the AH itself and Buy next does the shopping. Auctionator is still handy for posting your crafts, and Goldsmith reads its scans. If you'd rather shop with Auctionator's shopping lists, turn on Settings > Send to Auctionator button." },
     { "If you already use TSM",
       "Not needed: Goldsmith Data covers prices and how well each item sells (Sells / Slow / Hardly sells). If TSM and its desktop app are installed anyway, Goldsmith uses TSM's region sales per day and sale rates instead, a check on listings far from the usual price, and prices between AH scans." },
     { "Commands",

@@ -653,6 +653,7 @@ local function Refresh(v)
     local canSend = #q.buyAH > 0 and addon:HasAuctionator()
     v.shop:SetEnabled(canSend)
     v.shop:SetAlpha(canSend and 1 or 0.5)
+    addon:PlaceShopButton(v.shop, v.craft)
     v.warnings = not empty and Warnings(q) or nil
     v.warnLine:SetText(v.warnings and v.warnings.text or "")
 

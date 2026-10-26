@@ -490,7 +490,7 @@ local function CraftTooltip(tooltip, item)
         Line(tooltip, "AH listing", Money(info.doubtPrice), "dim")
         Note(tooltip, addon:UnconfirmedPriceText(info) .. " Goldsmith Data covers materials and consumables, not gear or tools.", "warning")
     else
-        Note(tooltip, "No AH price yet. Scan the AH with Auctionator.")
+        Note(tooltip, "No AH price yet. Scan the AH.")
     end
     -- After the price, not under "How": next to "all silver" it read as
     -- part of the mix (user, 2026-10-16)
@@ -868,7 +868,7 @@ local function PlanTooltip(tooltip, node)
         millDetail = millDetail .. string.format("\nestimate: the yield of %s,\nuntil you've salvaged this one", o.mill.estimateFrom)
     end
     Option(o.mill, (o.mill and o.mill.verb or "Mill") .. " it", millDetail)
-    if not node.best then Note(tooltip, "  No price found. Scan the AH with Auctionator.", "loss") end
+    if not node.best then Note(tooltip, "  No price found. Scan the AH.", "loss") end
 
     -- Savings only on what can be made now: crafting held back by its
     -- crafter's concentration (Planner.lua) saves on those crafts alone, or
@@ -1438,7 +1438,7 @@ local function MillStepState(node, state)
             -- Bought with Buy next, still in the mailbox (Shop.lua)
             table.insert(state.blockers, string.format("Get %s from your mailbox to %s it.", herbName, lower))
         else
-            table.insert(state.blockers, string.format("Not enough %s to %s (%d at a time). Send the shopping list to Auctionator.",
+            table.insert(state.blockers, string.format("Not enough %s to %s (%d at a time). Buy next at the AH buys it.",
                 herbName, lower, perCast))
         end
         state.label, state.step = StepLabel(verb, wanted * perCast, herbName)
@@ -2438,6 +2438,7 @@ local function CreatePlanScreen(parent)
         screen.builtPlan = nil
         screen.shop:Disable()
         screen.shop:SetAlpha(0.5)
+        addon:PlaceShopButton(screen.shop, screen.craft)
         SetCraftState(nil)
     end
 
@@ -2775,6 +2776,7 @@ local function CreatePlanScreen(parent)
         local canSend = #plan.buyAH > 0 and addon:HasAuctionator()
         screen.shop:SetEnabled(canSend)
         screen.shop:SetAlpha(canSend and 1 or 0.5)
+        addon:PlaceShopButton(screen.shop, screen.craft)
         -- Old prices only matter while there's something to buy
         local warnings = ShoppingWarnings(plan)
         if warnings and #warnings.more == 0 and #warnings.extra == 0 and #plan.buyAH == 0 then
@@ -3059,6 +3061,7 @@ local function CreateSalvageScreen(parent)
         screen.noteLine:SetText("")
         screen.shop:Disable()
         screen.shop:SetAlpha(0.5)
+        addon:PlaceShopButton(screen.shop, screen.action)
         SetAction(nil)
     end
 
@@ -3206,6 +3209,7 @@ local function CreateSalvageScreen(parent)
         local canSend = buy ~= nil and addon:HasAuctionator()
         screen.shop:SetEnabled(canSend)
         screen.shop:SetAlpha(canSend and 1 or 0.5)
+        addon:PlaceShopButton(screen.shop, screen.action)
 
         local profession = t.profession or "Inscription"
         if mine and not ProfessionOpen({ profession = profession }) then

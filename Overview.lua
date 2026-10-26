@@ -998,22 +998,16 @@ local function SetupSteps()
     local hasTSM = addon:HasTSM()
     local hasAuctionator = HasAuctionator()
 
-    -- Auctionator is recommended (a plain CurseForge addon: live prices and
-    -- shopping lists), never needed: Goldsmith Data covers prices and sell
-    -- levels. TSM isn't recommended: its data needs the TSM desktop app from
-    -- outside CurseForge, the step players skip (user's guild, 2026-10-10);
-    -- it's only mentioned for those who already use it.
-    local auctionatorTip = "Auctionator gives live prices when you scan the AH, and its Shopping tab is where Goldsmith's shopping lists go."
-    local tsmTip = "Already use TSM? Goldsmith uses its sales per day and sale rates when it's installed."
-    if hasAuctionator and hasTSM then
-        table.insert(steps, { true, "Auctionator and TSM found",
-            "Auctionator for live prices and shopping lists, TSM for sales per day and sale rates." })
-    elseif hasAuctionator then
-        table.insert(steps, { true, "Auctionator found", "Using it for live prices and shopping lists." })
+    -- Goldsmith Data first: the region's prices before any scan. Auctionator
+    -- isn't recommended any more: Goldsmith scans the AH and Buy next does
+    -- the shopping (user, 2026-10-26: "shouldn't encourage using it"). The
+    -- old step "Recommended: Auctionator" also kept the checklist from ever
+    -- finishing without it.
+    if addon:GetBlizzardDataTime() then
+        table.insert(steps, { true, "Goldsmith Data found", "The region's AH prices, updated daily, from the start." })
     else
-        table.insert(steps, { false, "Recommended: Auctionator",
-            "Free, on CurseForge, and optional: Goldsmith works without it. " .. auctionatorTip
-                .. (hasTSM and "" or (" " .. tsmTip)) })
+        table.insert(steps, { false, "Install Goldsmith Data",
+            "CurseForge installs it with Goldsmith: the region's AH prices, updated daily, so prices show before your first scan." })
     end
 
     local professions = CraftingProfessions()

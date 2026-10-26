@@ -415,8 +415,10 @@ local STEPS = {
       target = function() return QueuePart("list") end },
     { tab = "queue", title = "3. Buy it",
       lead = "Next: everything you've queued.",
-      text = "Then go to the AH. Goldsmith's panel beside it scans prices, and Buy next buys everything the queue needs, one click per item. At a vendor, Goldsmith's panel buys the vendor materials in one click.\n\nPrefer Auctionator? This button sends the list there instead.",
-      target = function() return QueuePart("shop") end },
+      text = "Then go to the AH. Goldsmith's panel beside it scans prices, and Buy next buys everything the queue needs, one click per item. At a vendor, Goldsmith's panel buys the vendor materials in one click.",
+      -- What to buy, not the Send to Auctionator button: hidden unless
+      -- turned on (Settings > Buy next; user, 2026-10-26)
+      target = function() return QueuePart("spendLine") end },
     { tab = "queue", title = "4. Craft it",
       lead = "Next: everything you've queued.",
       text = "With your profession window open, press Craft next (or set a key for it). One click per craft, down the queue: it makes the materials first when the plan says so.",

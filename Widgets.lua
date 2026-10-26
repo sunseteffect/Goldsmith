@@ -304,12 +304,26 @@ function addon:AddItemDescription(tooltip, itemID)
     end
 end
 
--- What Auctionator would add, on Goldsmith's Send to Auctionator buttons
--- while it isn't installed or turned on (they're greyed out then)
+-- On Goldsmith's Send to Auctionator buttons while Auctionator isn't
+-- installed or turned on (they're greyed out then). No longer a pitch to
+-- install it: Buy next does the shopping (user, 2026-10-26)
 function addon:AuctionatorPitch(tooltip)
-    tooltip:AddLine("Needs the Auctionator addon (free on CurseForge).", 1, 0.82, 0, true)
-    tooltip:AddLine("With it, this makes a shopping list on the AH that crosses items off as you buy them, and one scan refreshes every price in Goldsmith.",
-        0.8, 0.8, 0.8, true)
+    tooltip:AddLine("Needs the Auctionator addon. Buy next at the AH does the same shopping without it.", 1, 0.82, 0, true)
+end
+
+-- A Send to Auctionator button shows only with its setting on
+-- (auctionatorButton); the button above it (Craft, Mill) moves down into
+-- its place when it's hidden
+function addon:PlaceShopButton(shop, above)
+    local show = addon:Setting("auctionatorButton")
+    shop:SetShown(show)
+    if not above then return end
+    above:ClearAllPoints()
+    if show then
+        above:SetPoint("BOTTOMRIGHT", shop, "TOPRIGHT", 0, 8)
+    else
+        above:SetPoint("BOTTOMRIGHT", shop, "BOTTOMRIGHT", 0, 0)
+    end
 end
 
 -- Shift-clicking an item in Goldsmith, like shift-clicking one in your

@@ -16,7 +16,7 @@ local panel = GoldsmithSettings
 local screen = bench.Screen()
 bench.Has("opens on the dashboard", screen, "Goldsmith settings")
 for _, label in ipairs({ "Help", "Support and feedback", "Take the tour", "Getting started",
-        "VERSION", "LAST AH SCAN", "KEY TO OPEN", "0 of 16", "Everything is on its recommended setting." }) do
+        "VERSION", "LAST AH SCAN", "KEY TO OPEN", "0 of 17", "Everything is on its recommended setting." }) do
     bench.Has("dashboard shows " .. label, screen, label)
 end
 -- Last AH scan: the day alone in the tile, its time on the line under it
@@ -56,7 +56,7 @@ bench.Equal("toggle saves", addon:Setting("sounds"), false)
 addon:SetSetting("tooltips", "short")
 panel:Open("dashboard")
 screen = bench.Screen()
-bench.Has("changed count", screen, "2 of 16")
+bench.Has("changed count", screen, "2 of 17")
 bench.Has("changed list names it", screen, "Item tooltips: Short")
 bench.Has("changed list: sounds", screen, "Sounds: Off")
 
@@ -98,7 +98,7 @@ bench.Equal("tooltips back", addon:Setting("tooltips"), "full")
 bench.Equal("sounds back", addon:Setting("sounds"), true)
 bench.Check("excluded character kept", not addon:IsCharacterIncluded("Maddoxynn-Sargeras"))
 bench.Check("ignored craft kept", addon:IsIgnored(12345))
-bench.Has("dashboard: nothing changed", bench.Screen(), "0 of 16")
+bench.Has("dashboard: nothing changed", bench.Screen(), "0 of 17")
 -- Help, Support and the bug report open in the panel, not windows of
 -- their own (user, 2026-10-25)
 panel:Open("dashboard")

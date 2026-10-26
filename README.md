@@ -9,7 +9,7 @@ Most players don't want to study the auction house. Goldsmith gives you a short 
 - **Crafts:** every recipe your characters know, costed with each character's own stats (multicraft, resourcefulness, ingenuity) and the cheapest mix of material qualities for each tier, with and without concentration. Show Recommended, Profitable, All crafts, or Not learned yet (recipes you haven't learned, with what they'd earn and where to learn them). Hide gear, search, or ignore items you never want to see. Each craft shows how well it sells: Sells, Slow or Hardly sells.
 - **Planner:** for any craft, whether to buy, craft, mill or prospect each material (right-click one to choose another way, or which item to salvage for it, for that plan only), and a Craft button that walks you through each step. What to craft is picked on today's prices; the plan's profit is on what your materials cost you. Shopping lists cover the unlucky case, so one trip is always enough.
 - **Queue:** queue crafts on each character and shop for all of them at once; right-click a craft in Overview or Characters to queue it in one click. Then press Craft next (or its key binding) to work through them: mill, make materials, then craft. A button swaps in the profession tool that suits the next craft.
-- **Shopping:** Goldsmith scans the AH itself for every price. **Buy next** buys your queue's materials one item at a time right from the AH, for this character or every character's queue, and warns you when the AH asks more than the plan counted on. The vendor panel buys the exact vendor materials in one click. At the mailbox, a panel sends each character what their queue needs. The shopping list can also go to Auctionator.
+- **Shopping:** Goldsmith scans the AH itself for every price. **Buy next** buys your queue's materials one item at a time right from the AH, for this character or every character's queue, and warns you when the AH asks more than the plan counted on. The vendor panel buys the exact vendor materials in one click. At the mailbox, a panel sends each character what their queue needs. (Or send the list to Auctionator: turn its button on in Settings.)
 - **Before you lose gold:** a raid warning and a popup when a craft you're buying for would lose money (Buy next asks twice) or when you post under break-even.
 - **Salvage:** milling, prospecting, crushing and recycling as profit rows, from the yields you actually get. The planner shows whether salvaging beats buying.
 - **Characters:** a to-do list for each alt, with their professions, concentration and craft cooldowns. Cooldowns that are ready and worth making show up in Do this next.
@@ -21,8 +21,8 @@ Most players don't want to study the auction house. Goldsmith gives you a short 
 - English game client (other languages aren't supported yet)
 - [Goldsmith Data](https://github.com/sunseteffect/GoldsmithData): region-wide AH prices for US, EU, KR and TW, refreshed daily, and how well each item sells. CurseForge installs it with Goldsmith.
 
-## Recommended
-- Auctionator (free on CurseForge, not required), for posting your crafts and for shopping lists if you prefer it to Buy next.
+## Using Auctionator?
+Not needed: Goldsmith scans the AH itself and Buy next does the shopping. Auctionator is still handy for posting your crafts, and Goldsmith reads its scans. To shop with Auctionator's shopping lists instead, turn on Settings > Send to Auctionator button.
 
 ## If you already use TSM
 Not needed: Goldsmith Data covers prices and how well each item sells. If TradeSkillMaster and its desktop app are installed anyway, Goldsmith uses TSM's region sales per day and sale rates instead of Goldsmith Data's Sells / Slow / Hardly sells, plus prices between your AH scans and a check on listings far from the usual price.
