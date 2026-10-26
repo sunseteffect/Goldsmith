@@ -302,7 +302,7 @@ local function Create(parent)
                     view.q.charKey, item.remaining, "queue")
             end
         end,
-        empty = "Nothing queued. Open a craft's plan and click Add to queue, or right-click a craft (or a mill or prospect row) on the Crafts tab.",
+        empty = "Nothing queued. Right-click a craft on the Crafts tab to add it.",
     })
     view.list:SetPoint("TOPLEFT", 0, -(TOP_HEIGHT + 12))
     view.list:SetPoint("BOTTOMRIGHT", 0, SUMMARY_HEIGHT + 12)
@@ -564,7 +564,7 @@ local function Refresh(v)
             if entry.short then short = true end
         end
         local text = #q.buyAH == 0 and "Nothing to buy on the AH"
-            or string.format("To buy on the AH: %d item%s, about %s", #q.buyAH, #q.buyAH == 1 and "" or "s",
+            or string.format("AH: %d item%s, about %s", #q.buyAH, #q.buyAH == 1 and "" or "s",
                 Money(q.spend))
         if live > 0 then text = text .. string.format(" (%d priced from live listings)", live) end
         if short then text = text .. ". Not enough listed for all of it." end
@@ -577,9 +577,6 @@ local function Refresh(v)
                 text = text .. ". Buy next on any of your characters buys them"
             end
         end
-        -- Where to buy it, always in sight (user, 2026-10-20: nobody would
-        -- know Buy next is there)
-        if q.mine and #q.buyAH > 0 and not short then text = text .. ". At the AH, Goldsmith's Buy next buys them." end
         v.spendLine:SetText(text)
         v.spendLine:SetTextColor(addon:Color(short and "warning" or "muted"))
     end
@@ -588,7 +585,7 @@ local function Refresh(v)
         for _, entry in ipairs(q.buyVendor) do table.insert(parts, entry.quantity .. " " .. entry.name) end
         -- Orange and "first": 53 Luminant Flux in muted text was missed and
         -- the queue stalled on Needs materials (user, 2026-10-22)
-        v.vendorLine:SetText("Buy from vendor first: " .. table.concat(parts, ", "))
+        v.vendorLine:SetText("Vendor: " .. table.concat(parts, ", "))
         v.vendorLine:SetTextColor(addon:Color("warning"))
     else
         v.vendorLine:SetText("")
@@ -627,9 +624,9 @@ end
 -- What clicks do, for the window's click legend
 local function Legend()
     return {
-        { "click", "an entry: its plan (a batch: how many)" },
-        { "right", ": move up or down, or remove" },
-        { "hover", ": costs and what's left to make" },
+        { "click", ": plan" },
+        { "right", ": move or remove" },
+        { "hover", ": details" },
     }
 end
 

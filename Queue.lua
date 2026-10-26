@@ -938,9 +938,10 @@ function addon:QueueNextLine(row)
     if not s or not row.recipe or addon.QueueBusy() then return nil end
     local name = row.recipe.outputName or "?"
     if s.enabled then
-        -- The craft itself too: "Craft 2" alone didn't say what (user,
+        -- The step names its material; the craft it feeds is the gold row
+        -- (C6 cut, 2026-10-25). Was ", for <craft>": "Craft 2" alone didn't say what (user,
         -- 2026-10-24: "i like the label above the button its missing here")
-        if s.step and not s.final then return string.format("Next: %s, for %s", s.step, name) end
+        if s.step and not s.final then return "Next: " .. s.step end
         return "Next: " .. name
     end
     return "Next: " .. name .. ((row.remaining or 0) > 1 and (" x" .. row.remaining) or "")

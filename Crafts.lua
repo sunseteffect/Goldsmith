@@ -2734,7 +2734,7 @@ local function CreatePlanScreen(parent)
             if entry.short then short = true end
         end
         local spendText = #plan.buyAH == 0 and "Nothing to buy on the AH"
-            or string.format("To buy on the AH: %d item%s, about %s",
+            or string.format("AH: %d item%s, about %s",
             #plan.buyAH, #plan.buyAH == 1 and "" or "s", Money(spend))
         if live > 0 then spendText = spendText .. string.format(" (%d priced from live listings)", live) end
         if short then spendText = spendText .. ". Not enough listed for all of it." end
@@ -2747,7 +2747,7 @@ local function CreatePlanScreen(parent)
         if #plan.buyVendor > 0 then
             local parts = {}
             for _, entry in ipairs(plan.buyVendor) do table.insert(parts, entry.quantity .. " " .. entry.name) end
-            screen.vendorLine:SetText("Buy from vendor first: " .. table.concat(parts, ", "))
+            screen.vendorLine:SetText("Vendor: " .. table.concat(parts, ", "))
             screen.vendorLine:SetTextColor(addon:Color("warning"))
         else
             screen.vendorLine:SetText("")
@@ -3182,7 +3182,7 @@ local function CreateSalvageScreen(parent)
         screen.warnLine:SetTextColor(addon:Color("warning"))
 
         local buy = plan.buyAH[1]
-        screen.spendLine:SetText(buy and string.format("To buy on the AH: %d %s, about %s", buy.quantity, t.name, Money(buy.cost))
+        screen.spendLine:SetText(buy and string.format("AH: %d %s, about %s", buy.quantity, t.name, Money(buy.cost))
             or "Nothing to buy: you have enough.")
         local canSend = buy ~= nil and addon:HasAuctionator()
         screen.shop:SetEnabled(canSend)
