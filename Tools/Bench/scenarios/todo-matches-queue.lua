@@ -37,10 +37,10 @@ for key, t in pairs(addon:GetCharacterTodo("All")) do
         end
         if heldSalvage and plan.revenue and plan.marketCost then
             bench.Log("%s: salvages held herbs for %s, to-do %s, queue %s", name, heldSalvage,
-                addon:FormatMoney(item.profit), addon:FormatMoney(plan.revenue - plan.marketCost))
+                addon:FormatMoney(item.profit), addon:FormatMoney(plan.revenue - (plan.todayCost or plan.marketCost)))
         elseif plan and plan.revenue and plan.marketCost then
             lines = lines + 1
-            bench.Near(name, item.profit, plan.revenue - plan.marketCost, bench.Gold(0.5))
+            bench.Near(name, item.profit, plan.revenue - (plan.todayCost or plan.marketCost), bench.Gold(0.5))
         else
             bench.Check(name .. " has a priced plan", false)
         end

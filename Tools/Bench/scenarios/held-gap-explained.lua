@@ -64,7 +64,7 @@ local todo = addon:GetCharacterTodo("All")[MADDOXYNN]
 for _, t in ipairs(todo and todo.items or {}) do
     if t.recipe.recipeID == MISSIVE then
         local m = q.rows[2].plan
-        local today = m.revenue - m.marketCost
+        local today = m.revenue - (m.todayCost or m.marketCost)
         bench.Log("Missive: to-do %s for %d craft (about %.2f made), queue at today's prices %s",
             addon:FormatMoney(t.profit), t.crafts, t.made or 0, addon:FormatMoney(today))
         bench.Near("to-do counts what the craft makes", t.made, m.expectedOutput, 0.01)

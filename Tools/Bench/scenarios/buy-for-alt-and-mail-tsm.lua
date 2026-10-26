@@ -14,6 +14,8 @@ db.queues = {}
 db.queues["Mysticmead-Sargeras"] = { { recipeID = AZEROOT_TEA, quantity = 8, made = 0, added = os.time() } }
 local myst = db.characters["Mysticmead-Sargeras"]
 myst.stock[AZEROOT], myst.stock[AZEROOT + 1] = nil, nil
+-- The tea's Mana-Wyrm Essence held, whatever the saved data says now
+myst.stock[242644] = 20
 -- Tea sells well, whatever today's prices: a losing craft would stop Buy next
 db.ownScan.prices[db.recipes[AZEROOT_TEA].outputItemID] = { 50 * 10000 }
 db.searchPrices = {}

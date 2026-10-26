@@ -47,7 +47,7 @@ local screen = bench.Screen()
 bench.Check("feast starred", addon:QueueRowGap(feast) ~= nil)
 for _, row in ipairs(q.rows) do
     local p = row.plan
-    local off = math.abs(p.cost - p.marketCost)
+    local off = math.abs(p.cost - (p.todayCost or p.marketCost))
     bench.Equal(string.format("%s starred at %s off", row.recipe.outputName, addon:FormatMoney(off)),
         addon:QueueRowGap(row) ~= nil, off >= bench.Gold(1))
 end
