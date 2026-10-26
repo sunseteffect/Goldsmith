@@ -678,7 +678,7 @@ local SCROLL_BAR = 8
 local PAGE_WIDTH = WIDTH - NAV_WIDTH - 1 - 2 * PAD - SCROLL_BAR - 10
 local ROW_HEIGHT = 62
 local ROW_GAP = 6
-local CONTROL_WIDTH = 170
+local CONTROL_WIDTH = 190
 
 local CHOICES = {
     priceSource = {
@@ -753,6 +753,13 @@ local function LabelFor(choices, value)
         if c.value == value then return c.label end
     end
     return choices[1].label
+end
+
+-- The choice on a dropdown's button: without "(recommended)", which only
+-- the menu shows (user, 2026-10-25: "Up to 2% more (recommend..." was cut
+-- off)
+local function ButtonLabel(choices, value)
+    return (LabelFor(choices, value):gsub(" %(recommended%)", ""))
 end
 
 -- Hover text for each setting: a title, then paragraphs
@@ -942,7 +949,7 @@ for _ in pairs(DEFAULTS) do SETTING_COUNT = SETTING_COUNT + 1 end
 -- A setting's value as its control shows it ("Short", "On")
 local function ValueText(key)
     local value = addon:Setting(key)
-    if CHOICES[key] then return (LabelFor(CHOICES[key], value):gsub(" %(recommended%)", "")) end
+    if CHOICES[key] then return ButtonLabel(CHOICES[key], value) end
     return value and "On" or "Off"
 end
 
@@ -1022,7 +1029,7 @@ local function ChoiceRow(parent, panel, key, title, description)
                 function() addon:SetSetting(key, c.value); panel:Update() end)
         end
     end)
-    function row:Update() row.control:SetLabel(LabelFor(CHOICES[key], addon:Setting(key))) end
+    function row:Update() row.control:SetLabel(ButtonLabel(CHOICES[key], addon:Setting(key))) end
     return row
 end
 
@@ -1288,7 +1295,7 @@ function addon:CreateSettingsPanel(parent)
                 function() SetKeepDays(c.value, panel) end)
         end
     end)
-    function rows.keepDays:Update() self.control:SetLabel(LabelFor(CHOICES.keepDays, addon:Setting("keepDays"))) end
+    function rows.keepDays:Update() self.control:SetLabel(ButtonLabel(CHOICES.keepDays, addon:Setting("keepDays"))) end
 
     -- Price source only matters with both price addons installed. Asked
     -- each time: TSM can finish loading after Goldsmith.

@@ -106,4 +106,11 @@ bench.Has("on the bug report", bench.Screen(), "Select all")
 panel:Search("interact key")
 bench.HasNot("search finds Help's text", bench.Screen(), "No setting matches")
 
+-- A dropdown's button shows the choice without "(recommended)", which
+-- ran off the end; the menu still marks it (user, 2026-10-25)
+panel:Open("buying")
+screen = bench.Screen()
+bench.Has("button shows the choice", screen, "Up to 2% more")
+bench.HasNot("no (recommended) on the button", screen, "(recommended)")
+
 bench.Done()
