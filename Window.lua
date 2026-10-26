@@ -224,16 +224,13 @@ function addon:CreateWindow()
 
     -- A game window opening (the AH and Auctionator, a profession, mail, a
     -- vendor, the bank, bags) goes in front of Goldsmith, which stays open
-    -- behind it; click Goldsmith to bring it back. Settings and Help sit on
-    -- a higher layer, so they close.
+    -- behind it; click Goldsmith to bring it back. Settings sit on a higher
+    -- layer, so they close.
     local function StepBack()
         if not frame:IsShown() then return end
         inFront = false
         frame:Lower()
         if GoldsmithSettings then GoldsmithSettings:Hide() end
-        if GoldsmithHelp then GoldsmithHelp:Hide() end
-        if GoldsmithSupport then GoldsmithSupport:Hide() end
-        if GoldsmithReport then GoldsmithReport:Hide() end
     end
     hooksecurefunc("ShowUIPanel", function(panel)
         if panel and panel ~= frame then StepBack() end
@@ -366,12 +363,6 @@ function addon:CreateWindow()
         local handled = false
         if addon.HelpModeActive and addon:HelpModeActive() then
             addon:ExitHelpMode(); handled = true
-        elseif GoldsmithHelp and GoldsmithHelp:IsShown() then
-            GoldsmithHelp:Hide(); handled = true
-        elseif GoldsmithSupport and GoldsmithSupport:IsShown() then
-            GoldsmithSupport:Hide(); handled = true
-        elseif GoldsmithReport and GoldsmithReport:IsShown() then
-            GoldsmithReport:Hide(); handled = true
         elseif GoldsmithSettings and GoldsmithSettings:IsShown() then
             GoldsmithSettings:Hide(); handled = true
         elseif InFront() then
@@ -587,11 +578,20 @@ function addon:CreateWindow()
     -- Down to the window's bottom and no further, for small screens; the
     -- page scrolls inside (user, 2026-10-25)
     settings:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -8, 8)
+    -- The window fades behind the settings so they stand out (user,
+    -- 2026-10-25). On a layer between the two; a click on it closes them.
+    local shade = CreateFrame("Frame", nil, frame)
+    shade:SetAllPoints(frame)
+    shade:SetFrameStrata("HIGH")
+    shade:EnableMouse(true)
+    shade:Hide()
+    local shadeTexture = shade:CreateTexture(nil, "BACKGROUND")
+    shadeTexture:SetAllPoints()
+    shadeTexture:SetColorTexture(0, 0, 0, 0.5)
+    shade:SetScript("OnMouseDown", function() settings:Hide() end)
+    settings:HookScript("OnShow", function() shade:Show() end)
+    settings:HookScript("OnHide", function() shade:Hide() end)
     local settingsButton = UI.Button(tabArea, "Settings", 80, 24, function()
-        -- Help, Support and the bug report sit in the same spot
-        if GoldsmithHelp then GoldsmithHelp:Hide() end
-        if GoldsmithSupport then GoldsmithSupport:Hide() end
-        if GoldsmithReport then GoldsmithReport:Hide() end
         settings:SetShown(not settings:IsShown())
     end)
     settingsButton:SetPoint("RIGHT", -8, 0)

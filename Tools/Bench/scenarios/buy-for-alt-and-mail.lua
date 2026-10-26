@@ -7,7 +7,8 @@ local AZEROOT_TEA = 1226197
 
 local db = bench.LoadSaved()
 db.settings.buyFor = "all"
-db.queues["Maddoxynn-Sargeras"] = {}
+-- Only Mysticmead's queue, whatever else is queued in the saved data
+db.queues = {}
 db.queues["Mysticmead-Sargeras"] = { { recipeID = AZEROOT_TEA, quantity = 8, made = 0, added = os.time() } }
 local myst = db.characters["Mysticmead-Sargeras"]
 myst.stock[AZEROOT], myst.stock[AZEROOT + 1] = nil, nil

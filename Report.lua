@@ -282,37 +282,21 @@ function addon:BuildBugReport()
     return Anonymize(table.concat(lines, "\n"))
 end
 
--- Report panel: the report in a box to copy, in the same spot as Settings
+-- The Bug report page in Settings, under Support and feedback (user,
+-- 2026-10-25: in the panel, not a window of its own; its intro is the
+-- page's): the report in a box, selected to copy. page:Fill() builds it
+-- afresh and selects it; onBack goes back to Support and feedback.
 
-local REPORT_WIDTH = 640
 local BOX_HEIGHT = 330
 
-function addon:CreateReportPanel(parent, support)
-    local panel = CreateFrame("Frame", "GoldsmithReport", parent, "BackdropTemplate")
-    panel:SetWidth(REPORT_WIDTH)
-    panel:SetPoint("TOPRIGHT", support, "TOPRIGHT")
-    UI.Style(panel, "dialog", "borderGold")
-    panel:SetFrameStrata("DIALOG")
-    panel:EnableMouse(true)
-    panel:Hide()
-
-    local title = UI.Text(panel, "heading")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Bug report")
-    local close = UI.IconButton(panel, 26, "X", "Close", function() panel:Hide() end, { hoverColor = "loss" })
-    close:SetPoint("TOPRIGHT", -8, -8)
-
-    local intro = UI.Text(panel, "small", "muted")
-    intro:SetPoint("TOPLEFT", 16, -50)
-    intro:SetWidth(REPORT_WIDTH - 32)
-    intro:SetWordWrap(true)
-    intro:SetSpacing(2)
-    intro:SetText("It's selected: press Ctrl+C to copy it, then paste it into your comment (or GitHub issue) under what happened. Character and realm names are left out, and nothing about your gold or items is included.")
+function addon:BuildReportPage(parent, width, onBack)
+    local page = CreateFrame("Frame", nil, parent)
+    page:SetWidth(width)
 
     -- The box, scrolling inside a border
-    local border = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-    border:SetPoint("TOPLEFT", intro, "BOTTOMLEFT", 0, -10)
-    border:SetSize(REPORT_WIDTH - 32, BOX_HEIGHT)
+    local border = CreateFrame("Frame", nil, page, "BackdropTemplate")
+    border:SetPoint("TOPLEFT", 0, 0)
+    border:SetSize(width, BOX_HEIGHT)
     UI.Style(border, "panelRaised", "borderStrong")
     local ok, scroll = pcall(CreateFrame, "ScrollFrame", nil, border, "ScrollFrameTemplate")
     if not ok then scroll = CreateFrame("ScrollFrame", nil, border, "UIPanelScrollFrameTemplate") end
@@ -322,7 +306,7 @@ function addon:CreateReportPanel(parent, support)
     box:SetMultiLine(true)
     box:SetAutoFocus(false)
     box:SetFontObject(addon:Font("small"))
-    box:SetWidth(REPORT_WIDTH - 32 - 34)
+    box:SetWidth(width - 34)
     box:SetTextColor(addon:Color("text"))
     scroll:SetScrollChild(box)
     local report = ""
@@ -344,45 +328,40 @@ function addon:CreateReportPanel(parent, support)
         C_Timer.After(0, function() if box:HasFocus() then box:HighlightText() end end)
     end
 
-    local back = UI.Button(panel, "Back", 80, 24, function()
-        panel:Hide()
-        support:Show()
-    end)
-    back:SetPoint("BOTTOMRIGHT", -16, 12)
-    local selectButton = UI.Button(panel, "Select all", 90, 24, SelectAll)
+    local back = UI.Button(page, "Back", 80, 24, onBack)
+    back:SetPoint("TOPRIGHT", border, "BOTTOMRIGHT", 0, -10)
+    local selectButton = UI.Button(page, "Select all", 90, 24, SelectAll)
     selectButton:SetPoint("RIGHT", back, "LEFT", -8, 0)
-    local clear = UI.Button(panel, "Clear errors", 110, 24, function()
+    local clear = UI.Button(page, "Clear errors", 110, 24, function()
         addon:ClearErrors()
-        panel:Fill()
+        page:Fill()
     end)
-    clear:SetPoint("BOTTOMLEFT", 16, 12)
+    clear:SetPoint("TOPLEFT", border, "BOTTOMLEFT", 0, -10)
     UI.SetTooltip(clear, function(tooltip)
         tooltip:AddLine("Clear errors", 1, 1, 1)
         tooltip:AddLine("Forget the saved errors, for example once you've reported them, so a new report only has new ones.", 0.8, 0.8, 0.8, true)
     end, "ANCHOR_RIGHT")
 
-    function panel:Fill()
+    function page:Fill()
         report = addon:BuildBugReport()
         box:SetText(report)
         scroll:SetVerticalScroll(0)
         clear:SetShown(#addon:GetErrors() > 0)
         SelectAll()
     end
-
-    panel:SetScript("OnShow", function()
-        panel:SetHeight(50 + intro:GetStringHeight() + 10 + BOX_HEIGHT + 52)
-        panel:Fill()
-    end)
-    panel:SetScript("OnHide", function() box:ClearFocus() end)
-    return panel
+    function page:Measure()
+        page:SetHeight(BOX_HEIGHT + 10 + 24)
+        return BOX_HEIGHT + 10 + 24
+    end
+    page:SetScript("OnHide", function() box:ClearFocus() end)
+    return page
 end
 
 -- Opens Settings > Support and feedback > Bug report (/gsm report)
 function addon:ShowBugReport()
     if not addon.ShowSettings then return end
     addon:ShowSettings()
-    if GoldsmithSettings then GoldsmithSettings:Hide() end
-    if GoldsmithReport then GoldsmithReport:Show() end
+    if GoldsmithSettings and GoldsmithSettings.Open then GoldsmithSettings:Open("report") end
 end
 
 _G.Goldsmith = addon

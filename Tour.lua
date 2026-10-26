@@ -600,7 +600,7 @@ end
 
 -- Settings, Help, Support and the bug report sit over the window: closed
 -- for the tour, however it started (a friend's tour ran under Help)
-local POPUPS = { "GoldsmithSettings", "GoldsmithHelp", "GoldsmithSupport", "GoldsmithReport" }
+local POPUPS = { "GoldsmithSettings" }
 local function ClosePopups()
     for _, name in ipairs(POPUPS) do
         local popup = _G[name]

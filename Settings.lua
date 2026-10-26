@@ -908,6 +908,16 @@ local PAGES = {
     { key = "history", label = "History",
       intro = "How long Goldsmith keeps what it records.",
       rows = { "keepDays" } },
+    -- In the panel, not windows of their own (user, 2026-10-25). page:
+    -- built by Help and Support below. hidden: not in the list; nav: the
+    -- entry it's under.
+    { group = "About" },
+    { key = "help", label = "Help", page = "help",
+      intro = "Getting started, what each tab is for, and the /gsm commands." },
+    { key = "support", label = "Support and feedback", page = "support",
+      intro = "Found a bug or have an idea? Leave a comment on Goldsmith's CurseForge page. Click a link, press Ctrl+C to copy it, and paste it into your browser." },
+    { key = "report", label = "Bug report", page = "report", hidden = true, nav = "support",
+      intro = "It's selected: press Ctrl+C to copy it, then paste it into your comment (or GitHub issue) under what happened. Character and realm names are left out, and nothing about your gold or items is included." },
 }
 local PAGE_BY_KEY, PAGE_OF_ROW = {}, {}
 for _, page in ipairs(PAGES) do
@@ -1172,8 +1182,9 @@ function addon:CreateSettingsPanel(parent)
 
     local navButtons = {}
     local function MarkNav()
+        local under = PAGE_BY_KEY[current].nav or current
         for key, b in pairs(navButtons) do
-            local on = query == "" and key == current
+            local on = query == "" and key == under
             b.bg:SetColorTexture(addon:Color(on and "highlight" or "hover"))
             b.bg:SetShown(on or b:IsMouseOver())
             b.bar:SetShown(on)
@@ -1188,7 +1199,7 @@ function addon:CreateSettingsPanel(parent)
             heading:SetPoint("TOPLEFT", PAD, y)
             heading:SetText(page.group:upper())
             y = y - 18
-        else
+        elseif not page.hidden then
             local b = CreateFrame("Button", nil, nav)
             b:SetSize(NAV_WIDTH - 16, 24)
             b:SetPoint("TOPLEFT", 8, y)
@@ -1337,14 +1348,21 @@ function addon:CreateSettingsPanel(parent)
         return card
     end
 
-    local help = addon:CreateHelpPanel(parent, panel)
-    local support = addon:CreateSupportPanel(parent, panel)
     local cards = {
-        Card("Interface\\Icons\\INV_Misc_Book_09", "Help", function() panel:Hide(); help:Show() end),
-        Card("Interface\\Icons\\INV_Letter_15", "Support and feedback", function() panel:Hide(); support:Show() end),
+        Card("Interface\\Icons\\INV_Misc_Book_09", "Help", function() Open("help") end),
+        Card("Interface\\Icons\\INV_Letter_15", "Support and feedback", function() Open("support") end),
         Card("Interface\\Icons\\INV_Misc_Map_01", "Take the tour", function() panel:Hide(); addon:StartTour() end),
         Card("Interface\\Icons\\INV_Misc_Note_01", "Getting started", function() panel:Hide(); addon:ShowSetup() end),
     }
+    -- Help, Support and the bug report, as pages (Help and Support below,
+    -- the report in Report.lua)
+    local pages = {
+        help = addon:BuildHelpPage(content, PAGE_WIDTH, panel),
+        support = addon:BuildSupportPage(content, PAGE_WIDTH, function() Open("report") end),
+        report = addon:BuildReportPage(content, PAGE_WIDTH, function() Open("support") end),
+    }
+    for _, p in pairs(pages) do p:Hide() end
+
     cards[1].text:SetText("Getting started, what each tab is for, and the /gsm commands.")
     cards[3].text:SetText("A guided walk through the window, a step at a time.")
     cards[4].text:SetText("The setup checklist: professions, prices and your first craft.")
@@ -1505,6 +1523,7 @@ function addon:CreateSettingsPanel(parent)
     end
     local function PageMatches(page, words)
         if Matches(page.label, words) or Matches(page.intro, words) then return true end
+        if page.key == "help" and Matches(addon:HelpText(), words) then return true end
         for _, name in ipairs(ListNames(page)) do
             if Matches(name, words) then return true end
         end
@@ -1525,6 +1544,7 @@ function addon:CreateSettingsPanel(parent)
         for _, pool in pairs(listRows) do for _, row in ipairs(pool) do row:Hide() end end
         for _, h in ipairs(headings) do h:Hide() end
         dash:Hide()
+        for _, p in pairs(pages) do p:Hide() end
         emptyText:Hide()
         MarkNav()
 
@@ -1543,7 +1563,7 @@ function addon:CreateSettingsPanel(parent)
             local words = query:lower():gsub("^%s+", ""):gsub("%s+$", "")
             local n = 0
             for _, p in ipairs(PAGES) do
-                if p.key and p.key ~= "dashboard" then
+                if p.key and p.key ~= "dashboard" and not p.hidden then
                     local found = {}
                     for _, key in ipairs(p.rows or {}) do
                         if Applies(key) and RowMatches(key, words) then table.insert(found, key) end
@@ -1566,6 +1586,8 @@ function addon:CreateSettingsPanel(parent)
             end
         elseif current == "dashboard" then
             Place(dash, LayoutDashboard())
+        elseif page.page then
+            Place(pages[page.page], pages[page.page]:Measure())
         elseif page.list == "characters" then
             for i, entry in ipairs(addon:GetCharacters()) do
                 local row = ListRow("characters", i)
@@ -1615,6 +1637,8 @@ function addon:CreateSettingsPanel(parent)
         search:ClearFocus()
         UpdateRows()
         Layout()
+        -- A new report each time, selected to copy
+        if current == "report" then pages.report:Fill() end
     end
     panel.Open = function(_, key) Open(key) end
     panel.Search = function(_, text) query = text or ""; UpdateRows(); Layout() end
@@ -1632,8 +1656,6 @@ end
 --
 -- What a new player needs, inside the game: WoW can't open a web page, so
 -- a link to the README would only be text to copy.
-
-local HELP_WIDTH = 560
 
 local HELP_SECTIONS = {
     { "Getting started",
@@ -1668,66 +1690,26 @@ local HELP_SECTIONS = {
       "Everything is in the window; commands are for checking what Goldsmith recorded. /gsm help lists them all, for example /gsm cooldowns (every craft cooldown it's found, and what the game reports), /gsm recipes and /gsm milling. The buttons below bring back the getting started checklist and the tour." },
 }
 
-function addon:CreateHelpPanel(parent, settings)
-    local panel = CreateFrame("Frame", "GoldsmithHelp", parent, "BackdropTemplate")
-    panel:SetWidth(HELP_WIDTH)
-    panel:SetPoint("TOPRIGHT", settings, "TOPRIGHT")
-    UI.Style(panel, "dialog", "borderGold")
-    panel:SetFrameStrata("DIALOG")
-    panel:EnableMouse(true)
-    panel:Hide()
-
-    local title = UI.Text(panel, "heading")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Help")
-    local close = UI.IconButton(panel, 26, "X", "Close", function() panel:Hide() end, { hoverColor = "loss" })
-    close:SetPoint("TOPRIGHT", -8, -8)
-
-    -- The sections scroll (mouse wheel or the bar) between the title and
-    -- the buttons: at 1920x1080 the page ran off the bottom of the screen
-    -- (user, 2026-10-12)
-    local SCROLL_BAR = 8
-    local scroll = CreateFrame("ScrollFrame", nil, panel)
-    scroll:SetPoint("TOPLEFT", 16, -46)
-    scroll:SetPoint("BOTTOMRIGHT", -(16 + SCROLL_BAR + 6), 46)
-    local content = CreateFrame("Frame", nil, scroll)
-    content:SetSize(HELP_WIDTH - 32 - SCROLL_BAR - 6, 1)
-    scroll:SetScrollChild(content)
-    local bar = CreateFrame("Slider", nil, panel, "BackdropTemplate")
-    bar:SetOrientation("VERTICAL")
-    bar:SetWidth(SCROLL_BAR)
-    bar:SetPoint("TOPLEFT", scroll, "TOPRIGHT", 6, 0)
-    bar:SetPoint("BOTTOMLEFT", scroll, "BOTTOMRIGHT", 6, 0)
-    UI.Style(bar, "panelRaised")
-    local thumb = bar:CreateTexture(nil, "OVERLAY")
-    thumb:SetColorTexture(addon:Color("borderStrong"))
-    thumb:SetSize(SCROLL_BAR, 40)
-    bar:SetThumbTexture(thumb)
-    bar:SetMinMaxValues(0, 0)
-    bar:SetValue(0)
-    bar:SetScript("OnValueChanged", function(_, value) scroll:SetVerticalScroll(value) end)
-    local function Wheel(_, delta)
-        local low, high = bar:GetMinMaxValues()
-        bar:SetValue(math.max(low, math.min(high, bar:GetValue() - delta * 40)))
-    end
-    for _, f in ipairs({ scroll, bar }) do
-        f:EnableMouseWheel(true)
-        f:SetScript("OnMouseWheel", Wheel)
-    end
-
+-- The Help page in Settings: each section's heading and text, then the
+-- getting started checklist and the tour (user, 2026-10-25: in the panel,
+-- not a window of its own). page:Measure() sets and returns its height,
+-- once the text has wrapped to the page's width.
+function addon:BuildHelpPage(parent, width, settings)
+    local page = CreateFrame("Frame", nil, parent)
+    page:SetWidth(width)
     local above
     local texts = {}
     for _, section in ipairs(HELP_SECTIONS) do
-        local heading = UI.Text(content, "body", "text")
+        local heading = UI.Text(page, "body", "text")
         if above then
             heading:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -14)
         else
             heading:SetPoint("TOPLEFT", 0, 0)
         end
         heading:SetText(section[1])
-        local text = UI.Text(content, "small", "muted")
+        local text = UI.Text(page, "small", "muted")
         text:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -4)
-        text:SetWidth(HELP_WIDTH - 32 - SCROLL_BAR - 6)
+        text:SetWidth(width)
         text:SetWordWrap(true)
         text:SetSpacing(2)
         text:SetText(section[2])
@@ -1736,40 +1718,31 @@ function addon:CreateHelpPanel(parent, settings)
         above = text
     end
 
-    local setupButton = UI.Button(panel, "Show getting started", 160, 24, function()
-        panel:Hide()
+    local setupButton = UI.Button(page, "Show getting started", 160, 24, function()
+        settings:Hide()
         addon:ShowSetup()
     end)
-    setupButton:SetPoint("BOTTOMLEFT", 16, 12)
-    local tourButton = UI.Button(panel, "Take the tour", 120, 24, function()
-        panel:Hide()
+    setupButton:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -18)
+    local tourButton = UI.Button(page, "Take the tour", 120, 24, function()
+        settings:Hide()
         addon:StartTour()
     end)
     tourButton:SetPoint("LEFT", setupButton, "RIGHT", 8, 0)
-    local back = UI.Button(panel, "Back to settings", 130, 24, function()
-        panel:Hide()
-        settings:Show()
-    end)
-    back:SetPoint("BOTTOMRIGHT", -16, 12)
 
-    -- Tall enough for the text, however it wrapped, but no taller than
-    -- the Goldsmith window below the settings panel's top; the rest
-    -- scrolls (the bar only shows when there's something to scroll)
-    panel:SetScript("OnShow", function()
-        local textHeight = (#HELP_SECTIONS - 1) * 14 + #HELP_SECTIONS * 4
-        for _, fs in ipairs(texts) do textHeight = textHeight + fs:GetStringHeight() end
-        content:SetHeight(textHeight)
-        local top = panel:GetTop() or settings:GetTop()
-        local room = (top and parent:GetBottom()) and (top - parent:GetBottom() - 8) or 600
-        local height = math.min(46 + textHeight + 46 + 4, room)
-        panel:SetHeight(height)
-        local overflow = math.max(textHeight - (height - 92), 0)
-        bar:SetMinMaxValues(0, overflow)
-        bar:SetValue(0)
-        scroll:SetVerticalScroll(0)
-        bar:SetShown(overflow > 0)
-    end)
-    return panel
+    function page:Measure()
+        local height = (#HELP_SECTIONS - 1) * 14 + #HELP_SECTIONS * 4 + 18 + 24
+        for _, fs in ipairs(texts) do height = height + fs:GetStringHeight() end
+        page:SetHeight(height)
+        return height
+    end
+    return page
+end
+
+-- All of Help's text, for the settings search
+function addon:HelpText()
+    local parts = {}
+    for _, section in ipairs(HELP_SECTIONS) do table.insert(parts, section[1] .. " " .. section[2]) end
+    return table.concat(parts, " ")
 end
 
 -- Support and feedback
@@ -1779,8 +1752,6 @@ end
 -- can't open a web page, so the links are in boxes to copy. No donation link here: Blizzard's
 -- add-on policy doesn't allow asking for donations in game, so that lives
 -- on the CurseForge page (2026-10-06).
-
-local SUPPORT_WIDTH = 560
 
 -- A box showing text to copy: clicking selects all of it, and typing
 -- can't change it
@@ -1815,74 +1786,46 @@ local function CopyBox(parent, width, text)
     return box
 end
 
-function addon:CreateSupportPanel(parent, settings)
-    local panel = CreateFrame("Frame", "GoldsmithSupport", parent, "BackdropTemplate")
-    panel:SetWidth(SUPPORT_WIDTH)
-    panel:SetPoint("TOPRIGHT", settings, "TOPRIGHT")
-    UI.Style(panel, "dialog", "borderGold")
-    panel:SetFrameStrata("DIALOG")
-    panel:EnableMouse(true)
-    panel:Hide()
+-- The Support and feedback page in Settings (the "Found a bug" line is
+-- the page's intro): the two links to copy, what helps in a bug report,
+-- and the button for the report. page:Measure() sets and returns its
+-- height.
+function addon:BuildSupportPage(parent, width, openReport)
+    local page = CreateFrame("Frame", nil, parent)
+    page:SetWidth(width)
 
-    local title = UI.Text(panel, "heading")
-    title:SetPoint("TOPLEFT", 16, -16)
-    title:SetText("Support and feedback")
-    local close = UI.IconButton(panel, 26, "X", "Close", function() panel:Hide() end, { hoverColor = "loss" })
-    close:SetPoint("TOPRIGHT", -8, -8)
-
-    local intro = UI.Text(panel, "small", "muted")
-    intro:SetPoint("TOPLEFT", 16, -50)
-    intro:SetWidth(SUPPORT_WIDTH - 32)
-    intro:SetWordWrap(true)
-    intro:SetSpacing(2)
-    intro:SetText("Found a bug or have an idea? Leave a comment on Goldsmith's CurseForge page. Click the link, press Ctrl+C to copy it, and paste it into your browser.")
-
-    local link = CopyBox(panel, SUPPORT_WIDTH - 32, addon.COMMENTS_URL)
-    link:SetPoint("TOPLEFT", intro, "BOTTOMLEFT", 0, -10)
-
-    local githubText = UI.Text(panel, "small", "muted")
+    local link = CopyBox(page, width, addon.COMMENTS_URL)
+    link:SetPoint("TOPLEFT", 0, 0)
+    local githubText = UI.Text(page, "small", "muted")
     githubText:SetPoint("TOPLEFT", link, "BOTTOMLEFT", 0, -10)
     githubText:SetText("Use GitHub? Issues work too:")
-    local github = CopyBox(panel, SUPPORT_WIDTH - 32, addon.ISSUES_URL)
+    local github = CopyBox(page, width, addon.ISSUES_URL)
     github:SetPoint("TOPLEFT", githubText, "BOTTOMLEFT", 0, -6)
 
-    local heading = UI.Text(panel, "body", "text")
+    local heading = UI.Text(page, "body", "text")
     heading:SetPoint("TOPLEFT", github, "BOTTOMLEFT", 0, -16)
     heading:SetText("For a bug, it helps to include")
-    local details = UI.Text(panel, "small", "muted")
+    local details = UI.Text(page, "small", "muted")
     details:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -4)
-    details:SetWidth(SUPPORT_WIDTH - 32)
+    details:SetWidth(width)
     details:SetWordWrap(true)
     details:SetSpacing(2)
+    details:SetText("What you did and what happened. Copy bug report adds your versions, settings and any saved errors.")
 
-    local back = UI.Button(panel, "Back to settings", 130, 24, function()
-        panel:Hide()
-        settings:Show()
-    end)
-    back:SetPoint("BOTTOMRIGHT", -16, 12)
-
-    -- The details below, gathered for you (Report.lua)
-    local report = addon:CreateReportPanel(parent, panel)
-    local reportButton = UI.Button(panel, "Copy bug report", 140, 24, function()
-        panel:Hide()
-        report:Show()
-    end)
-    reportButton:SetPoint("BOTTOMLEFT", 16, 12)
-    local errorsText = UI.Text(panel, "small", "warning")
+    local reportButton = UI.Button(page, "Copy bug report", 140, 24, openReport)
+    reportButton:SetPoint("TOPLEFT", details, "BOTTOMLEFT", 0, -14)
+    local errorsText = UI.Text(page, "small", "warning")
     errorsText:SetPoint("LEFT", reportButton, "RIGHT", 10, 0)
 
-    -- Tall enough for the text, however it wrapped: the title, the intro,
-    -- the two links with the GitHub line, the heading and details with the
-    -- gaps between, the button
-    panel:SetScript("OnShow", function()
-        details:SetText("What you did and what happened. Copy bug report adds your versions, settings and any saved errors.")
+    function page:Measure()
         local errors = #addon:GetErrors()
         errorsText:SetText(errors > 0 and string.format("%d error%s saved", errors, errors == 1 and "" or "s") or "")
-        panel:SetHeight(50 + intro:GetStringHeight() + 10 + 26 + 10 + githubText:GetStringHeight() + 6 + 26
-            + 16 + heading:GetStringHeight() + 4
-            + details:GetStringHeight() + 52)
-    end)
-    return panel
+        local height = 26 + 10 + githubText:GetStringHeight() + 6 + 26 + 16 + heading:GetStringHeight() + 4
+            + details:GetStringHeight() + 14 + 24
+        page:SetHeight(height)
+        return height
+    end
+    return page
 end
 
 _G.Goldsmith = addon

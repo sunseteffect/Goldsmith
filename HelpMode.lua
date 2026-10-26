@@ -449,7 +449,7 @@ local function CreateDims()
     closeProxy = Proxy("X", "Close", function() if addon.window then addon.window:Hide() end end)
 end
 
-local POPUPS = { "GoldsmithSettings", "GoldsmithHelp", "GoldsmithSupport", "GoldsmithReport" }
+local POPUPS = { "GoldsmithSettings" }
 local function AnyPopup()
     for _, name in ipairs(POPUPS) do
         if _G[name] and _G[name]:IsShown() then return true end
