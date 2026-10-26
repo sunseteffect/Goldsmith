@@ -51,11 +51,14 @@ local function QualitySlots(schematic)
             local low = slot.reagents[1].itemID
             local high = slot.reagents[#slot.reagents].itemID
             if low and high then
+                local ids = {}
+                for _, r in ipairs(slot.reagents) do table.insert(ids, r.itemID) end
                 table.insert(slots, {
                     dataSlotIndex = slot.dataSlotIndex,
                     quantity = slot.quantityRequired,
                     low = low,
                     high = high,
+                    ids = ids,
                 })
             end
         end
@@ -64,14 +67,16 @@ local function QualitySlots(schematic)
 end
 
 -- The game's materials list for a mix; highUnits[i] = better-quality units
--- in quality slot i, the rest at the lowest quality
-local function BuildList(qslots, highUnits)
+-- in quality slot i, the rest at the lowest quality (or base[i], a middle
+-- quality the plan picked)
+local function BuildList(qslots, highUnits, base)
     local list = {}
     for i, s in ipairs(qslots) do
         local high = math.min(highUnits[i] or 0, s.quantity)
         local low = s.quantity - high
         if low > 0 then
-            table.insert(list, { reagent = { itemID = s.low }, quantity = low, dataSlotIndex = s.dataSlotIndex })
+            table.insert(list, { reagent = { itemID = base and base[i] or s.low }, quantity = low,
+                dataSlotIndex = s.dataSlotIndex })
         end
         if high > 0 then
             table.insert(list, { reagent = { itemID = s.high }, quantity = high, dataSlotIndex = s.dataSlotIndex })
@@ -517,6 +522,10 @@ end
 -- craft takes it first. Gold inks counted as crafted made 2 gold Missives
 -- a +490g to-do; the Missives took 450 of 494, the inks were bought and it
 -- came to +341g (user, 2026-10-18).
+-- Without concentration, the plan the craft gets (CraftPlanUnit) when it's
+-- cheaper: the row prices its own materials as bought, so a Missive's
+-- Sienna Ink counted at the AH's 19.18g while its plan mills the pigments
+-- for 18.43g, and the to-do and the queue disagreed (user, 2026-10-25).
 local function CraftedTierCost(itemID, name, sharing)
     local row, recipe = addon:CraftedTierRow(itemID, name)
     if row and sharing and row.concentrate and recipe and recipe.profession == sharing then return nil end
@@ -528,15 +537,13 @@ local function CraftedTierCost(itemID, name, sharing)
     end
     return unit + addon:ConcentrationPerItem(row) * addon.CONC_POINT_COST
 end
--- Without concentration, the plan the craft gets (CraftPlanUnit) when it's
--- cheaper: the row prices its own materials as bought, so a Missive's
--- Sienna Ink counted at the AH's 19.18g while its plan mills the pigments
--- for 18.43g, and the to-do and the queue disagreed (user, 2026-10-25).
 
 -- The cheaper of buying a material quality and making it, else what you
 -- paid: a gold Sunglass Vial listed at 293g made the gold Draught of
 -- Rampant Abandon row cost 245g each, while its plan crafted the vials for
 -- 49g and came to 61g (2026-10-10)
+-- Salvaging for it (milling pigments) too, when that beats the rest by the
+-- plan's margin, as the plan would (SalvageUnitCost; user, 2026-10-25)
 local function QualityPrice(itemID, name, sharing)
     local market = addon:GetMarketPrice(itemID, true)
     local crafted = CraftedTierCost(itemID, name, sharing)
@@ -544,8 +551,6 @@ local function QualityPrice(itemID, name, sharing)
     local salvage, margin = addon:SalvageUnitCost(itemID, name)
     if salvage and (not best or salvage * (1 + margin) < best) then best = salvage end
     return best or addon:GetOwnCost(name)
--- Salvaging for it (milling pigments) too, when that beats the rest by the
--- plan's margin, as the plan would (SalvageUnitCost; user, 2026-10-25)
 end
 
 -- Cost per crafted item for a scenario's materials: each quality material
@@ -600,7 +605,8 @@ end
 
 -- Crafting from Goldsmith: the materials list to give the game for a
 -- scenario's mix of qualities (nil scenario: all lowest quality; or
--- { chosen = { [itemID] = true } } for the qualities a plan picked), built
+-- { chosen = { [itemID] = true } } for the qualities a plan picked, any
+-- of them), built
 -- the same way as the lists the game was asked about, from the recipe's
 -- schematic (the profession must be open). Only quality materials go in
 -- it; the game adds the fixed ones itself.
@@ -616,15 +622,20 @@ function addon:GetCraftReagents(recipeID, scenario, held)
     local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
     if not ok or not schematic then return nil end
     local qslots = QualitySlots(schematic)
-    local highUnits = {}
+    local highUnits, base = {}, {}
     for i, s in ipairs(qslots) do
         if scenario and scenario.mix then
             highUnits[i] = scenario.mix[s.low] or 0
         elseif scenario and scenario.mats == "high" then
             highUnits[i] = s.quantity
         elseif scenario and scenario.chosen then
-            -- { [itemID] = true }: the better quality where it was chosen
+            -- { [itemID] = true }: the better quality where it was chosen,
+            -- or a middle one: Dragonflight and War Within materials have
+            -- three qualities, and a plan's silver went in as bronze
             highUnits[i] = scenario.chosen[s.high] and s.quantity or 0
+            for _, id in ipairs(s.ids) do
+                if id ~= s.high and scenario.chosen[id] then base[i] = id end
+            end
         end
     end
     local swapped
@@ -634,7 +645,7 @@ function addon:GetCraftReagents(recipeID, scenario, held)
             local high = math.min(highUnits[i] or 0, s.quantity)
             local low = s.quantity - high
             if low > 0 and s.low ~= s.high and addon:MayUseHeldGold(s.low, s.high) then
-                local haveLow = C_Item.GetItemCount(s.low, true, false, true, true) or 0
+                local haveLow = C_Item.GetItemCount(base[i] or s.low, true, false, true, true) or 0
                 local spareHigh = (C_Item.GetItemCount(s.high, true, false, true, true) or 0) - high * n
                 if haveLow < low * n and spareHigh >= n then
                     -- Per craft: enough gold to cover the shortfall, as far
@@ -697,7 +708,7 @@ function addon:GetCraftReagents(recipeID, scenario, held)
         end
     end
 
-    local list = BuildList(qslots, highUnits)
+    local list = BuildList(qslots, highUnits, base)
     if swapped then swapped.tier = TierOf(list) end
     local needs = {}
     for _, entry in ipairs(list) do

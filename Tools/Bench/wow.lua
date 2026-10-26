@@ -746,7 +746,10 @@ C_TradeSkillUI = {
     OpenTradeSkill = function(id) Record("OpenTradeSkill", id) return true end,
     CloseTradeSkill = function() end,
     SetRecipeItemNameFilter = function() end,
-    CraftRecipe = function(id, n, reagents, level, guid, conc) Record("CraftRecipe", id, n or 1, conc and "conc" or "") end,
+    CraftRecipe = function(id, n, reagents, level, guid, conc)
+        world.lastCraftReagents = reagents
+        Record("CraftRecipe", id, n or 1, conc and "conc" or "")
+    end,
     CraftSalvage = function(id, n, loc) Record("CraftSalvage", id, n or 1) end,
     CraftEnchant = function(id, n) Record("CraftEnchant", id, n or 1) end,
     GetProfessionChildSkillLineID = function() return 0 end,

@@ -1655,7 +1655,18 @@ local function CraftState(p, tierInfo, plan)
 
     CheckStation(state, recipe.recipeID)
 
-    local reagents, needs, swapped = addon:GetCraftReagents(recipe.recipeID, tierInfo and tierInfo.scenario,
+    -- No quality tier (bags, treatises, teas): the qualities the plan
+    -- picked, as the shopping list buys them. It was all lowest quality: a
+    -- plan picked Tier 2 materials for a bag, held in the bags, and the
+    -- button said to buy Tier 1, then the sale was costed at those (a
+    -- user's report, 2026-10-25).
+    local scenario = tierInfo and tierInfo.scenario
+    if not tierInfo then
+        local chosen = {}
+        for _, node in ipairs(plan.nodes) do chosen[node.itemID] = true end
+        scenario = { chosen = chosen }
+    end
+    local reagents, needs, swapped = addon:GetCraftReagents(recipe.recipeID, scenario,
         { crafts = plan.crafts, concentrate = tierInfo and tierInfo.concentrate == true, tier = tierInfo and tierInfo.tier })
     if not reagents then
         table.insert(state.blockers, "The game didn't give this recipe's materials. Try closing and reopening the profession.")
@@ -2657,17 +2668,6 @@ local function CreatePlanScreen(parent)
             screen.profit.value:SetTextColor(addon:Color(addon:MoneyColor(plan.profit)))
             screen.profit.note:SetText(plan.margin and (Roi(plan.margin) .. " ROI") or "")
             screen.profit.note:SetTextColor(addon:Color("muted"))
-            -- Profit counts what you hold at what you paid (Planner.lua);
-            -- when selling those materials today would make clearly more
-            -- than the craft, say so (user, 2026-10-22: "whatever makes me
-            -- the most gold, within a threshold"; cheaper materials since
-            -- don't matter, you use what you have)
-            local sellMats = plan.marketCost and plan.marketCost * (1 - AH_CUT) - plan.revenue
-            if sellMats and sellMats >= math.max(100000, plan.marketCost * 0.10) then
-                screen.profit.note:SetText(string.format("Selling the materials instead makes about %s more today",
-                    Money(sellMats)))
-                screen.profit.note:SetTextColor(addon:Color("warning"))
-            end
             -- What you hold cost clearly more or less than today: the
             -- to-do's number (today's prices) and why, in plain sight
             -- (HeldGap, Planner.lua)
@@ -2678,6 +2678,17 @@ local function CreatePlanScreen(parent)
                     plan.margin and (Roi(plan.margin) .. " ROI · ") or "",
                     addon:Colorize(Signed(today), addon:MoneyColor(today)), addon:HeldGapText(gap, gapItem)))
                 screen.profit.note:SetTextColor(addon:Color("text"))
+            end
+            -- Profit counts what you hold at what you paid (Planner.lua);
+            -- when selling those materials today would make clearly more
+            -- than the craft, say so (user, 2026-10-22: "whatever makes me
+            -- the most gold, within a threshold"; cheaper materials since
+            -- don't matter, you use what you have)
+            local sellMats = plan.marketCost and plan.marketCost * (1 - AH_CUT) - plan.revenue
+            if sellMats and sellMats >= math.max(100000, plan.marketCost * 0.10) then
+                screen.profit.note:SetText(string.format("Selling the materials instead makes about %s more today",
+                    Money(sellMats)))
+                screen.profit.note:SetTextColor(addon:Color("warning"))
             end
         else
             screen.sells.value:SetText("-")
