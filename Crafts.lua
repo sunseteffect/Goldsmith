@@ -663,7 +663,7 @@ end
 local function FillFinishingRow(row, node)
     local cells, choice = row.cells, node.finishingChoice
     cells.item:SetText("Finishing reagent: " .. addon:Colorize(choice.yours == false and "none (your pick)"
-        or "none, not worth it here", "muted"))
+        or "none", "muted"))
     for _, key in ipairs({ "need", "have", "each", "total" }) do
         cells[key]:SetText("-")
         cells[key]:SetTextColor(addon:Color("dim"))
@@ -2650,9 +2650,9 @@ local function CreatePlanScreen(parent)
         if plan.price then
             screen.sells.value:SetText((plan.unconfirmed and UNCONFIRMED_ICON or "") .. Money(plan.revenue))
             screen.sells.value:SetTextColor(addon:Color("text"))
-            screen.sells.note:SetText(string.format("%s each after the AH cut, AH price %s",
-                Money(plan.price * (1 - AH_CUT)),
-                addon:PriceAgeText((tierInfo and tierInfo.itemID) or recipe.outputItemID) or ""))
+            local age = addon:PriceAgeText((tierInfo and tierInfo.itemID) or recipe.outputItemID)
+            screen.sells.note:SetText(string.format("%s each after AH cut%s",
+                Money(plan.price * (1 - AH_CUT)), age and (" · " .. age) or ""))
             screen.profit.value:SetText(Signed(plan.profit))
             screen.profit.value:SetTextColor(addon:Color(addon:MoneyColor(plan.profit)))
             screen.profit.note:SetText(plan.margin and (Roi(plan.margin) .. " ROI") or "")
@@ -2703,16 +2703,12 @@ local function CreatePlanScreen(parent)
             elseif plan.demand and plan.demand > 0 then
                 local made = plan.expectedOutput or quantity
                 local days = made / plan.demand
-                local worth
-                if days < 1 then
-                    worth = "less than a day's worth"
-                elseif days < 1.5 then
-                    worth = "about a day's worth"
-                else
-                    worth = string.format("about %.0f days' worth", days)
-                end
-                table.insert(parts, string.format("%s about %s a day (%s): %d is %s.",
-                    level and "You sell" or "Sells", addon:FormatDemand(plan.demand), plan.demandSource or "?", math.floor(made + 0.5), worth))
+                -- The batch against a day's sales only when it's more
+                -- than a day's worth (C29 cut, 2026-10-25)
+                local worth = days >= 1.5
+                    and string.format(": %d is about %.0f days' worth", math.floor(made + 0.5), days) or ""
+                table.insert(parts, string.format("%s %s a day (%s)%s.",
+                    level and "You sell" or "Sells", addon:FormatDemand(plan.demand), plan.demandSource or "?", worth))
                 warn = warn or days > PLAN_DAYS_WARN
             end
             screen.demandLine:SetText(table.concat(parts, " "))
@@ -3806,7 +3802,7 @@ local function Refresh(v, state)
             and "No craft matches. " .. (addon.char.name or "This character") .. " may not know it: untick Only " .. (addon.char.name or "me") .. ", or pick All professions at the top."
             or "No craft matches. Try All professions at the top, or open the profession that makes it so Goldsmith can load the recipe.")
     elseif show == "recommended" then
-        v.list:SetEmptyText("Nothing to recommend right now: no craft both makes a profit and sells. Set Show to All crafts, or pick more expansions at the top.")
+        v.list:SetEmptyText("Nothing to recommend. Set Show to All crafts to see everything.")
     else
         v.list:SetEmptyText(ui.craftsOnlyMine
             and "No crafts match. This character may not know these recipes: untick Only " .. (addon.char.name or "me") .. ", pick All expansions at the top, or set Show to All crafts."
