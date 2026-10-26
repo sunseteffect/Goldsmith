@@ -14,6 +14,17 @@ local UI = addon.UI
 -- this is marked seen. /gsm news shows it again.
 local NEWS = {
     {
+        key = "2.7.0",
+        title = "What's new in Goldsmith 2.7",
+        items = {
+            { "Buy for every queue", "Tick All queues in Buy next to shop for all your characters in one trip." },
+            { "Mail it to them", "At the mailbox, a panel lists what each character needs. Click once to fill in the mail, again to send it." },
+            { "Warnings before you lose gold", "Buy next asks twice when a craft would lose money. Posting under break-even gets a warning too." },
+            { "Stock up on cheap materials", "Items > Cheap materials follows what you actually use. Right-click one to queue a stock-up." },
+            { "New Settings", "Categories on the left, search, and Reset to recommended. Help and Support are in there too." },
+        },
+    },
+    {
         key = "2.6.3",
         title = "What's new in Goldsmith 2.6.3",
         items = {

@@ -1670,7 +1670,7 @@ end
 
 local HELP_SECTIONS = {
     { "Getting started",
-      "Open each profession once on every crafter (press K) so Goldsmith loads its recipes and crafting stats. Prices come with Goldsmith Data from the start; scan the AH with Auctionator for live ones. From then on, purchases, sales, crafts and AH deposits are recorded by themselves." },
+      "Open each profession once on every crafter (press K) so Goldsmith loads its recipes and crafting stats. Prices come with Goldsmith Data from the start; press Scan the AH at the auction house for live ones. From then on, purchases, sales, crafts and AH deposits are recorded by themselves." },
     { "Opening Goldsmith",
       "/gsm, the Goldsmith button on the minimap, the addons button by the minimap, or a key of your own (Settings > Keys)." },
     -- One line per tab, its name in the text color (Theme.lua loads first)
@@ -1679,14 +1679,16 @@ local HELP_SECTIONS = {
         addon:Colorize("Characters", "text") .. ": a to-do list for each character, its craft cooldowns, and which characters count.",
         addon:Colorize("Crafts", "text") .. ": what you can make, with its cost, profit and how well it sells. Show picks Recommended, All crafts or Not learned yet (recipes worth going to learn), and can hide gear. Click a craft to plan it: type how many crafts, and it shows what they make and what to buy. With concentration it plans only what yours covers now; Why this mix shows the material qualities compared, and clicking one uses it instead.",
         addon:Colorize("Queue", "text") .. ": crafts lined up to make, with one shopping list and a button that does the next step.",
-        addon:Colorize("Items", "text") .. ": any item's page, and In my bags for everything you hold.",
+        addon:Colorize("Items", "text") .. ": any item's page, In my bags for everything you hold, and Cheap materials (right-click one to stock up).",
         addon:Colorize("History", "text") .. ": every purchase, sale, craft and deposit; right-click an entry to fix it.",
         addon:Colorize("Stats", "text") .. ": lifetime stats and your Goldsmith title; Share in chat to brag.",
       }, "\n") },
     { "Getting to the AH and the mailbox",
       "Hold Alt and Goldsmith fades almost away: clicks go through it, so you can click the auctioneer or the mailbox behind it without moving the window. Let go and it's back. Pick another key in Settings > Keys. The game's Interact key works too: turn on Options > Gameplay > Controls > Enable Interact Key, bind Interact with Target in Keybindings, and press it beside the auctioneer or a mailbox." },
+    { "At the AH, vendors and the mailbox",
+      "At the AH, Goldsmith's panel scans prices and Buy next buys what the queue needs, one click per item; tick All queues to shop for every character. It asks twice when a craft would lose money. At a vendor, its panel buys the vendor materials. At the mailbox, a panel lists what to send each character: click once to fill in the mail, again to send it. Drag a panel or notice by its move icon; right-click the icon to put it back." },
     { "In the game's windows",
-      "Under the reagents in a profession window, Goldsmith shows what your materials cost and the profit, the same as on Crafts; hover it for the breakdown. On a crafting order, only the materials you supply count, with the commission and rewards (a payout bag at what's usually inside). Above Goldsmith's Craft button, a note reminds you when a crafting buff such as Everburning Ignition or Shattered Essence is off." },
+      "Under the reagents in a profession window, Goldsmith shows what your materials cost and the profit, the same as on Crafts; hover it for the breakdown. On a crafting order, only the materials you supply count, with the commission and rewards (a payout bag at what's usually inside). Above Goldsmith's Craft button, a note reminds you when a crafting buff such as Everburning Ignition or Shattered Essence is off, and a button offers to swap in the profession tool that suits the craft best." },
     { "Hovers and clicks",
       "Click ? at the top right, then any part of the window, to see what it's for. Hovers show the numbers. Hold Ctrl over one to see what each number means, how it's worked out and what clicking does; let go and they're gone. The line along the bottom of the window says what clicking, right-clicking and shift-clicking do on the screen you're on. A gold Filtered button by Settings means something is hiding part of the list: click it to see everything." },
     { "When a suggestion isn't for you",
