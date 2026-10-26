@@ -23,7 +23,22 @@ for key, t in pairs(addon:GetCharacterTodo("All")) do
         local q = addon:BuildQueue(key)
         local plan = q.rows[#q.rows] and q.rows[#q.rows].plan
         local name = string.format("%s, %dx %s", key:match("^[^-]+"), item.crafts, item.recipe.outputName)
-        if plan and plan.revenue and plan.marketCost then
+        -- Known gap, not yet fixed: a plan salvages herbs the crafter holds
+        -- even when buying is a little cheaper (HELD_SALVAGE_SHARE); the
+        -- to-do's material costs are shared by every character, so they
+        -- can't know who holds what (Mysticmead's 10 Malleable Root: Bento
+        -- +43.48g on the to-do, +51.35g in the queue; 2026-10-26)
+        local heldSalvage
+        for _, node in ipairs(plan and addon:FlattenPlan(plan) or {}) do
+            local o = node.options
+            if o and o.millHeld and node.best == o.mill and o.other and o.other.unit < o.mill.unit * 1.1 then
+                heldSalvage = node.name
+            end
+        end
+        if heldSalvage and plan.revenue and plan.marketCost then
+            bench.Log("%s: salvages held herbs for %s, to-do %s, queue %s", name, heldSalvage,
+                addon:FormatMoney(item.profit), addon:FormatMoney(plan.revenue - plan.marketCost))
+        elseif plan and plan.revenue and plan.marketCost then
             lines = lines + 1
             bench.Near(name, item.profit, plan.revenue - plan.marketCost, bench.Gold(0.5))
         else

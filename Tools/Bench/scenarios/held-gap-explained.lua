@@ -20,6 +20,15 @@ db.queues[MADDOXYNN] = {
     { recipeID = MISSIVE, quantity = 1, made = 0, tier = 1, added = os.time() },
 }
 local addon = bench.Login("Maddoxynn", { db = db })
+-- The 6 roots held, at the 81g paid on 2026-10-25 (crafted away since, so
+-- the saved data no longer has them)
+bench.SetBags({ ["Petrified Root"] = 6 })
+local ownCost = addon.GetOwnCost
+addon.GetOwnCost = function(self, name, ...)
+    if name == "Petrified Root" then return bench.Gold(81) end
+    return ownCost(self, name, ...)
+end
+addon:DataChanged()
 
 local q = addon:BuildQueue(MADDOXYNN)
 local plans = {}

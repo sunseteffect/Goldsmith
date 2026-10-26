@@ -11,6 +11,9 @@ local db = bench.LoadSaved()
 db.queues[MADDOXYNN] = { { recipeID = SIENNA_INK, quantity = 6, made = 0, tier = 2, concentrate = true,
                            prefMix = "17 gold Powder Pigment", added = os.time() } }
 if db.ui2 and db.ui2.planMix then db.ui2.planMix[SIENNA_INK] = nil end
+-- The mix list open (Compare), whatever it was left at in game
+db.ui2 = db.ui2 or {}
+db.ui2.planMixOpen = true
 local addon = bench.Login("Mysticmead", { db = db })
 
 addon:OpenCraftPlan(GoldsmithDB.recipes[SIENNA_INK], { tier = 2, concentrate = true }, MADDOXYNN, 6, "queue")
