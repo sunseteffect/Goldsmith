@@ -396,7 +396,8 @@ local function SalvageLots(itemName, exactItemID)
                 local out = record.outputs and record.outputs[outID]
                 local name = out and out.name or C_Item.GetItemNameByID(outID)
                 if qty > 0 and name == itemName and (not exactItemID or outID == exactItemID) then
-                    local unit = addon:GetHerbUnitCost(run.itemID, record.name)
+                    -- What the herbs cost when milled (older runs: now)
+                    local unit = run.herbCost or addon:GetHerbUnitCost(run.itemID, record.name)
                     if unit then
                         -- This output's share of the run, by AH value (by
                         -- count when something has no price)

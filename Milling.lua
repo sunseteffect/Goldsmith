@@ -25,7 +25,10 @@ end
 -- so yields can be compared across characters and spec changes:
 --   { time, character, recipeID, itemID, casts, used, perCast,
 --     outputs = { [itemID] = qty }, skill, difficulty, quality, qualityID,
---     resourcefulness, concentrated }
+--     resourcefulness, concentrated, herbCost }
+-- herbCost: what one herb cost you when the run started (GetHerbUnitCost),
+-- so what came out keeps that cost. Runs saved before 2026-10-25 have
+-- none and are costed at what the herbs you hold now cost.
 -- casts counts finished casts, so casts * perCast - used is the material
 -- resourcefulness saved.
 
@@ -91,6 +94,7 @@ local function CurrentRun()
         perCast = session.perCast,
         outputs = session.outputs,
         concentrated = session.concentrated,
+        herbCost = session.herbCost,
     }
     for key, value in pairs(session.stats) do
         run[key] = value
@@ -201,6 +205,11 @@ local function OnCraftSalvage(recipeID, numCasts, itemTarget, craftingReagents, 
         casts = 0,
         used = 0,
         outputs = {},
+        -- Before the first cast, while the herbs are still held: worked
+        -- out later, a pigment's cost followed whatever herbs you held then
+        -- (herbs bought at 8g next week repriced pigments milled from 4g
+        -- ones; user, 2026-10-25)
+        herbCost = addon:GetHerbUnitCost(herbID, herbName),
     }
 end
 
@@ -266,9 +275,13 @@ end
 
 -- What one herb costs you: your average purchase price, and the current AH
 -- price for herbs you gathered yourself (what you could have sold them for),
--- weighted by how many of each you hold (GetOwnCost).
+-- weighted by how many of each you hold (GetOwnCost). That herb's quality
+-- only: by name, the gold Argentleaf bought at ~40g for a gold craft was
+-- averaged in with the silver at ~4g that you mill, so Maddoxynn's
+-- pigments cost 15.51g each against 2.85g on the AH and a Missive showed
+-- -15.94g (user, 2026-10-25).
 function addon:GetHerbUnitCost(herbID, herbName)
-    local own, source = addon:GetOwnCost(herbName)
+    local own, source = addon:GetOwnCost(herbName, nil, herbID)
     if own then
         return own, source
     end
