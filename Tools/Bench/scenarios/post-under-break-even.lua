@@ -19,6 +19,19 @@ local function Post(unitPrice)
 end
 bench.OpenAH()
 bench.Calls()
+-- Patron order bag loot counts at the AH price for a sale's profit; a
+-- post only counts the gold you spent, so loot posted at market is quiet,
+-- and half loot, half bought at 100g has a break-even on 50g each
+local basis, own = addon.GetUnitCostBasis, addon.GetOwnCost
+local G = bench.Gold(100)
+addon.GetUnitCostBasis = function() return G, false, "paid" end
+addon.GetOwnCost = function() return G, "gathered", { { "gathered", G, 5 } } end
+Post(G * 0.9)
+bench.HasNot("bag loot at market: quiet", bench.Chat(), "under break-even (")
+addon.GetOwnCost = function() return G, "paid+gathered", { { "paid", G, 5 }, { "gathered", G, 5 } } end
+Post(G * 0.6)
+bench.HasNot("half loot: over what you spent", bench.Chat(), "under break-even (")
+addon.GetUnitCostBasis, addon.GetOwnCost = basis, own
 Post(breakEven * 0.5)
 bench.Has("warns under break-even", bench.Chat(), "under break-even (")
 local calls = bench.Calls()

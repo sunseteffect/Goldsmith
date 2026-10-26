@@ -306,6 +306,22 @@ local function CheckPostPrice(itemLocation, quantity, unitPrice)
     local itemID, name = C_Item.GetItemID(itemLocation), C_Item.GetItemName(itemLocation)
     local cost, _, source = addon:GetUnitCostBasis(name, quantity, itemID)
     if not cost or cost <= 0 or (source ~= "crafted" and source ~= "paid") then return end
+    -- Gathered and payout bag loot count at the AH price for a sale's
+    -- profit, so their break-even sat over the market and every post of
+    -- patron order bag loot warned (user, 2026-10-26). Here only the gold
+    -- you spent counts; those are free.
+    if source == "paid" then
+        local _, _, parts = addon:GetOwnCost(name, nil, itemID, true)
+        if parts then
+            local spent, units = 0, 0
+            for _, s in ipairs(parts) do
+                if s[1] ~= "gathered" and s[1] ~= "free" then spent = spent + s[2] * s[3] end
+                units = units + s[3]
+            end
+            cost = units > 0 and spent / units or cost
+        end
+        if cost <= 0 then return end
+    end
     local breakEven = cost / (1 - AH_CUT)
     if unitPrice >= breakEven then return end
     local key = itemID or name
