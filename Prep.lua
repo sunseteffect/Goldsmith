@@ -12,8 +12,11 @@ local addon = _G.Goldsmith or {}
 -- first: { label, lines (for the hover), run }, or nil. It shows where the
 -- buff warning is: above the plan's Craft button and in the queue panel.
 
--- The two main professions' tool slots (INVSLOT_PROF0TOOL, INVSLOT_PROF1TOOL)
-local TOOL_SLOTS = { 20, 23 }
+-- Every profession equipment slot (the two main professions' tools and
+-- gear, then Cooking's and Fishing's), searched for the profession's tool:
+-- only the main two (20, 23) missed the cooking tool, and salvaging for
+-- Cooking offered no resourcefulness swap (user, 2026-10-26)
+local TOOL_SLOTS = { 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 }
 local PROFESSION_CLASS = 19 -- Enum.ItemClass.Profession
 -- Enum.ItemProfessionSubclass, by profession name
 local SUBCLASS = {
