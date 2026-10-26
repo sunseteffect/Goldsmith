@@ -1,7 +1,7 @@
 -- Posting under what yours cost you (crafted or paid, after the AH cut):
--- a chat warning, the raid warning and a popup right after the post (error review
--- #5). At or over break-even, and items with only an estimated cost, say
--- nothing.
+-- a chat line right after the post, no raid warning or sound (user,
+-- 2026-10-26; error review #5). At or over break-even, and items with
+-- only an estimated cost, say nothing. The same item again soon: quiet.
 local bench = dofile(BENCH_DIR .. "bench.lua")
 local addon = bench.Login("Mysticmead")
 local POTENTIAL = bench.ItemID("Light's Potential")
@@ -22,8 +22,11 @@ bench.Calls()
 Post(breakEven * 0.5)
 bench.Has("warns under break-even", bench.Chat(), "under break-even (")
 local calls = bench.Calls()
-bench.Has("raid warning sound", calls, "PlaySound(RAID_WARNING)")
-bench.Has("popup", calls, "RaidNotice(Goldsmith: Light's Potential posted under your break-even")
+bench.HasNot("no sound", calls, "PlaySound(")
+bench.HasNot("no raid warning", calls, "RaidNotice(")
+-- The same item again soon: no second line
+Post(breakEven * 0.5)
+bench.HasNot("once per item", bench.Chat(), "under break-even (")
 Post(breakEven * 1.2)
 bench.HasNot("quiet over break-even", bench.Chat(), "under break-even (")
 bench.HasNot("no sound over break-even", bench.Calls(), "PlaySound(")

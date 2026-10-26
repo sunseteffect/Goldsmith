@@ -823,7 +823,7 @@ local HELP = {
     sounds = {
         "Sounds",
         "A sound only when Goldsmith stops you, so you look before going on. Never for news like a finished scan or a deal.",
-        "The raid warning when Buy next waits because the AH asks more than the plan, or when a purchase fails. When you'd lose gold (a queued craft or the queue at a loss, or posting under what yours cost you), a warning in the middle of the screen too, even with sounds off.",
+        "The raid warning when Buy next waits because the AH asks more than the plan, or when a purchase fails. When buying would lose gold (a queued craft or the queue at a loss), a warning in the middle of the screen too, even with sounds off.",
         "The game's own sounds, at your Sound effects volume.",
     },
     characters = {

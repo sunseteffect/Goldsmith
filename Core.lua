@@ -294,7 +294,13 @@ end
 -- so right after, while cancelling costs just the deposit (error review,
 -- 2026-10-23). Only from a real cost (your crafts or what you paid), not
 -- a recipe's estimate, so a guess never cries wolf.
+-- A chat line only: no raid warning or sound. Posting a pile of patron
+-- order bag loot set one off per item (user, 2026-10-26: "in current
+-- state this will get annoying even with no sound"). Once per item every
+-- POST_WARN_GAP, so posting the same item again stays quiet.
 local AH_CUT = 0.05
+local POST_WARN_GAP = 15 * 60
+local postWarned = {}
 local function CheckPostPrice(itemLocation, quantity, unitPrice)
     if not (unitPrice and unitPrice > 0 and C_Item.DoesItemExist(itemLocation)) then return end
     local itemID, name = C_Item.GetItemID(itemLocation), C_Item.GetItemName(itemLocation)
@@ -302,10 +308,11 @@ local function CheckPostPrice(itemLocation, quantity, unitPrice)
     if not cost or cost <= 0 or (source ~= "crafted" and source ~= "paid") then return end
     local breakEven = cost / (1 - AH_CUT)
     if unitPrice >= breakEven then return end
+    local key = itemID or name
+    if key and postWarned[key] and GetTime() - postWarned[key] < POST_WARN_GAP then return end
+    if key then postWarned[key] = GetTime() end
     addon:Notify("info", "%s posted at %s, under break-even (%s). Cancel it if that's a mistake.",
         name or "An item", addon:FormatMoney(unitPrice), addon:FormatMoney(breakEven))
-    addon:Alert("loss", string.format("%s posted under your break-even of %s.", name or "An item",
-        addon:FormatMoney(breakEven)))
 end
 
 local function OnPostCommodity(itemLocation, duration, quantity, unitPrice)
