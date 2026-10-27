@@ -95,9 +95,18 @@ local openingBox -- the box being opened, while its loot comes in
 local openingCrafted -- it's one you crafted (its loot isn't gathered)
 local boxUntil = 0
 
+-- Each tier's item too: a gold Bouquet of Herbs is its own item, and
+-- opening one went unrecorded (user, 2026-10-27)
 local function IsCraftedBox(itemID)
     for _, recipe in pairs(GoldsmithDB.recipes) do
         if recipe.outputItemID == itemID then return true end
+    end
+    for _, c in pairs(GoldsmithDB.characters) do
+        for _, td in pairs(c.tierData or {}) do
+            for _, out in pairs(td.outputs or {}) do
+                if out.itemID == itemID then return true end
+            end
+        end
     end
     return false
 end

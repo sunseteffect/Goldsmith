@@ -1221,10 +1221,12 @@ end
 
 -- A bound box you craft and open (Bouquet of Herbs): no sales of its own,
 -- so the sales column says "Opens", not "-" (read as missing data, user,
--- 2026-10-27)
+-- 2026-10-27). A tier not opened yet (gold) counts when its recipe's base
+-- item has been: baseItemID.
 addon.OPENS_TEXT = "Opens"
-function addon:IsOpenedBox(itemID)
-    return addon:CanAuction(itemID) == false and addon:GetBoxValue(itemID) ~= nil
+function addon:IsBox(itemID, baseItemID)
+    if addon:CanAuction(itemID) ~= false then return false end
+    return addon:GetBoxValue(itemID) ~= nil or (baseItemID ~= nil and addon:GetBoxValue(baseItemID) ~= nil)
 end
 
 -- Recipes

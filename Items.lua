@@ -555,7 +555,7 @@ local function AddSales(items)
 end
 
 local function FillSalesCells(c, item)
-    if not item.demand and addon:IsOpenedBox(item.itemID) then
+    if not item.demand and addon:IsBox(item.itemID) then
         c.demand:SetText(addon.OPENS_TEXT)
         c.demand:SetTextColor(addon:Color("text"))
     else

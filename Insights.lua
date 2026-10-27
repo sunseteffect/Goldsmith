@@ -123,6 +123,8 @@ WhyNotBase = function(recipe, row, shownExpansions)
     -- worth the materials inside, which sell (user, 2026-10-11: worth making
     -- for what's inside)
     if addon:CanAuction(itemID) == false and addon:GetBoxValue(itemID) then return nil end
+    -- Its gold tier, not opened yet: "No sales data" read wrong (2026-10-27)
+    if addon:IsBox(itemID, recipe.outputItemID) then return "No worth yet: open one and Goldsmith notes what's inside." end
     -- Without TSM, Goldsmith Data's sell level decides (TSM comes first
     -- when it's installed). Gear isn't in it (realm by realm), so it goes on
     -- to the rules below.

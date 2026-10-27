@@ -277,7 +277,7 @@ local function FillCraftRow(row, item)
     -- Without TSM: Goldsmith Data's sell level (Sells, Slow, Hardly sells)
     -- instead of a number
     local level = not addon:HasTSM() and addon:GetSellLevel(item.itemID)
-    if not info.demand and addon:IsOpenedBox(item.itemID) then
+    if not info.demand and addon:IsBox(item.itemID, item.recipe and item.recipe.outputItemID) then
         cells.demand:SetText(addon.OPENS_TEXT)
         cells.demand:SetTextColor(addon:Color("text"))
     elseif level then
@@ -475,9 +475,12 @@ local function CraftTooltip(tooltip, item)
     end
 
     tooltip:AddLine(" ")
+    local box = addon:IsBox(item.itemID, item.recipe and item.recipe.outputItemID)
     if info.price then
         local stale = info.priceAge and info.priceAge >= STALE_PRICE_DAYS
-        Line(tooltip, "AH price", Money(info.price))
+        -- A box can't be listed: what's inside is what it's worth (user,
+        -- 2026-10-27)
+        Line(tooltip, info.priceSource == "Contents" and "Worth" or "AH price", Money(info.price))
         -- Where the price came from, on its own row: "Goldsmith Data, 09:15",
         -- "Auctionator, 2 days old", "TSM". From the row's own price, since
         -- gear tiers are priced by link, not by their shared item ID.
@@ -492,6 +495,8 @@ local function CraftTooltip(tooltip, item)
     elseif info.doubtPrice then
         Line(tooltip, "AH listing", Money(info.doubtPrice), "dim")
         Note(tooltip, addon:UnconfirmedPriceText(info) .. " Goldsmith Data covers materials and consumables, not gear or tools.", "warning")
+    elseif box then
+        Note(tooltip, "No worth yet: open one and Goldsmith notes what's inside.")
     else
         Note(tooltip, "No AH price yet. Scan the AH.")
     end
@@ -500,10 +505,12 @@ local function CraftTooltip(tooltip, item)
     if item.tier then TopTierOutOfReach(tooltip, item) end
     -- Without TSM: how well it sells (Goldsmith Data)
     local sellLevel = not addon:HasTSM() and addon:GetSellLevel(item.itemID)
-    if not info.demand and addon:IsOpenedBox(item.itemID) then
+    if not info.demand and box then
         local _, opened = addon:GetBoxValue(item.itemID)
         Line(tooltip, "Sells", "Bound: you open it")
-        Why(tooltip, string.format("Its profit is the average of what came out over %d openings, and those sell.", opened))
+        if opened then
+            Why(tooltip, string.format("Its profit is the average of what came out over %d openings, and those sell.", opened))
+        end
     elseif sellLevel then
         Line(tooltip, "Sells", addon:SellLevelText(sellLevel) .. " (Goldsmith Data, last 7 days)",
             addon:SellLevelColor(sellLevel))
@@ -2739,6 +2746,8 @@ local function CreatePlanScreen(parent)
             screen.sells.value:SetTextColor(addon:Color("dim"))
             screen.sells.note:SetText(plan.doubtPrice
                 and string.format("Listed at %s, not counted: nothing backs it", Money(plan.doubtPrice))
+                or addon:IsBox(screen.tierItemID, screen.plan and screen.plan.recipe and screen.plan.recipe.outputItemID)
+                    and "No worth yet: open one and Goldsmith notes what's inside."
                 or "No AH price yet. Scan the AH (Goldsmith panel beside it).")
             screen.profit.value:SetText("-")
             screen.profit.value:SetTextColor(addon:Color("dim"))
