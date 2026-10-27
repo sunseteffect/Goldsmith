@@ -1,4 +1,4 @@
-## Interface: 120105, 120100, 16001
+## Interface: 120107, 120105, 120100, 16001
 ## Title: Goldsmith
 ## Notes: Crafting profitability analyzer
 ## Author: sunseteffect

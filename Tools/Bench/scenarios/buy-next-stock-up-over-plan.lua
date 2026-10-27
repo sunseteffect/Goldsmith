@@ -30,8 +30,9 @@ for _ = 1, 5 do
     bench.PurchaseSucceeds(id, n, n)
 end
 bench.Click("Buy 20 Argentleaf")
--- Far over its plan
-bench.QuotePrice(ARGENTLEAF, bench.Gold(50), 20)
+-- Far over its plan, whatever Argentleaf costs today (50g stopped being
+-- over it after a rescan, 2026-10-27)
+bench.QuotePrice(ARGENTLEAF, bench.Gold(5000), 20)
 screen = bench.Screen()
 bench.Show(screen, "after quote")
 bench.HasNot("not bought over plan", bench.Calls(), "ConfirmCommoditiesPurchase(" .. ARGENTLEAF)
