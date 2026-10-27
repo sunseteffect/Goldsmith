@@ -177,11 +177,17 @@ local function SlotQuality(slot, index)
     end
 end
 
+-- Qualities compare with concentration charged (compareUnit), as buying
+-- and crafting do in GetOptions: a gold Smuggler's Enchanted Edge "made
+-- with concentration" at the silver's 25.33g beat silver bought at 29g,
+-- then the concentration ran out and the plan bought gold at 59.23g
+-- (user, 2026-10-26)
+local function SlotUnit(best) return best.compareUnit or best.unit end
 local function GetSlotChoice(slot, depth, memo, visiting)
     local best
     for i, itemID in ipairs(slot.itemIDs or {}) do
         local options = GetOptions(itemID, slot.names[i], depth, memo, visiting)
-        if options.best and (not best or options.best.unit < best.options.best.unit) then
+        if options.best and (not best or SlotUnit(options.best) < SlotUnit(best.options.best)) then
             local tier, tierCount = SlotQuality(slot, i)
             best = { itemID = itemID, name = slot.names[i], options = options,
                      qualityTier = tier, tierCount = tierCount }

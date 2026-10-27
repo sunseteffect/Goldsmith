@@ -372,6 +372,8 @@ local function OrderRecipe(recipe, provided)
     end
     return copy
 end
+-- For the plan screen of a queued order (Crafts.lua)
+function addon:OrderRecipe(recipe, provided) return OrderRecipe(recipe, provided) end
 
 function addon:RemoveQueueEntry(charKey, entry)
     local q = Queue(charKey) or {}

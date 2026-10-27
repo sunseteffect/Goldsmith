@@ -314,8 +314,8 @@ local function Create(parent)
             elseif item.entry.salvageID then
                 addon:OpenSalvagePlan(item.entry.salvageID, view.q.charKey, item.remaining, "queue")
             elseif item.recipe then
-                addon:OpenCraftPlan(item.recipe, { tier = item.entry.tier, concentrate = item.entry.concentrate },
-                    view.q.charKey, item.remaining, "queue")
+                addon:OpenCraftPlan(item.recipe, { tier = item.entry.tier, concentrate = item.entry.concentrate,
+                    order = item.entry.orderID and item.entry }, view.q.charKey, item.remaining, "queue")
             end
         end,
         empty = "Nothing queued. Right-click a craft on the Crafts tab to add it.",

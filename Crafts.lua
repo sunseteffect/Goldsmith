@@ -1077,6 +1077,8 @@ function addon:OpenCraftPlan(recipe, info, charKey, quantity, returnTab, crafts)
             recipe = recipe, charKey = charKey or addon:GetCrafter(recipe.recipeID) or addon.charKey,
             tier = info and info.tier, concentrate = info and info.concentrate == true or false,
             scenario = info and info.scenario, returnTab = returnTab,
+            -- A queued crafting order: planned and changed as that entry
+            order = info and info.order,
         },
         quantity = quantity,
     }
@@ -2473,7 +2475,11 @@ local function CreatePlanScreen(parent)
         -- and buys with it. The page picked another, so its "2 items to
         -- buy" read as the queue's while Buy next had nothing (user,
         -- 2026-10-24: Sienna Ink queued with 17 gold, shown with 20 gold)
-        local queued = tierInfo and addon:FindQueueEntry(p.charKey, recipe.recipeID, p.tier, tierInfo.concentrate == true)
+        -- A queued order is its own entry (FindQueueEntry skips orders): a
+        -- right-click Buy on its plan stayed on the plan, and Buy next
+        -- still planned to craft the part (user, 2026-10-26)
+        local order = p.order and addon:FindOrderEntry(p.order.orderID)
+        local queued = order or (tierInfo and addon:FindQueueEntry(p.charKey, recipe.recipeID, p.tier, tierInfo.concentrate == true))
         local set = queued and queued.prefMix and addon:MixByDescription(tierInfo, queued.prefMix)
         if set then
             tierInfo = set
@@ -2483,9 +2489,11 @@ local function CreatePlanScreen(parent)
         end
         screen.tierInfo = tierInfo
         screen.tierItemID = tierInfo and tierInfo.itemID or recipe.outputItemID
-        screen.queued = addon:FindQueueEntry(p.charKey, recipe.recipeID, p.tier,
+        screen.queued = order or addon:FindQueueEntry(p.charKey, recipe.recipeID, p.tier,
             tierInfo and tierInfo.concentrate == true or false)
         screen.queue:SetLabel(screen.queued and "Update queue" or "Add to queue")
+        -- An order's queued once, from the orders window
+        screen.queue:SetShown(not p.order)
         local tierIcon = tierInfo and (addon:TierIconText(tierInfo.tier, tierInfo.tierCount) .. " ") or ""
         if not tierInfo then
             -- A refine: the one quality it makes
@@ -2515,8 +2523,10 @@ local function CreatePlanScreen(parent)
             return
         end
 
+        -- An order: without what the customer provides, as the queue plans it
+        local planRecipe = order and addon:OrderRecipe(recipe, order.provided) or recipe
         local plan = addon:WithChoices(screen:Choices(), addon.WithCharacter, addon, p.charKey, addon.BuildPlan,
-            addon, recipe, quantity, true, tierInfo)
+            addon, planRecipe, quantity, true, tierInfo)
         -- With concentration, plan only the crafts it covers now, like the
         -- Craft button: 2 crafts were planned and shopped for with enough
         -- for 1 (user, 2026-10-12). The box keeps your number. Counted at
@@ -2532,7 +2542,7 @@ local function CreatePlanScreen(parent)
                     concLimit = { crafts = affordable, current = current }
                     local q = screen:PlannedItems(affordable)
                     local capped = addon:WithChoices(screen:Choices(), addon.WithCharacter, addon, p.charKey,
-                        addon.BuildPlan, addon, recipe, q, true, tierInfo)
+                        addon.BuildPlan, addon, planRecipe, q, true, tierInfo)
                     -- The mix for the crafts planned, not the number typed:
                     -- Make 30 picked one using less of the gold dust you
                     -- hold, though 2 crafts were planned (user, 2026-10-12)
@@ -2540,7 +2550,7 @@ local function CreatePlanScreen(parent)
                     local repick = base and not set and addon:WithCharacter(p.charKey, addon.ChooseMix, addon, recipe, base, q)
                     if repick and repick.scenario ~= tierInfo.scenario then
                         local again = addon:WithChoices(screen:Choices(), addon.WithCharacter, addon, p.charKey,
-                            addon.BuildPlan, addon, recipe, q, true, repick)
+                            addon.BuildPlan, addon, planRecipe, q, true, repick)
                         local full2 = repick.scenario and repick.scenario.concentration or repick.concentration
                         local fits = full2 and (full2 > 0 and math.floor(current / full2) or math.huge) or 0
                         if again.crafts <= fits then
@@ -2569,6 +2579,12 @@ local function CreatePlanScreen(parent)
                     end
                 end
             end
+        end
+        if order then
+            -- What the order pays, not what the item sells for (Queue.lua)
+            plan.revenue = (order.commission or 0) + (order.rewardsValue or 0)
+            plan.profit = plan.revenue - plan.cost
+            plan.margin = plan.cost > 0 and plan.profit / plan.cost * 100 or nil
         end
         screen.current = plan
         local nodes = addon:FlattenPlan(plan)
@@ -2659,7 +2675,15 @@ local function CreatePlanScreen(parent)
         screen.cost.note:SetText(costNote)
         screen.cost.note:SetTextColor(addon:Color(plan.complete and "muted" or "warning"))
 
-        if plan.price then
+        if order then
+            screen.sells.value:SetText(Money(plan.revenue))
+            screen.sells.value:SetTextColor(addon:Color("text"))
+            screen.sells.note:SetText("The order's commission and rewards")
+            screen.profit.value:SetText(Signed(plan.profit))
+            screen.profit.value:SetTextColor(addon:Color(addon:MoneyColor(plan.profit)))
+            screen.profit.note:SetText(plan.margin and (Roi(plan.margin) .. " ROI") or "")
+            screen.profit.note:SetTextColor(addon:Color("muted"))
+        elseif plan.price then
             screen.sells.value:SetText((plan.unconfirmed and UNCONFIRMED_ICON or "") .. Money(plan.revenue))
             screen.sells.value:SetTextColor(addon:Color("text"))
             local age = addon:PriceAgeText((tierInfo and tierInfo.itemID) or recipe.outputItemID)
