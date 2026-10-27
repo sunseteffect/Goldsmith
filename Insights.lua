@@ -1431,7 +1431,8 @@ end
 -- worked out per item name. Prices, stock and costs are per item (each
 -- quality tier is its own item); an item page can switch between tiers.
 
-local BOARD_SIZE = 6
+-- 8 fill a board; 6 left half of each empty (user, 2026-10-27)
+local BOARD_SIZE = 8
 local MIN_SALES_FOR_ROI = 2    -- sales before an item's ROI is ranked
 local PRICE_DAYS = 30
 
