@@ -318,13 +318,31 @@ local function Wearable(itemID)
 end
 -- Not worth a callout under this in all (2 Repair Hammers, +4.60g)
 local SELL_NOW_MIN_GOLD = 10 * 10000
+-- Posted in the last SELL_NOW_POSTED_HOURS, or on the AH now: already being
+-- sold. 2 Soul Cipher were told "sell now" right after they were posted
+-- (the stock count hadn't caught up; user, 2026-10-27).
+local SELL_NOW_POSTED_HOURS = 24
+local function PostedLately()
+    local names, since = {}, time() - SELL_NOW_POSTED_HOURS * 3600
+    local all = addon.ledger:getAll()
+    for i = #all, 1, -1 do
+        local e = all[i]
+        if e.timestamp and e.timestamp >= since and e.type == "COST" and e.kind == "DEPOSIT" and e.item then
+            names[e.item] = true
+        end
+    end
+    return names
+end
+
 function addon:GetSellNow()
     local list = {}
+    local posted = PostedLately()
     for _, item in ipairs(addon:GetStockValue("All").heldLong) do
         addon:Yield()
         -- Not gear or tools: one realm's listing that may never sell (an
         -- Apprentice Jeweler's Apron "above break-even" at 953g, 2026-10-27)
-        local price = not Wearable(item.itemID) and addon:GetAHPrice(item.itemID)
+        local selling = posted[item.name] or ListedNow(item.itemID)
+        local price = not selling and not Wearable(item.itemID) and addon:GetAHPrice(item.itemID)
         local cost, _, source = addon:GetUnitCostBasis(item.name, item.count, item.itemID)
         if price and cost and cost > 0 and (source == "crafted" or source == "paid") then
             local each = price * (1 - AH_CUT) - cost
@@ -345,13 +363,15 @@ end
 function addon:PrintSellNow()
     local M = function(c) return c and addon:FormatMoney(c) or "-" end
     local stock = addon:GetStockValue("All")
+    local posted = PostedLately()
     print(string.format("Goldsmith: %d held %d+ days, %d kept for yourself", #stock.heldLong,
         addon:Setting("heldDays"), #addon:GetKeptItems()))
     for _, item in ipairs(stock.heldLong) do
         local price = addon:GetAHPrice(item.itemID)
         local cost, _, source = addon:GetUnitCostBasis(item.name, item.count, item.itemID)
         local why
-        if Wearable(item.itemID) then why = "gear or a tool"
+        if posted[item.name] or ListedNow(item.itemID) then why = "posted in the last day or on the AH now"
+        elseif Wearable(item.itemID) then why = "gear or a tool"
         elseif not price then why = "no price"
         elseif not (cost and cost > 0) or (source ~= "crafted" and source ~= "paid") then why = "no real cost (" .. tostring(source) .. ")"
         else

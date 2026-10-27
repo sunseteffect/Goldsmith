@@ -44,6 +44,19 @@ addon:CheckSellNow()
 bench.Advance(2)
 bench.HasNot("once a day", bench.Chat(), "above break-even")
 
+-- On the AH already (just posted): not told again (2 Soul Cipher were,
+-- 2026-10-27)
+db.sellNowTold = {}
+local me = db.characters["Mysticmead-Sargeras"]
+me.auctions = me.auctions or {}
+me.auctions[item.itemID] = 1
+addon:DataChanged()
+addon:CheckSellNow()
+bench.Advance(2)
+bench.HasNot("listed on the AH: quiet", bench.Chat(), "above break-even")
+me.auctions[item.itemID] = nil
+addon:DataChanged()
+
 -- Kept for yourself (potions you use): off the Held board and Sell now
 addon:SetKept(item.itemID, item.name, true)
 local listed = false
