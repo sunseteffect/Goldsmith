@@ -3019,7 +3019,12 @@ local function SellerCost(itemName, units, itemID)
             if e.box then
                 each, free = (e.cost and (e.costQty or 0) > 0) and e.cost / e.costQty or 0, false
             elseif e.payout then
-                each, free = addon:GetMarketPrice(itemID) or 0, false
+                -- What it was worth when the bag gave it (the order counted
+                -- it then), as order rewards (RewardCost): today's price
+                -- made 5 Tranquility Bloom from a patron bag read -3.24g
+                -- (user, 2026-10-27)
+                each = (e.value and e.value > 0) and e.value / e.qty or addon:GetMarketPrice(itemID) or 0
+                free = false
             end
             list[#list + 1] = { time = e.time or 0, qty = e.qty, each = each, free = free }
         end
