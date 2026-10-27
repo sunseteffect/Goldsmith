@@ -90,6 +90,8 @@ function addon:ChangedSettings()
     if excluded > 0 then table.insert(list, excluded .. " characters excluded") end
     local ignored = #addon:GetIgnoredItems()
     if ignored > 0 then table.insert(list, ignored .. " items ignored") end
+    local kept = #addon:GetKeptItems()
+    if kept > 0 then table.insert(list, kept .. " items kept for yourself") end
     return list
 end
 
@@ -348,6 +350,35 @@ end
 function addon:GetIgnoredItems()
     local list = {}
     for itemID, entry in pairs(GoldsmithDB.ignored or {}) do
+        table.insert(list, { itemID = itemID, name = entry.name or C_Item.GetItemNameByID(itemID) or ("item " .. itemID) })
+    end
+    table.sort(list, function(a, b) return a.name < b.name end)
+    return list
+end
+
+-- Kept for yourself: things you hold to use, not to sell (health potions,
+-- an old soulbound apron; user, 2026-10-27). Left out of the Held board,
+-- held time and Sell now. Right-click one on the Held board; undo there
+-- or in Settings > Kept for yourself.
+-- GoldsmithDB.kept[itemID] = { name, time }
+function addon:IsKept(itemID)
+    return itemID ~= nil and GoldsmithDB.kept ~= nil and GoldsmithDB.kept[itemID] ~= nil
+end
+
+function addon:SetKept(itemID, name, kept)
+    if not itemID then return end
+    GoldsmithDB.kept = GoldsmithDB.kept or {}
+    GoldsmithDB.kept[itemID] = kept and { name = name, time = time() } or nil
+    addon:Notify("info", kept and "Keeping %s for yourself: it's left out of Held and Sell now. Undo in Settings > Kept for yourself."
+        or "%s counts as for sale again.", name or "that item")
+    addon:DataChanged()
+    if addon.RefreshWindow then addon.RefreshWindow() end
+end
+
+-- { { itemID, name } }, by name
+function addon:GetKeptItems()
+    local list = {}
+    for itemID, entry in pairs(GoldsmithDB.kept or {}) do
         table.insert(list, { itemID = itemID, name = entry.name or C_Item.GetItemNameByID(itemID) or ("item " .. itemID) })
     end
     table.sort(list, function(a, b) return a.name < b.name end)
@@ -840,6 +871,11 @@ local HELP = {
         "Its sales and purchases still count, and Goldsmith keeps recording it while you play it.",
         "The Characters tab has the same switch, and can remove a character you've deleted.",
     },
+    kept = {
+        "Kept for yourself",
+        "Things you keep to use, not to sell: left out of the Held board and Sell now.",
+        "Turn one off to count it as for sale again. To add one, right-click it on the Items tab's Held board.",
+    },
     ignored = {
         "Ignored crafts",
         "Crafts you've told Goldsmith to ignore: they're never suggested in Do this next and are hidden on the Crafts tab.",
@@ -916,6 +952,8 @@ local PAGES = {
       rows = { "minROI", "minLine", "dealPercent", "heldDays" } },
     { key = "ignored", label = "Ignored crafts", list = "ignored",
       intro = "Never suggested, and hidden on the Crafts tab. Turn one off to stop ignoring it. To ignore a craft, right-click it on the Crafts tab." },
+    { key = "kept", label = "Kept for yourself", list = "kept",
+      intro = "Things you keep to use, not to sell: left out of the Held board and Sell now. Turn one off to count it again. To add one, right-click it on the Items tab's Held board." },
     { key = "characters", label = "Characters", list = "characters",
       intro = "Turn a character off to leave it out of Gold in stock, concentration, total gold, the Crafts tab and Do this next: a bank alt, or one you've stopped playing. Its sales and purchases still count." },
     { group = "Auction House" },
@@ -1334,7 +1372,7 @@ function addon:CreateSettingsPanel(parent)
     end
 
     -- Characters and ignored crafts: a toggle each, made as needed
-    local listRows = { characters = {}, ignored = {} }
+    local listRows = { characters = {}, ignored = {}, kept = {} }
     local function ListRow(kind, i)
         local pool = listRows[kind]
         if pool[i] then return pool[i] end
@@ -1343,7 +1381,8 @@ function addon:CreateSettingsPanel(parent)
             if kind == "characters" then
                 addon:SetCharacterIncluded(row.charKey, on)
             else
-                addon:SetIgnored(row.itemID, row.titleText, on)
+                if kind == "kept" then addon:SetKept(row.itemID, row.titleText, on)
+                else addon:SetIgnored(row.itemID, row.titleText, on) end
             end
             panel:Update()
         end), kind)
@@ -1355,7 +1394,7 @@ function addon:CreateSettingsPanel(parent)
     end
     -- Ignored crafts are listed as they were when the page opened, so one
     -- turned off stays there to turn back on
-    local ignoredShown = {}
+    local ignoredShown, keptShown = {}, {}
 
     -- The dashboard
     local dash = CreateFrame("Frame", nil, content)
@@ -1559,6 +1598,8 @@ function addon:CreateSettingsPanel(parent)
             for _, entry in ipairs(addon:GetCharacters()) do table.insert(names, CharacterLabel(entry)) end
         elseif page.list == "ignored" then
             for _, entry in ipairs(addon:GetIgnoredItems()) do table.insert(names, entry.name) end
+        elseif page.list == "kept" then
+            for _, entry in ipairs(addon:GetKeptItems()) do table.insert(names, entry.name) end
         end
         return names
     end
@@ -1655,6 +1696,20 @@ function addon:CreateSettingsPanel(parent)
                 emptyText:SetText("Nothing ignored.")
                 Place(emptyText, 20)
             end
+        elseif page.list == "kept" then
+            for i, entry in ipairs(keptShown) do
+                local row = ListRow("kept", i)
+                row.itemID = entry.itemID
+                row.titleText = entry.name
+                row.title:SetText(entry.name)
+                row:SetDescription("")
+                row.control:SetOn(addon:IsKept(entry.itemID))
+                Place(row, ROW_HEIGHT)
+            end
+            if #keptShown == 0 then
+                emptyText:SetText("Nothing kept. Right-click something on the Items tab's Held board to add it.")
+                Place(emptyText, 20)
+            end
         else
             for _, key in ipairs(page.rows) do
                 if Applies(key) then Place(rows[key], ROW_HEIGHT) end
@@ -1673,6 +1728,7 @@ function addon:CreateSettingsPanel(parent)
     function Open(key)
         current = PAGE_BY_KEY[key] and key or "dashboard"
         if current == "ignored" then ignoredShown = addon:GetIgnoredItems() end
+        if current == "kept" then keptShown = addon:GetKeptItems() end
         query = ""
         search:SetText("")
         search:ClearFocus()

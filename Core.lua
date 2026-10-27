@@ -716,6 +716,8 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:SampleSound(rest)
     elseif cmd == "buylist" and GoldsmithDB.devTools then
         addon:PrintBuyList(rest)
+    elseif cmd == "sellnow" and GoldsmithDB.devTools then
+        addon:PrintSellNow()
     elseif cmd == "finishing" and GoldsmithDB.devTools then
         addon:PrintFinishing(rest)
     -- A harmless error from Goldsmith's own file, caught like a real one:

@@ -7,13 +7,20 @@ local bench = dofile(BENCH_DIR .. "bench.lua")
 local db = bench.LoadSaved()
 db.sellNowTold = nil
 local addon = bench.Login("Mysticmead", { db = db })
--- Everything held a while, under its break-even, so only the one raised
+-- Prices set here, whatever the saved scans say: everything held a while
+-- under its break-even, so only the one raised
 -- below counts
 local item
+local prices = {}
+local ahPrice = addon.GetAHPrice
+addon.GetAHPrice = function(self, itemID, ...)
+    if prices[itemID] then return prices[itemID] end
+    return ahPrice(self, itemID, ...)
+end
 for _, held in ipairs(addon:GetStockValue("All").heldLong) do
     local cost, _, source = addon:GetUnitCostBasis(held.name, held.count, held.itemID)
     if cost and cost > 0 then
-        db.ownScan.prices[held.itemID] = { math.floor(cost * 0.9) }
+        prices[held.itemID] = math.floor(cost * 0.9)
         if not item and not addon:IsGear(held.itemID) and (source == "crafted" or source == "paid") then
             item = { itemID = held.itemID, name = held.name, cost = cost }
         end
@@ -27,7 +34,7 @@ bench.Advance(2)
 bench.HasNot("under break-even: quiet", bench.Chat(), "above break-even")
 
 -- Over it: told once
-db.ownScan.prices[item.itemID] = { math.floor(item.cost * 1.3) }
+prices[item.itemID] = math.floor(item.cost * 1.3)
 addon:DataChanged()
 addon:CheckSellNow()
 bench.Advance(2)
@@ -36,6 +43,16 @@ bench.HasNot("no sound", bench.Calls(), "PlaySound(")
 addon:CheckSellNow()
 bench.Advance(2)
 bench.HasNot("once a day", bench.Chat(), "above break-even")
+
+-- Kept for yourself (potions you use): off the Held board and Sell now
+addon:SetKept(item.itemID, item.name, true)
+local listed = false
+for _, s in ipairs(addon:GetSellNow()) do if s.itemID == item.itemID then listed = true end end
+bench.Check("kept: not in Sell now", not listed)
+local onBoard = false
+for _, h in ipairs(addon:GetStockValue("All").heldLong) do if h.itemID == item.itemID then onBoard = true end end
+bench.Check("kept: not held for sale", not onBoard)
+addon:SetKept(item.itemID, item.name, false)
 
 addon:ToggleWindow()
 addon:ShowTab("overview")

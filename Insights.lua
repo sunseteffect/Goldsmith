@@ -270,6 +270,7 @@ end
 local function IsForSale(itemID, name, materials)
     local lots = GoldsmithDB.craftLots[itemID]
     if not lots or #lots == 0 then return false end
+    if addon:IsKept(itemID) then return false end
     if addon:CanAuction(itemID) == false or addon:IsVendorItem(itemID) then return false end
     materials = materials or addon:GetTrackedMaterials()
     if materials[itemID] then
@@ -309,6 +310,14 @@ end
 -- the post warning, and a profit of at least SELL_NOW_MIN of the cost and
 -- SELL_NOW_MIN_GOLD in all.
 local SELL_NOW_MIN = 0.02
+-- Gear, tools and accessories: anything that can be equipped. The class
+-- alone missed an Apprentice Jeweler's Apron and a Repair Hammer in game
+-- (both told "sell now", 2026-10-27).
+local function Wearable(itemID)
+    if addon:IsGear(itemID) then return true end
+    local equipLoc = select(4, C_Item.GetItemInfoInstant(itemID))
+    return equipLoc ~= nil and equipLoc ~= "" and equipLoc ~= "INVTYPE_NON_EQUIP_IGNORE"
+end
 -- Not worth a callout under this in all (2 Repair Hammers, +4.60g)
 local SELL_NOW_MIN_GOLD = 10 * 10000
 function addon:GetSellNow()
@@ -317,7 +326,7 @@ function addon:GetSellNow()
         addon:Yield()
         -- Not gear or tools: one realm's listing that may never sell (an
         -- Apprentice Jeweler's Apron "above break-even" at 953g, 2026-10-27)
-        local price = not addon:IsGear(item.itemID) and addon:GetAHPrice(item.itemID)
+        local price = not Wearable(item.itemID) and addon:GetAHPrice(item.itemID)
         local cost, _, source = addon:GetUnitCostBasis(item.name, item.count, item.itemID)
         if price and cost and cost > 0 and (source == "crafted" or source == "paid") then
             local each = price * (1 - AH_CUT) - cost
@@ -330,6 +339,32 @@ function addon:GetSellNow()
     end
     table.sort(list, function(a, b) return a.gain > b.gain end)
     return list
+end
+
+-- /gsm sellnow (dev tools): each held item, its price and break-even, and
+-- why Sell now did or didn't name it (2026-10-27: no line after a scan,
+-- and the bench's prices weren't the game's)
+function addon:PrintSellNow()
+    local M = function(c) return c and addon:FormatMoney(c) or "-" end
+    local stock = addon:GetStockValue("All")
+    print(string.format("Goldsmith: %d held %d+ days, %d kept for yourself", #stock.heldLong,
+        addon:Setting("heldDays"), #addon:GetKeptItems()))
+    for _, item in ipairs(stock.heldLong) do
+        local price = addon:GetAHPrice(item.itemID)
+        local cost, _, source = addon:GetUnitCostBasis(item.name, item.count, item.itemID)
+        local why
+        if Wearable(item.itemID) then why = "gear or a tool"
+        elseif not price then why = "no price"
+        elseif not (cost and cost > 0) or (source ~= "crafted" and source ~= "paid") then why = "no real cost (" .. tostring(source) .. ")"
+        else
+            local each = price * (1 - AH_CUT) - cost
+            why = each < cost * SELL_NOW_MIN and "under break-even"
+                or each * item.count < SELL_NOW_MIN_GOLD and "under 10g in all"
+                or ("SELL NOW " .. addon:FormatSignedMoney(each * item.count))
+        end
+        print(string.format("  %d %s: price %s, break-even %s, held %d days: %s", item.count, item.name, M(price),
+            M(cost and cost / (1 - AH_CUT)), math.floor((time() - item.heldSince) / 86400), why))
+    end
 end
 
 -- New prices (login, Goldsmith's scan, an Auctionator scan): say so for

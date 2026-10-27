@@ -250,8 +250,22 @@ local function CreateBoard(parent, def)
         row.name:SetPoint("RIGHT", row.value, "LEFT", -10, 0)
         -- The row can lose its item under the mouse when the board refills
         -- (a hover redraw then found nothing)
-        row:SetScript("OnClick", function(self)
-            if self.item then addon:OpenItem(self.item.name, self.item.itemID) end
+        row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        row:SetScript("OnClick", function(self, button)
+            if not self.item then return end
+            -- Held: right-click to say you keep it for yourself (potions
+            -- to use; user, 2026-10-27)
+            if button == "RightButton" and def.key == "held" then
+                local item = self.item
+                if MenuUtil and MenuUtil.CreateContextMenu then
+                    MenuUtil.CreateContextMenu(self, function(_, root)
+                        root:CreateTitle(item.name)
+                        root:CreateButton("Keeping these (not for sale)", function() addon:SetKept(item.itemID, item.name, true) end)
+                    end)
+                end
+                return
+            end
+            addon:OpenItem(self.item.name, self.item.itemID)
         end)
         UI.SetTooltip(row, function(tooltip, self)
             if not self.item then return end
@@ -259,6 +273,7 @@ local function CreateBoard(parent, def)
             addon:AddItemDescription(tooltip, self.item.itemID)
             def.tooltip(tooltip, self.item)
             addon:ClickHint(tooltip, "Click to open its page.")
+            if def.key == "held" then addon:ClickHint(tooltip, "Right-click if you keep these for yourself.") end
         end)
         board.rows[i] = row
     end
