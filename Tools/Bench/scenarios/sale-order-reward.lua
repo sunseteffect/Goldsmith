@@ -50,10 +50,14 @@ for i = 1, 2 do
     bench.Advance(2)
     for _, l in ipairs(bench.Chat()) do table.insert(seen, l) end
 end
-bench.Has("rune line: profit over the order's value", seen,
-    string.format("Sold %s: +%.2fg", RUNE, (bench.Gold(1115.92) - counted) / 10000), true)
-bench.HasNot("total leaves nothing out", seen, "no cost not counted", true)
-bench.Has("a total", seen, "Total profit:", true)
+-- The rune's sale in History: its profit over what the order counted
+local runeSale
+for _, e in ipairs(addon.ledger:getAll()) do
+    if e.type == "REVENUE" and e.item == RUNE and e.totalCopper == bench.Gold(1115.92) and e.quantity == 1 and e.id ~= -1 then runeSale = e end
+end
+bench.Equal("rune sale costed as a reward", runeSale and runeSale.costSource, "reward")
+bench.Near("rune sale's profit: over the order's value", runeSale and (runeSale.totalCopper - runeSale.costBasis) or 0,
+    bench.Gold(1115.92) - counted, 1)
 
 -- An old sale takes the orders finished before it, not later ones; a
 -- sale from before any order Goldsmith saw a rune from keeps no cost

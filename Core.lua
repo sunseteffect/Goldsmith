@@ -125,19 +125,20 @@ local pendingSales = {}
 local knownMoney = nil
 local SALE_TIMEOUT = 15
 
--- After the sale lines, their total profit (user, 2026-10-27: "after we
--- display all of the lines can we have a total profit?"): once no AH sale
--- is left in the mailbox, or it closes, for two or more sales. Sales with
--- no cost aren't in it; the line says how many.
+-- After the sale lines, the gold they brought in (user, 2026-10-27:
+-- "after we display all of the lines can we have a total"): once no AH
+-- sale is left in the mailbox, or it closes, for two or more sales.
+-- What it sold for, not profit: a sale's profit depends on where the item
+-- came from (crafted, bought, a patron bag, an order's reward), which a
+-- chat line can't explain; History does (user, 2026-10-27: "a can of
+-- worms of complexity and questions and confusion").
 local TOTAL_CHECK = 1
 local saleRun
 local function FlushSaleRun()
     local r = saleRun
     saleRun = nil
-    if not r or r.costed + r.uncosted < 2 or r.costed == 0 then return end
-    addon:Notify("money", "Total profit: %s%s", addon:Colorize((r.profit >= 0 and "+" or "-")
-        .. addon:FormatMoney(math.abs(r.profit)), addon:MoneyColor(r.profit)),
-        r.uncosted > 0 and string.format(" (%d with no cost not counted)", r.uncosted) or "")
+    if not r or r.sales < 2 then return end
+    addon:Notify("money", "Total: %s", addon:Colorize(addon:FormatMoney(r.gold), "profit"))
 end
 local function SalesLeftInMail()
     local shown, total = GetInboxNumItems()
@@ -148,13 +149,9 @@ local function SalesLeftInMail()
     end
     return false
 end
-local function AddToSaleRun(profit)
-    saleRun = saleRun or { profit = 0, costed = 0, uncosted = 0 }
-    if profit then
-        saleRun.profit, saleRun.costed = saleRun.profit + profit, saleRun.costed + 1
-    else
-        saleRun.uncosted = saleRun.uncosted + 1
-    end
+local function AddToSaleRun(gold)
+    saleRun = saleRun or { gold = 0, sales = 0 }
+    saleRun.gold, saleRun.sales = saleRun.gold + gold, saleRun.sales + 1
     C_Timer.After(TOTAL_CHECK, function() addon:CheckSaleTotal() end)
 end
 function addon:FlushSaleTotal() FlushSaleRun() end
@@ -179,19 +176,11 @@ local function RecordSale(sale)
         costBasis and costSource, itemID, { soldAt = sale.soldAt })
     addon:AuctionSold(sale.itemName, sale.count, itemID)
 
-    -- One line: the item and its profit (user, 2026-10-27: "i don't care
-    -- about the quantity ... just tell me the profit"). History has the
-    -- rest. With no cost known, what it sold for.
-    if costBasis then
-        local profit = sale.net - costBasis
-        local text = string.format("%s%.2fg", profit >= 0 and "+" or "-", math.abs(profit) / 10000)
-        addon:Notify("money", "Sold %s: %s%s", sale.itemName, addon:Colorize(text, addon:MoneyColor(profit)),
-            partial and " at most" or "")
-        AddToSaleRun(profit)
-    else
-        addon:Notify("money", "Sold %s for %.2fg", sale.itemName, sale.net / 10000)
-        AddToSaleRun(nil)
-    end
+    -- One line: the item and the gold it brought in (user, 2026-10-27:
+    -- "its too much text"). Its profit is in History, which explains it
+    -- (see the total above).
+    addon:Notify("money", "Sold %s: %s", sale.itemName, addon:Colorize(addon:FormatMoney(sale.net), "profit"))
+    AddToSaleRun(sale.net)
 end
 
 local function OnTakeMailMoney(index)
@@ -750,23 +739,15 @@ end)
 
 MailSummary = function()
     mailSummed = true
-    local shown, total = GetInboxNumItems()
-    local earned, sales, spent, buys = 0, 0, 0, 0
+    -- Sales aren't summed here any more: the Total after their lines says
+    -- it (RecordSale; user, 2026-10-27)
+    local shown = GetInboxNumItems()
+    local spent, buys = 0, 0
     for i = 1, shown or 0 do
-        local _, _, _, _, money = GetInboxHeaderInfo(i)
         local invoiceType, _, _, bid = GetInboxInvoiceInfo(i)
-        if invoiceType == "seller" and money and money > 0 then
-            earned, sales = earned + money, sales + 1
-        elseif invoiceType == "buyer" and bid then
+        if invoiceType == "buyer" and bid then
             spent, buys = spent + bid, buys + 1
         end
-    end
-    if sales == 0 and buys == 0 then return end
-    local more = total and shown and total > shown
-        and string.format(" (the first %d of %d mails; more show as you empty it)", shown, total) or ""
-    if sales > 0 then
-        addon:Notify("money", "Mailbox: |cFF33DD55+%s|r from %d AH sale%s%s", addon:FormatMoney(earned),
-            sales, sales == 1 and "" or "s", more)
     end
     if buys > 0 then
         addon:Notify("money", "Mailbox: %s spent on %d AH purchase%s waiting in it", addon:FormatMoney(spent),

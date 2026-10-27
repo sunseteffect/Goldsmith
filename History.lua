@@ -430,8 +430,12 @@ local function Refresh(view, state)
     end
     view.list:SetItems(shown)
     state.loading:Done(view.list)
-    view.summary:SetText(string.format("%d entr%s  ·  in %s  ·  out %s", #rows, #rows == 1 and "y" or "ies",
-        addon:Colorize(Money(totals.goldIn), "profit"), addon:Colorize(Money(totals.goldOut), "loss")))
+    -- A side with nothing in it is left out: Sales alone read "out 0.00g",
+    -- as if something were broken (user, 2026-10-27)
+    local summary = { string.format("%d entr%s", #rows, #rows == 1 and "y" or "ies") }
+    if totals.goldIn > 0 then table.insert(summary, "in " .. addon:Colorize(Money(totals.goldIn), "profit")) end
+    if totals.goldOut > 0 then table.insert(summary, "out " .. addon:Colorize(Money(totals.goldOut), "loss")) end
+    view.summary:SetText(table.concat(summary, "  ·  "))
 
     local notes = {}
     for _, row in ipairs(rows) do
