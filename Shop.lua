@@ -141,8 +141,9 @@ local function OwnStockNote(entry, unit)
     if not who or OwnQueueUses(entry.itemID) then return nil end
     -- Already counted (UseOwnStock): only the rest is bought
     if entry.fromBags then
-        return string.format("Your %d %s count too: mail them to %s with these.",
-            entry.fromBags, entry.name or "of these", who)
+        local one = entry.fromBags == 1
+        return string.format("Your %d %s %s too: mail %s to %s with these.",
+            entry.fromBags, entry.name or "of these", one and "counts" or "count", one and "it" or "them", who)
     end
     local have = (C_Item.GetItemCount(entry.itemID, true, false, true, false) or 0)
         - (addon.ReservedCount and addon:ReservedCount(entry.itemID) or 0)
