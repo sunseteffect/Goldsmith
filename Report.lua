@@ -93,6 +93,7 @@ local function Record(message, stack)
     for i = #log, MAX_ERRORS + 1, -1 do log[i] = nil end
 
     sessionCount = sessionCount + 1
+    C_Timer.After(0, function() addon:UpdateErrorDots() end)
     if not told then
         told = true
         -- Next frame: printing from inside an error handler can fail
@@ -141,9 +142,50 @@ function addon:GetSessionErrorCount()
     return sessionCount
 end
 
+-- A red dot on the window's Settings button, the Support entry and its
+-- dashboard card while an error is newer than your last look at Support
+-- (user, 2026-10-27: "like a notification icon"). Opening Support or the
+-- bug report clears it (GoldsmithDB.errorsSeen).
+local dots = {}
+
+function addon:HasNewErrors()
+    if not GoldsmithDB then return false end
+    local seen = GoldsmithDB.errorsSeen or 0
+    for _, e in ipairs(Log()) do
+        if (e.last or 0) > seen then return true end
+    end
+    return false
+end
+
+function addon:UpdateErrorDots()
+    local show = addon:HasNewErrors()
+    for _, dot in ipairs(dots) do dot:SetShown(show) end
+end
+
+-- A dot at the frame's top right corner
+function addon:ErrorDot(frame, x, y)
+    local dot = frame:CreateTexture(nil, "OVERLAY", nil, 7)
+    dot:SetSize(9, 9)
+    dot:SetPoint("CENTER", frame, "TOPRIGHT", x or -3, y or -3)
+    dot:SetColorTexture(addon:Color("loss"))
+    local mask = frame:CreateMaskTexture()
+    mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    mask:SetAllPoints(dot)
+    dot:AddMaskTexture(mask)
+    table.insert(dots, dot)
+    dot:SetShown(addon:HasNewErrors())
+    return dot
+end
+
+function addon:MarkErrorsSeen()
+    if GoldsmithDB then GoldsmithDB.errorsSeen = time() end
+    addon:UpdateErrorDots()
+end
+
 function addon:ClearErrors()
     wipe(Log())
     sessionCount = 0
+    addon:UpdateErrorDots()
 end
 
 -- The report

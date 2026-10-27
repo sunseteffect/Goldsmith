@@ -1240,6 +1240,8 @@ function addon:CreateSettingsPanel(parent)
             b:SetScript("OnEnter", MarkNav)
             b:SetScript("OnLeave", function() C_Timer.After(0, MarkNav) end)
             navButtons[page.key] = b
+            -- Errors you haven't looked at (Report.lua)
+            if page.key == "support" then addon:ErrorDot(b, -6, -12) end
             y = y - 26
         end
     end
@@ -1380,6 +1382,7 @@ function addon:CreateSettingsPanel(parent)
         Card("Interface\\Icons\\INV_Misc_Map_01", "Take the tour", function() panel:Hide(); addon:StartTour() end),
         Card("Interface\\Icons\\INV_Misc_Note_01", "Getting started", function() panel:Hide(); addon:ShowSetup() end),
     }
+    addon:ErrorDot(cards[2], -8, -8)
     -- Help, Support and the bug report, as pages (Help and Support below,
     -- the report in Report.lua)
     local pages = {
@@ -1669,6 +1672,7 @@ function addon:CreateSettingsPanel(parent)
         Layout()
         -- A new report each time, selected to copy
         if current == "report" then pages.report:Fill() end
+        if current == "support" or current == "report" then addon:MarkErrorsSeen() end
     end
     panel.Open = function(_, key) Open(key) end
     panel.Search = function(_, text) query = text or ""; UpdateRows(); Layout() end

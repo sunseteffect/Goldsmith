@@ -595,6 +595,8 @@ function addon:CreateWindow()
         settings:SetShown(not settings:IsShown())
     end)
     settingsButton:SetPoint("RIGHT", -8, 0)
+    -- Red while Goldsmith has hit an error you haven't seen (Report.lua)
+    addon:ErrorDot(settingsButton)
     -- Above the tab bar, which spans the whole row
     settingsButton:SetFrameLevel(tabBar:GetFrameLevel() + 5)
 
@@ -623,6 +625,10 @@ function addon:CreateWindow()
     UI.SetTooltip(settingsButton, function(tooltip)
         tooltip:AddLine("Settings", 1, 1, 1)
         tooltip:AddLine("Costs, prices and thresholds, item tooltips, chat messages, which characters count, and Help.", 0.8, 0.8, 0.8, true)
+        if addon:HasNewErrors() then
+            local r, g, b = addon:Color("loss")
+            tooltip:AddLine("Goldsmith hit an error: Support and feedback has a bug report to copy.", r, g, b, true)
+        end
     end, "ANCHOR_BOTTOM")
 
     -- Screens
