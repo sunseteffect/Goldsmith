@@ -708,7 +708,7 @@ function addon:BuyNext()
     -- AH (nothing to buy, and everyone knows it) does nothing (user,
     -- 2026-10-25)
     if not addon:Setting("ahScan") or not ahOpen then return end
-    if buying or asking then return end
+    if buying or asking or addon:PurchaseSettling() then return end
     if addon:IsScanning() then
         -- No sound: the panel says so too; sounds are for what matters
         -- (user, 2026-10-25)

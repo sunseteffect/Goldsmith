@@ -31,6 +31,12 @@ end
 -- Every commodity purchase is recorded so average costs are available for any
 -- reagent; items not in a tracked list are saved as Unassigned.
 local function OnConfirmCommoditiesPurchase(itemID, quantity)
+    -- The last purchase, still waiting for its gold to settle: recorded now,
+    -- or this one replaces it and it's never saved (Bazaar Bites and Blood
+    -- Hunter bought back to back went missing, 2026-10-27)
+    if pending and awaitingMoney and GetMoney() < pending.moneyBefore then
+        addon:RecordPurchase()
+    end
     local itemData = addon.INSCRIPTION_ITEMS[itemID]
     local name = (itemData and itemData.name) or C_Item.GetItemNameByID(itemID)
     if not name then
@@ -43,8 +49,19 @@ local function OnConfirmCommoditiesPurchase(itemID, quantity)
         name = name,
         quantity = quantity,
         moneyBefore = GetMoney(),
+        -- Buy next's plan for it, kept with it: the next purchase's would
+        -- replace it before this one is recorded
+        planned = addon.buyNextPlanned,
     }
+    addon.buyNextPlanned = nil
     awaitingMoney = false
+end
+
+-- Bought, its gold not settled yet: Buy next waits (the press is ignored)
+-- so the next purchase's gold can't be counted as this one's. A few
+-- seconds at most, in case the gold never moves.
+function addon:PurchaseSettling()
+    return pending ~= nil and awaitingMoney and GetTime() - (pending.succeeded or 0) < 5
 end
 
 function addon:RecordPurchase()
@@ -61,8 +78,7 @@ function addon:RecordPurchase()
     -- Bought with Buy next: how far from the plan, in all (user, 2026-10-19:
     -- "show the variance in price we paid vs the plan. keep it short"; the
     -- difference reads quicker than the plan's price each)
-    local planned = addon.buyNextPlanned
-    addon.buyNextPlanned = nil
+    local planned = p.planned
     local plannedText = ""
     if planned and planned.itemID == p.itemID and planned.quantity == p.quantity and planned.cost then
         local diff = spent - planned.cost
@@ -526,6 +542,7 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         -- for 220.32g were saved as 206.77g, recorded at the first drop
         -- (2026-10-19). Recorded once it has been still for a moment.
         awaitingMoney = true
+        pending.succeeded = GetTime()
         SettleMoney()
 
     elseif event == "COMMODITY_PURCHASE_FAILED" then
