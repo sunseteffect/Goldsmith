@@ -8,6 +8,7 @@
 local bench = dofile(BENCH_DIR .. "bench.lua")
 local KEY = "Mysticmead-Sargeras"
 local db = bench.LoadSaved()
+db.settings.autoScan = false -- a scan older than an hour would start one on opening the AH
 local ids = {}
 for id, r in pairs(db.recipes) do ids[r.outputName or "?"] = ids[r.outputName or "?"] or id end
 db.queues[KEY] = {
@@ -55,5 +56,6 @@ local small = { plan = { nodes = {}, cost = bench.Gold(100), marketCost = bench.
 bench.Check("a 13g gap under 10% of the profit is starred", addon:QueueRowGap(small) ~= nil)
 bench.Has("footer: profit at today's prices", screen,
     addon:FormatSignedMoney(q.profit + gap) .. " at today's prices")
-bench.Has("footer: why, starred", screen, "* You paid " .. addon:FormatMoney(math.abs(gap)) .. " less for")
+-- More or less depends on what the saved data holds
+bench.Has("footer: why, starred", screen, "* You paid " .. addon:FormatMoney(math.abs(gap)) .. (gap > 0 and " more for" or " less for"))
 bench.Done()

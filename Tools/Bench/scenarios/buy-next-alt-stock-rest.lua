@@ -6,6 +6,7 @@ local AZEROOT = 236774
 local AZEROOT_TEA = 1226197
 
 local db = bench.LoadSaved()
+db.settings.autoScan = false -- a scan older than an hour would start one on opening the AH
 db.settings.buyFor = "all"
 db.queues = {}
 db.queues["Mysticmead-Sargeras"] = { { recipeID = AZEROOT_TEA, quantity = 8, made = 0, added = os.time() } }

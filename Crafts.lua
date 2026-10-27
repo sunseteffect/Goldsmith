@@ -277,7 +277,10 @@ local function FillCraftRow(row, item)
     -- Without TSM: Goldsmith Data's sell level (Sells, Slow, Hardly sells)
     -- instead of a number
     local level = not addon:HasTSM() and addon:GetSellLevel(item.itemID)
-    if level then
+    if not info.demand and addon:IsOpenedBox(item.itemID) then
+        cells.demand:SetText(addon.OPENS_TEXT)
+        cells.demand:SetTextColor(addon:Color("text"))
+    elseif level then
         cells.demand:SetText(addon:SellLevelText(level))
         cells.demand:SetTextColor(addon:Color(addon:SellLevelColor(level)))
     elseif not info.demand and (info.unconfirmed or info.doubtPrice) then
@@ -497,7 +500,11 @@ local function CraftTooltip(tooltip, item)
     if item.tier then TopTierOutOfReach(tooltip, item) end
     -- Without TSM: how well it sells (Goldsmith Data)
     local sellLevel = not addon:HasTSM() and addon:GetSellLevel(item.itemID)
-    if sellLevel then
+    if not info.demand and addon:IsOpenedBox(item.itemID) then
+        local _, opened = addon:GetBoxValue(item.itemID)
+        Line(tooltip, "Sells", "Bound: you open it")
+        Why(tooltip, string.format("Its profit is the average of what came out over %d openings, and those sell.", opened))
+    elseif sellLevel then
         Line(tooltip, "Sells", addon:SellLevelText(sellLevel) .. " (Goldsmith Data, last 7 days)",
             addon:SellLevelColor(sellLevel))
         Why(tooltip, "From the region's AH every hour: how often it sells, and how much is listed near the lowest price. Sells: often, with little stock ahead of you. Slow: now and then. Hardly sells: rarely.")

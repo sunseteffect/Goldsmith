@@ -1219,6 +1219,14 @@ function addon:CanAuction(itemID)
     return not UNSELLABLE_BINDS[facts.bind]
 end
 
+-- A bound box you craft and open (Bouquet of Herbs): no sales of its own,
+-- so the sales column says "Opens", not "-" (read as missing data, user,
+-- 2026-10-27)
+addon.OPENS_TEXT = "Opens"
+function addon:IsOpenedBox(itemID)
+    return addon:CanAuction(itemID) == false and addon:GetBoxValue(itemID) ~= nil
+end
+
 -- Recipes
 
 -- Recipes are saved automatically when you craft them, from the game's own

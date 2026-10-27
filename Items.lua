@@ -555,8 +555,13 @@ local function AddSales(items)
 end
 
 local function FillSalesCells(c, item)
-    c.demand:SetText(addon:FormatDemand(item.demand))
-    c.demand:SetTextColor(addon:Color(addon:DemandColor(item.demand, item.itemID)))
+    if not item.demand and addon:IsOpenedBox(item.itemID) then
+        c.demand:SetText(addon.OPENS_TEXT)
+        c.demand:SetTextColor(addon:Color("text"))
+    else
+        c.demand:SetText(addon:FormatDemand(item.demand))
+        c.demand:SetTextColor(addon:Color(addon:DemandColor(item.demand, item.itemID)))
+    end
     -- Not there without TSM (see AvailableColumns)
     if c.saleRate then
         c.saleRate:SetText(addon:FormatSaleRate(item.saleRate))
