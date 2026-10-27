@@ -1845,7 +1845,10 @@ function addon:GetItemDetails(name, itemID)
     -- A material you also craft: what yours cost you covers your crafts and
     -- purchases together (shown as "Yours cost you"); the crafts alone made
     -- Mote of Light's break-even 2.34g against 0.60g (2026-10-11)
-    local yours = (not d.material) and d.yours or nil
+    -- Only while you hold some: with all of them sold, your last crafts' cost
+    -- (Harandar Celebration, 105.83g on Oct 19) judged today's at 67g
+    -- (user, 2026-10-27). The next ones cost the estimate.
+    local yours = (not d.material) and (d.have or 0) > 0 and d.yours or nil
     local basis = yours or paid or (not d.free and d.estimated) or nil
     d.breakEvenFrom = (yours and "yours") or (paid and "paid")
         or (basis and "estimated")

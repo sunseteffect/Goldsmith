@@ -1064,14 +1064,17 @@ local function CreatePage(parent)
         end
         if d.recipe and not d.material then
             if d.yours then
-                r[1]:Set("Yours cost you", Money(d.yours), "text", "your latest crafts of it")
+                r[1]:Set("Yours cost you", Money(d.yours), "text",
+                    (d.have or 0) > 0 and "your latest crafts of it" or "your last crafts, all sold")
             else
                 r[1]:Set("Yours cost you", "-", "dim", "not crafted yet")
             end
             r[2]:Set("Estimated", d.estimated and (Money(d.estimated) .. (d.partial and "+" or "")) or "-", "text",
                 StatsText(d.stats, d.finishing))
             r[3]:Set("Worst case", d.worst and Money(d.worst) or "-", "muted", "no procs or finishing reagents")
-            if d.yours then ProfitNow(r[4], d.yours, "what yours cost") else ProfitNow(r[4], d.estimated, "the estimate") end
+            -- Held ones at what they cost, else what the next ones will
+            if d.yours and (d.have or 0) > 0 then ProfitNow(r[4], d.yours, "what yours cost")
+            else ProfitNow(r[4], d.estimated, "the estimated cost") end
         else
             local sources = { paid = "bought", milled = "milled", crafted = "crafted",
                               gathered = "gathered (at the AH price)" }
