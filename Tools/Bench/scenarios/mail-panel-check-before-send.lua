@@ -11,7 +11,7 @@ local tsmMail = true
 TSM_API = { IsUIVisible = function(ui) return ui == "MAILING" and tsmMail end }
 bench.Login("Maddoxynn", { db = db })
 bench.world.bank[AZEROOT], bench.world.bank[AZEROOT + 1] = nil, nil
-bench.SetBags({ [AZEROOT] = 8, [AZEROOT + 1] = nil })
+bench.SetBags({ [AZEROOT] = 8, [AZEROOT + 1] = 0 })
 
 bench.OpenMail()
 MailFrame:Hide()

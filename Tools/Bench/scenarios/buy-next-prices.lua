@@ -20,7 +20,7 @@ for _, c in pairs(db.characters) do
 end
 if db.warbandStock then db.warbandStock[AZEROOT], db.warbandStock[AZEROOT + 1] = nil, nil end
 local addon = bench.Login("Mysticmead", { db = db })
-bench.SetBags({ [AZEROOT] = nil, [AZEROOT + 1] = nil, [242644] = 20 }) -- the tea's Mana-Wyrm Essence held
+bench.SetBags({ [AZEROOT] = 0, [AZEROOT + 1] = 0, [242644] = 20 }) -- the tea's Mana-Wyrm Essence held
 
 addon:BuyNext()
 bench.OpenAH()

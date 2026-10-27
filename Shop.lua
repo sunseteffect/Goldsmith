@@ -139,6 +139,11 @@ local function OwnStockNote(entry, unit)
     end
     local who = ForWhom(entry)
     if not who or OwnQueueUses(entry.itemID) then return nil end
+    -- Already counted (UseOwnStock): only the rest is bought
+    if entry.fromBags then
+        return string.format("Your %d %s count too: mail them to %s with these.",
+            entry.fromBags, entry.name or "of these", who)
+    end
     local have = (C_Item.GetItemCount(entry.itemID, true, false, true, false) or 0)
         - (addon.ReservedCount and addon:ReservedCount(entry.itemID) or 0)
     if have <= 0 then return nil end
@@ -635,6 +640,41 @@ local function MergeQueue(into, other, key)
     end
 end
 
+-- What you hold that no queued craft of yours uses goes to the others
+-- first: only the rest is bought, and the mailbox panel lists yours with
+-- it. Holding 1 Arcanoweave Bolt, Buy next bought 6 for Maddoxynn's 6
+-- (user, 2026-10-27: "i should only need to buy 5"). Same count as the
+-- mailbox panel's (MailJobs).
+local function UseOwnStock(plan)
+    for i = #plan.buyAH, 1, -1 do
+        local e = plan.buyAH[i]
+        local mine = false
+        for _, part in ipairs(e.parts or {}) do
+            if part.key == addon.charKey and part.quantity > 0 then mine = true end
+        end
+        local spare = 0
+        if not mine and not OwnQueueUses(e.itemID) then
+            -- Bought and still in the mailbox counts: what's set aside for
+            -- others is mostly there
+            spare = math.max((C_Item.GetItemCount(e.itemID, true, false, true, false) or 0)
+                + addon:InMailCount(e.itemID) - addon:ReservedCount(e.itemID), 0)
+        end
+        local used = math.min(spare, e.quantity)
+        if used > 0 then
+            local left = used
+            for _, part in ipairs(e.parts) do
+                local n = math.min(left, part.quantity)
+                part.quantity, left = part.quantity - n, left - n
+            end
+            local unit = e.quantity > 0 and (e.cost or 0) / e.quantity or 0
+            e.quantity = e.quantity - used
+            e.cost = unit * e.quantity
+            e.fromBags = used
+            if e.quantity <= 0 then table.remove(plan.buyAH, i) end
+        end
+    end
+end
+
 -- Excluded characters too: a queue is something you asked for. Leaving
 -- them out kept the All queues box hidden while the note said to tick it,
 -- so there was no way to buy for them (user, 2026-10-24)
@@ -655,6 +695,7 @@ local function PlanQueue()
         if #others > 0 then
             for _, e in ipairs(plan.buyAH) do e.parts = { { key = addon.charKey, quantity = e.quantity } } end
             for _, key in ipairs(others) do MergeQueue(plan, addon:BuildQueue(key), key) end
+            UseOwnStock(plan)
         end
     end
     local mailed = {}

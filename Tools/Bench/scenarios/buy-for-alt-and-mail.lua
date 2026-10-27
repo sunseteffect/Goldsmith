@@ -18,11 +18,14 @@ myst.stock[242644] = 20
 db.ownScan.prices[db.recipes[AZEROOT_TEA].outputItemID] = { 50 * 10000 }
 db.searchPrices = {}
 db.inMail["Mysticmead-Sargeras"] = {}
+-- Nothing of the buyer's in the mail: it would count toward the order
+db.inMail["Maddoxynn-Sargeras"] = {}
+db.boughtFor = {}
 
 local addon = bench.Login("Maddoxynn", { db = db })
 -- None held anywhere, whatever the last login saved
 bench.world.bank[AZEROOT], bench.world.bank[AZEROOT + 1] = nil, nil
-bench.SetBags({ [AZEROOT] = nil, [AZEROOT + 1] = nil })
+bench.SetBags({ [AZEROOT] = 0, [AZEROOT + 1] = 0 })
 bench.OpenAH()
 bench.Has("Buy next names the item", bench.Screen(), "Buy 8 Azeroot")
 

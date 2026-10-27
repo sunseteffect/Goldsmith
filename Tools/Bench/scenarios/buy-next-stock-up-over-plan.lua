@@ -11,7 +11,7 @@ local myst = db.characters["Mysticmead-Sargeras"]
 myst.stock[AZEROOT], myst.stock[AZEROOT + 1] = nil, nil
 local addon = bench.Login("Mysticmead", { db = db })
 bench.world.bank[AZEROOT], bench.world.bank[AZEROOT + 1] = nil, nil
-bench.SetBags({ [AZEROOT] = nil, [AZEROOT + 1] = nil })
+bench.SetBags({ [AZEROOT] = 0, [AZEROOT + 1] = 0 })
 local ARGENTLEAF = bench.ItemID("Argentleaf")
 addon:AddStockToQueue("Mysticmead-Sargeras", ARGENTLEAF, 20, "Argentleaf")
 bench.Advance(1)

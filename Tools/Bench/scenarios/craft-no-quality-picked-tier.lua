@@ -16,7 +16,7 @@ if db.warbandStock then db.warbandStock[AZEROOT], db.warbandStock[GOLD_AZEROOT] 
 local addon = bench.Login("Mysticmead", { db = db })
 bench.world.bank[AZEROOT], bench.world.bank[GOLD_AZEROOT] = nil, nil
 -- Only gold Azeroot held, and gold the cheaper one
-bench.SetBags({ [AZEROOT] = nil, [GOLD_AZEROOT] = 40, ["Mana-Wyrm Essence"] = 40 })
+bench.SetBags({ [AZEROOT] = 0, [GOLD_AZEROOT] = 40, ["Mana-Wyrm Essence"] = 40 })
 local AHPrice = addon.GetAHPriceInfo
 function addon:GetAHPriceInfo(itemID, buying)
     if itemID == AZEROOT then return bench.Gold(20), "Goldsmith scan", 0 end

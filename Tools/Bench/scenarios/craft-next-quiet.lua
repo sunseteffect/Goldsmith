@@ -11,7 +11,7 @@ for _, c in pairs(db.characters) do
 end
 if db.warbandStock then db.warbandStock[AZEROOT], db.warbandStock[AZEROOT + 1] = nil, nil end
 local addon = bench.Login("Mysticmead", { db = db })
-bench.SetBags({ [AZEROOT] = nil, [AZEROOT + 1] = nil })
+bench.SetBags({ [AZEROOT] = 0, [AZEROOT + 1] = 0 })
 bench.world.bank[AZEROOT], bench.world.bank[AZEROOT + 1] = nil, nil
 bench.OpenProfession("Cooking")
 bench.Chat()

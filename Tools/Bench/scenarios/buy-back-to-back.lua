@@ -17,7 +17,7 @@ db.searchPrices = {}
 db.inMail["Mysticmead-Sargeras"] = {}
 local addon = bench.Login("Mysticmead", { db = db })
 bench.world.bank[AZEROOT], bench.world.bank[AZEROOT + 1] = nil, nil
-bench.SetBags({ [AZEROOT] = nil, [AZEROOT + 1] = nil })
+bench.SetBags({ [AZEROOT] = 0, [AZEROOT + 1] = 0 })
 bench.OpenAH()
 
 local function Purchases()
