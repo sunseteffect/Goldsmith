@@ -553,9 +553,11 @@ local function CraftTooltip(tooltip, item)
         for _, row in ipairs(rows) do
             if row.concentrate and row.tier > item.tier and not plainTiers[row.tier] then
                 if not shown then tooltip:AddLine(" ") shown = true end
-                Note(tooltip, string.format("%s tier needs concentration: about %d per craft, %s profit each. Turn on Concentration (top right) to see it.",
+                -- No price: "no price profit each" read as garbled (Bouquet of
+                -- Herbs, only silver ones opened, user 2026-10-27)
+                Note(tooltip, string.format("%s tier needs concentration: about %d per craft, %s. Turn on Concentration (top right) to see it.",
                     addon:TierIconText(row.tier, row.tierCount), row.concentration or 0,
-                    row.profit and Signed(row.profit) or "no price"), "conc")
+                    row.profit and (Signed(row.profit) .. " profit each") or "no price yet"), "conc")
             end
         end
     end
