@@ -2221,6 +2221,15 @@ local function CreatePlanScreen(parent)
                 Clear(row)
             end
         end
+        -- Open: as tall as its rows, so the materials keep the room (2
+        -- mixes left half of it blank and the materials scrolled; user,
+        -- 2026-10-27)
+        if open then
+            local used = math.min(#list + #baselines, #mixes.rows)
+            height = MIX_HEIGHT - (#mixes.rows - used) * 18
+            mixes:SetHeight(height)
+            screen.list:SetPoint("BOTTOMRIGHT", 0, PLAN_SUMMARY_HEIGHT + 12 + height + 8)
+        end
     end
 
     -- Summary: cost, sells for, profit; then sales, shopping and the button
