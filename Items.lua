@@ -20,8 +20,14 @@ local SEARCH_LIMIT = 100
 local STALE_PRICE_DAYS = 3
 local ACTIVITY_ROWS = 11
 local TIER_ROWS = 5
+local AH_CUT = 0.05
 
 local Money, Signed = function(c) return addon:FormatMoney(c) end, function(c) return addon:FormatSignedMoney(c) end
+
+-- As on the Crafts tab: whole percent, rounded toward zero
+local function Roi(margin)
+    return string.format("%d%%", margin >= 0 and math.floor(margin) or math.ceil(margin))
+end
 
 -- "all characters", or "counted characters" with any excluded in Settings
 -- (stock leaves them out; "all" read wrong then, user 2026-10-14)
@@ -796,9 +802,9 @@ local function CreatePage(parent)
     local costsTitle = UI.Text(costs, "heading")
     costsTitle:SetPoint("TOPLEFT", 16, -14)
     costsTitle:SetText("What it costs")
-    page.costRows = { CostRow(costs, -44), CostRow(costs, -94), CostRow(costs, -144) }
+    page.costRows = { CostRow(costs, -44), CostRow(costs, -94), CostRow(costs, -144), CostRow(costs, -194) }
     page.concNote = UI.Text(costs, "small", "conc")
-    page.concNote:SetPoint("TOPLEFT", 16, -192)
+    page.concNote:SetPoint("TOPLEFT", 16, -242)
     page.concNote:SetPoint("RIGHT", -16, 0)
     page.tiersLabel = UI.Text(costs, "label", "muted")
     page.tiersLabel:SetText("TIERS")
@@ -1042,8 +1048,16 @@ local function CreatePage(parent)
             t[5].tooltip = nil
         end
 
-        -- What it costs
+        -- What it costs. Profit each now and what your sales got fill the
+        -- panel with the "still worth it?" answer (two lines left it mostly
+        -- empty on a flip like Plant Protein, user 2026-10-27)
         local r = page.costRows
+        local function ProfitNow(row, cost, costText)
+            if not (cost and d.price) then return row:Set(nil) end
+            local profit = d.price * (1 - AH_CUT) - cost
+            row:Set("Profit each now", string.format("%s (%s ROI)", Signed(profit), Roi(profit / cost * 100)),
+                addon:MoneyColor(profit), "AH price after the 5% cut, minus " .. costText)
+        end
         if d.recipe and not d.material then
             if d.yours then
                 r[1]:Set("Yours cost you", Money(d.yours), "text", "your latest crafts of it")
@@ -1053,6 +1067,7 @@ local function CreatePage(parent)
             r[2]:Set("Estimated", d.estimated and (Money(d.estimated) .. (d.partial and "+" or "")) or "-", "text",
                 StatsText(d.stats))
             r[3]:Set("Worst case", d.worst and Money(d.worst) or "-", "muted", "no multicraft or resourcefulness")
+            if d.yours then ProfitNow(r[4], d.yours, "what yours cost") else ProfitNow(r[4], d.estimated, "the estimate") end
         else
             local sources = { paid = "bought", milled = "milled", crafted = "crafted",
                               gathered = "gathered (at the AH price)" }
@@ -1062,7 +1077,14 @@ local function CreatePage(parent)
             r[1]:Set("Yours cost you", d.paid and Money(d.paid) or "-", d.paid and "text" or "dim",
                 d.paid and ("average of what you " .. table.concat(how, " and ")) or "nothing bought yet")
             r[2]:Set("AH price now", d.price and Money(d.price) or "-", "text", d.priceText)
-            r[3]:Set(nil)
+            ProfitNow(r[3], d.paid, "what yours cost")
+            local got = addon:GetOwnSalePrice(d.name)
+            if got then
+                r[4]:Set("Your sales got", Money(got), "text",
+                    string.format("each, after the AH cut, last %d days", addon.OWN_SALES_DAYS))
+            else
+                r[4]:Set(nil)
+            end
         end
         page.concNote:SetText(d.concentration
             and string.format("This tier needs about %d concentration per craft.", d.concentration) or "")
