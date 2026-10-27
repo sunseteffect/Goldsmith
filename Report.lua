@@ -162,10 +162,10 @@ function addon:UpdateErrorDots()
     for _, dot in ipairs(dots) do dot:SetShown(show) end
 end
 
--- A dot at the frame's top right corner
-function addon:ErrorDot(frame, x, y)
+-- A dot near the frame's top right corner (x, y: its center from there)
+function addon:ErrorDot(frame, x, y, size)
     local dot = frame:CreateTexture(nil, "OVERLAY", nil, 7)
-    dot:SetSize(9, 9)
+    dot:SetSize(size or 9, size or 9)
     dot:SetPoint("CENTER", frame, "TOPRIGHT", x or -3, y or -3)
     dot:SetColorTexture(addon:Color("loss"))
     local mask = frame:CreateMaskTexture()

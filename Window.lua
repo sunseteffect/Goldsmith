@@ -596,7 +596,9 @@ function addon:CreateWindow()
     end)
     settingsButton:SetPoint("RIGHT", -8, 0)
     -- Red while Goldsmith has hit an error you haven't seen (Report.lua)
-    addon:ErrorDot(settingsButton)
+    -- Inside the button, a little smaller: on its border it looked big
+    -- (user, 2026-10-27)
+    addon:ErrorDot(settingsButton, -7, -7, 8)
     -- Above the tab bar, which spans the whole row
     settingsButton:SetFrameLevel(tabBar:GetFrameLevel() + 5)
 
