@@ -715,6 +715,11 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         addon:PrintBuyList(rest)
     elseif cmd == "finishing" and GoldsmithDB.devTools then
         addon:PrintFinishing(rest)
+    -- A harmless error from Goldsmith's own file, caught like a real one:
+    -- to see the error dot (Report.lua). Clear errors on the bug report
+    -- page forgets it.
+    elseif cmd == "testerror" and GoldsmithDB.devTools then
+        C_Timer.After(0, function() error("Goldsmith test error (/gsm testerror), not a real bug") end)
     elseif cmd == "prep" and GoldsmithDB.devTools then
         addon:PrintPrepCheck()
     elseif cmd == "perf" then
