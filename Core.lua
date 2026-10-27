@@ -603,6 +603,8 @@ function addon:Initialize()
     addon.ledger = addon:CreateLedger(GoldsmithDB)
     -- Sales costed at a recipe estimate though you'd bought the item (once)
     addon:RepairEstimatedSales()
+    -- Order rewards sold with no cost: what the order counted them at (once)
+    addon:RepairRewardSales()
     -- A one-off repair of the developer's own Missive lots, done and removed
     GoldsmithDB.harmoniousLotsRepaired = nil
     -- Keep history for (Settings); after login settles, like the other chores

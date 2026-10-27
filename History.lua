@@ -37,6 +37,7 @@ local COST_LABELS = {
     paid = "Cost you (what you paid)",
     estimated = "Cost you (estimated)",
     today = "Cost you (today's estimate)",
+    reward = "Order counted it at",
 }
 
 local COLUMNS = {
@@ -187,6 +188,8 @@ local function Tooltip(tooltip, row)
                 addon:Explain(tooltip, "You didn't craft these while Goldsmith was watching, so the cost is the recipe at that day's prices.", 0.6, 0.6, 0.6, true)
             elseif row.costSource == "today" then
                 addon:Explain(tooltip, "Sold before Goldsmith saved costs with sales, so this is today's estimate.", 0.6, 0.6, 0.6, true)
+            elseif row.costSource == "reward" then
+                addon:Explain(tooltip, "A crafting order's reward. The order's profit already counted it at its AH price then, so this sale's profit is what it sold for over that.", 0.6, 0.6, 0.6, true)
             end
         elseif row.kind == "Sale" then
             tooltip:AddLine("No cost known, so this sale isn't in your profit. If it was loot or a reward, right-click and mark it as free.", 0.6, 0.6, 0.6, true)

@@ -3037,6 +3037,37 @@ local function SellerCost(itemName, units, itemID)
     return total / covered, allFree and "free" or "paid"
 end
 
+-- A crafting order's reward you sell: what the order counted it at (its
+-- AH price then), newest rewards first. That value is already in the
+-- order's profit, so the sale's profit is only what it sold for over it.
+-- A Void-Touched Augment Rune sold for 1,115.92g read "no cost" and was
+-- left out of the mail's total; the order counted it at 367.77g (user,
+-- 2026-10-27).
+local function RewardCost(itemName, units, itemID)
+    local need, covered, total = math.max(units or 1, 1), 0, 0
+    local lots = GoldsmithDB.orderCrafts or {}
+    -- A sale without its item: the ID from a reward with that name (some
+    -- were saved without a link, so they're matched by ID)
+    for i = #lots, 1, -1 do
+        if itemID then break end
+        for _, r in ipairs(lots[i].rewards or {}) do
+            local name = (r.link and r.link:match("%[(.-)%]")) or (r.itemID and C_Item.GetItemNameByID(r.itemID))
+            if name == itemName then itemID = r.itemID break end
+        end
+    end
+    if not itemID then return nil end
+    for i = #lots, 1, -1 do
+        for _, r in ipairs(lots[i].rewards or {}) do
+            local same = r.itemID == itemID
+            if same and (r.count or 0) > 0 then
+                local take = math.min(r.count, need - covered)
+                total, covered = total + take * (addon:RewardValueNow(r) / r.count), covered + take
+                if covered >= need then return total / covered end
+            end
+        end
+    end
+end
+
 function addon:GetUnitCostBasis(itemName, units, itemID)
     if GoldsmithDB.freeItems and GoldsmithDB.freeItems[itemName] then
         return 0, false, "free"
@@ -3064,6 +3095,8 @@ function addon:GetUnitCostBasis(itemName, units, itemID)
     if own then
         return own, false, ownSource == "free" and "free" or "paid"
     end
+    local reward = RewardCost(itemName, units, itemID)
+    if reward then return reward, false, "reward" end
     local recipe = addon:FindRecipeByOutput(itemName)
     if recipe then
         local cost, missing = addon:GetRecipeCost(recipe)
@@ -3098,6 +3131,24 @@ function addon:RepairEstimatedSales()
         end
     end
     GoldsmithDB.estimatedSalesRepaired = true
+    return changed
+end
+
+-- Sales of order rewards saved with no cost before RewardCost (2026-10-27)
+-- get what the order counted them at. Runs once (rewardSalesRepaired).
+function addon:RepairRewardSales()
+    if GoldsmithDB.rewardSalesRepaired then return 0 end
+    local changed = 0
+    for _, e in ipairs(addon.ledger:getAll()) do
+        if e.type == "REVENUE" and not e.costBasis and e.item and (e.quantity or 0) > 0 then
+            local unit = RewardCost(e.item, e.quantity, e.itemID)
+            if unit then
+                e.costBasis, e.costSource = math.floor(unit * e.quantity + 0.5), "reward"
+                changed = changed + 1
+            end
+        end
+    end
+    GoldsmithDB.rewardSalesRepaired = true
     return changed
 end
 
