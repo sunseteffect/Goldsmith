@@ -4073,6 +4073,7 @@ function addon:InitializePricing()
         GoldsmithDB.lastPriceUpdate = now
         if isFullScan then GoldsmithDB.lastFullScan = now end
         addon:RecordPriceHistory(isFullScan)
+        addon:CheckSellNow()
         -- A scan loads the items it saw, so more scrolls can be matched
         addon:MatchEnchantScrolls()
         if addon.Refresh then

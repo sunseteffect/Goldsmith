@@ -45,7 +45,9 @@ local screen = bench.Screen()
 -- a gold or more off are starred, under 10% of their profit too (the
 -- feast's 13.34g against +136.47g went unexplained in game), and rows
 -- under a gold are not
-bench.Check("feast starred", addon:QueueRowGap(feast) ~= nil)
+-- The feast's own gap moves with the saved data (0.69g by 2026-10-27
+-- evening): the rule below checks it with every row
+bench.Check("feast in the queue", feast ~= nil)
 for _, row in ipairs(q.rows) do
     local p = row.plan
     local off = math.abs(p.cost - (p.todayCost or p.marketCost))

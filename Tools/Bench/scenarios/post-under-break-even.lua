@@ -5,6 +5,9 @@
 local bench = dofile(BENCH_DIR .. "bench.lua")
 local addon = bench.Login("Mysticmead")
 local POTENTIAL = bench.ItemID("Light's Potential")
+-- Some in the bags, whatever the saved data holds (all 54 were posted on
+-- 2026-10-27)
+bench.SetBags({ [POTENTIAL] = 20 })
 local cost, _, source = addon:GetUnitCostBasis("Light's Potential", 1, POTENTIAL)
 bench.Check("Light's Potential has a crafted cost", source == "crafted" and cost > 0, tostring(source))
 local breakEven = cost / 0.95

@@ -513,15 +513,18 @@ end
 -- Chat messages Goldsmith prints by itself (not answers to /gsm commands).
 -- kind is "money" (a sale, purchase or deposit), "loss" (you're about to
 -- lose gold: red with a warning icon, so it stands out among the game's
--- lines without a sound; user, 2026-10-27) or "info" (anything else).
+-- lines without a sound; user, 2026-10-27), "gain" (a chance to make gold:
+-- green with a coin) or "info" (anything else).
 -- Everything or off: the "Sales and purchases" level was dropped (user,
 -- 2026-10-10: History shows all of that; chat is for troubleshooting), so
 -- a saved "money" counts as everything.
 local LOSS_ICON = "|TInterface\\DialogFrame\\UI-Dialog-Icon-AlertNew:0|t "
+local GAIN_ICON = "|TInterface\\MoneyFrame\\UI-GoldIcon:0|t "
 function addon:Notify(kind, msg, ...)
     if addon:Setting("chat") == "off" then return end
     local text = string.format(msg, ...)
     if kind == "loss" then text = LOSS_ICON .. addon:Colorize(text, "loss") end
+    if kind == "gain" then text = GAIN_ICON .. addon:Colorize(text, "profit") end
     print("|cFF00FF00[Goldsmith]|r " .. text)
 end
 

@@ -486,6 +486,36 @@ local function SalvageAction(prof)
     }
 end
 
+-- What you've held a while that today's AH price sells above break-even
+-- (GetSellNow, Insights.lua): on every character, since that's where
+-- stock sits; the hover says how long and at what
+local function SellAction()
+    local list = addon:GetSellNow()
+    if #list == 0 then return nil end
+    local parts = {}
+    for i = 1, math.min(#list, 2) do
+        table.insert(parts, string.format("%d %s %s", list[i].count, ItemText(list[i].itemID, list[i].name),
+            addon:Colorize(Signed(list[i].gain), "profit")))
+    end
+    return {
+        title = "Sell now: above break-even",
+        detail = table.concat(parts, "   "),
+        tooltip = function(tooltip)
+            tooltip:AddLine("Sell now: above break-even", 1, 1, 1)
+            addon:Explain(tooltip, "Things you've held a while that today's AH price sells for more than they cost you, after the 5% cut. Prices like this may not last.",
+                0.6, 0.6, 0.6, true)
+            for i = 1, math.min(#list, 8) do
+                local s = list[i]
+                tooltip:AddDoubleLine(string.format("%d %s", s.count, ItemText(s.itemID, s.name)),
+                    string.format("%s (break-even %s) · %d days  %s", Money(s.price), Money(s.breakEven), s.days,
+                        Signed(s.gain)), 0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
+            end
+            addon:ClickHint(tooltip, "Click for the item's page: price history, where yours are, break-even.")
+        end,
+        onClick = function() addon:OpenItem(list[1].name, list[1].itemID) end,
+    }
+end
+
 -- How far below usual counts as cheap is a setting (dealPercent)
 local function DealsAction(prof)
     local deals, earliest, minDays = addon:GetDeals(prof)
@@ -1304,8 +1334,12 @@ local function Refresh(view, state)
         addon:MarkSuggested(items)
     end
     view.followed:Update(inSetup)
-    -- Order: concentration, cooldowns, best crafts, salvage, cheap
-    -- materials; the last ones are left out when they don't fit
+    -- Order: concentration, cooldowns, best crafts, sell now, salvage,
+    -- cheap materials; the last ones are left out when they don't fit.
+    -- Sell now before salvage: a price over break-even may not last a day
+    -- (Light's Potential, user 2026-10-27)
+    local sellAction = SellAction()
+    if sellAction then table.insert(list, sellAction) end
     local salvageAction = SalvageAction(prof)
     if salvageAction then table.insert(list, salvageAction) end
     local dealsAction = DealsAction(prof)

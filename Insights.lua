@@ -300,6 +300,70 @@ function addon:GetStockValue(prof)
     return store[id]
 end
 
+-- Sell now: what you've held the heldDays setting or more (the Held board)
+-- that today's AH price would sell above its break-even. Light's Potential,
+-- held 26 days at a 17.08g break-even, was 20.60g for one day (Oct 18) and
+-- nobody noticed; the user sold all 54 under cost a week later (2026-10-27).
+-- Returns { { itemID, name, count, price, cost, breakEven, each, gain,
+-- days } }, most gold first. Only from a real cost (crafted or paid), as
+-- the post warning, and a profit of at least SELL_NOW_MIN of the cost and
+-- SELL_NOW_MIN_GOLD in all.
+local SELL_NOW_MIN = 0.02
+-- Not worth a callout under this in all (2 Repair Hammers, +4.60g)
+local SELL_NOW_MIN_GOLD = 10 * 10000
+function addon:GetSellNow()
+    local list = {}
+    for _, item in ipairs(addon:GetStockValue("All").heldLong) do
+        addon:Yield()
+        -- Not gear or tools: one realm's listing that may never sell (an
+        -- Apprentice Jeweler's Apron "above break-even" at 953g, 2026-10-27)
+        local price = not addon:IsGear(item.itemID) and addon:GetAHPrice(item.itemID)
+        local cost, _, source = addon:GetUnitCostBasis(item.name, item.count, item.itemID)
+        if price and cost and cost > 0 and (source == "crafted" or source == "paid") then
+            local each = price * (1 - AH_CUT) - cost
+            if each >= cost * SELL_NOW_MIN and each * item.count >= SELL_NOW_MIN_GOLD then
+                table.insert(list, { itemID = item.itemID, name = item.name, count = item.count, price = price,
+                    cost = cost, breakEven = cost / (1 - AH_CUT), each = each, gain = each * item.count,
+                    days = math.floor((time() - item.heldSince) / 86400) })
+            end
+        end
+    end
+    table.sort(list, function(a, b) return a.gain > b.gain end)
+    return list
+end
+
+-- New prices (login, Goldsmith's scan, an Auctionator scan): say so for
+-- each item newly worth selling, in chat (green, a coin) and once in the
+-- middle of the screen, with no sound (good news doesn't beep; user,
+-- 2026-10-27: "chat is easily missed"). Once per item a day
+-- (GoldsmithDB.sellNowTold[itemID] = day). Worked out over frames.
+function addon:CheckSellNow()
+    if not GoldsmithDB or addon:UsingTourData() then return end
+    addon:RunWork(function()
+        local today = date("%Y-%m-%d")
+        GoldsmithDB.sellNowTold = GoldsmithDB.sellNowTold or {}
+        local told = GoldsmithDB.sellNowTold
+        for id, day in pairs(told) do if day ~= today then told[id] = nil end end
+        local fresh = {}
+        for _, s in ipairs(addon:GetSellNow()) do
+            if told[s.itemID] ~= today then
+                told[s.itemID] = today
+                table.insert(fresh, s)
+                addon:Notify("gain", "%s is above break-even: %s (break-even %s). You hold %d, held %d days: about %s if they sell now.",
+                    s.name, addon:FormatMoney(s.price), addon:FormatMoney(s.breakEven), s.count, s.days,
+                    addon:FormatSignedMoney(s.gain))
+            end
+        end
+        if #fresh > 0 and RaidNotice_AddMessage and RaidWarningFrame then
+            local top = fresh[1]
+            local more = #fresh > 1 and string.format(" (and %d more)", #fresh - 1) or ""
+            local r, g, b = addon:Color("profit")
+            RaidNotice_AddMessage(RaidWarningFrame, string.format("Goldsmith: sell %s now, about %s%s",
+                top.name, addon:FormatSignedMoney(top.gain), more), { r = r, g = g, b = b })
+        end
+    end, nil, nil, "sell now", true)
+end
+
 StockValue = function(prof)
     local outputs = GetOutputRecipes()
     local materials = addon:GetTrackedMaterials()

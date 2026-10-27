@@ -564,6 +564,8 @@ function addon:InitializeStock()
     SeedMaterialUse()
     -- After login settles (recipes and tier data are in by then)
     C_Timer.After(20, function() addon:RecordDailyHistory() end)
+    -- Anything you've held that today's prices would sell at a profit
+    C_Timer.After(30, function() addon:CheckSellNow() end)
 end
 
 _G.Goldsmith = addon

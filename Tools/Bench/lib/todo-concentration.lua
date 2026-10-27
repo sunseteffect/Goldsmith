@@ -9,6 +9,11 @@ return function(bench, who, oldWay)
     local key
     for k in pairs(db.characters) do if k:match("^([^-]+)") == who then key = k end end
     db.queues[key] = {}
+    -- Some to spend, whatever the saved data has left: Mysticmead had 37
+    -- and 73 by evening (2026-10-27), nothing to test
+    for _, snap in pairs(db.characters[key].concentration or {}) do
+        snap.current, snap.time = math.max(snap.current or 0, 450), os.time()
+    end
     local addon = bench.Login(who, { db = db })
 
     local todo = addon:GetCharacterTodo("All")
