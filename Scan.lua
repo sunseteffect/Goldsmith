@@ -69,12 +69,23 @@ local function Timed(key, started, into)
     if into then into[key] = math.max(into[key] or 0, math.floor(ms + 0.5)) end
 end
 
+local StartPages -- below
 local function Finish(prices, auctions, method)
     local items = 0
     for _ in pairs(prices) do items = items + 1 end
     if items == 0 then
-        -- Nothing came back: keep the last scan as it was
-        addon:Notify("info", "Goldsmith scan: the AH sent nothing back, so the last scan is kept.")
+        -- Nothing came back: keep the last scan as it was. What happened is
+        -- kept (GoldsmithDB.scanFail): one failed with nothing to say why
+        -- (user, 2026-10-27). A full scan that came back empty pages
+        -- instead, once, as when it never answers.
+        GoldsmithDB.scanFail = { time = time(), method = method, auctions = auctions,
+            borrowed = run and run.borrowed or nil, pages = run and run.pages or nil,
+            waited = run and run.started and time() - run.started or nil }
+        if method == "full" and run and not run.borrowed and ahOpen then
+            StartPages()
+            return
+        end
+        addon:Notify("info", "Goldsmith scan: the AH sent nothing back, so the last scan is kept. Try again in a minute.")
         run = nil
         UpdatePanel()
         return
@@ -246,7 +257,7 @@ local function NextPage()
     end
 end
 
-local function StartPages()
+StartPages = function()
     run = run or { started = time() }
     run.phase, run.method, run.pages, run.lastPage = "pages", "pages", 0, GetTime()
     run.progress = nil
