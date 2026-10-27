@@ -1818,6 +1818,13 @@ function addon:GetItemDetails(name, itemID)
             d.worst = addon:GetWorstCaseCost(recipe, row)
             d.concentration = row.concentrate and row.concentration or nil
             d.stats = addon:StatsChar().recipeStats[recipe.recipeID]
+            -- The finishing reagents the estimate counts (Bazaar Bites):
+            -- without them, 286g against a 619g worst case read as unexplained
+            local choice = addon:GetFinishingChoice(recipe)
+            d.finishing = {}
+            for _, pick in ipairs(choice and choice.picks or {}) do
+                table.insert(d.finishing, C_Item.GetItemNameByID(pick.option.itemID) or "a finishing reagent")
+            end
         end)
         d.yours = itemID and addon:GetCraftedCost(itemID)
     end

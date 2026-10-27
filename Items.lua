@@ -717,14 +717,15 @@ local function CostRow(parent, top)
     return r
 end
 
-local function StatsText(stats)
+local function StatsText(stats, finishing)
     -- Recipes from before Dragonflight have no crafting stats at all
     if not stats then return "Base recipe numbers: older recipes have no multicraft or resourcefulness. For newer ones, open the profession." end
     local parts = {}
     if stats.multicraft > 0 then table.insert(parts, string.format("multicraft %.1f%%", stats.multicraft)) end
     if stats.resourcefulness > 0 then table.insert(parts, string.format("resourcefulness %.1f%%", stats.resourcefulness)) end
     if #parts == 0 then return "From your stats: no multicraft or resourcefulness yet." end
-    return "From your stats: " .. table.concat(parts, ", ")
+    local with = finishing and #finishing > 0 and (", with " .. table.concat(finishing, " and ")) or ""
+    return "From your stats: " .. table.concat(parts, ", ") .. with
 end
 
 local ACTIVITY_COLORS = { Sold = "profit", Bought = "loss", Posted = "warning", Crafted = "line" }
@@ -1068,7 +1069,7 @@ local function CreatePage(parent)
                 r[1]:Set("Yours cost you", "-", "dim", "not crafted yet")
             end
             r[2]:Set("Estimated", d.estimated and (Money(d.estimated) .. (d.partial and "+" or "")) or "-", "text",
-                StatsText(d.stats))
+                StatsText(d.stats, d.finishing))
             r[3]:Set("Worst case", d.worst and Money(d.worst) or "-", "muted", "no procs or finishing reagents")
             if d.yours then ProfitNow(r[4], d.yours, "what yours cost") else ProfitNow(r[4], d.estimated, "the estimate") end
         else
