@@ -310,13 +310,11 @@ end
 -- the post warning, and a profit of at least SELL_NOW_MIN of the cost and
 -- SELL_NOW_MIN_GOLD in all.
 local SELL_NOW_MIN = 0.02
--- Gear, tools and accessories: anything that can be equipped. The class
--- alone missed an Apprentice Jeweler's Apron and a Repair Hammer in game
--- (both told "sell now", 2026-10-27).
+-- Gear, tools and accessories (IsGear: anything you can equip but bags):
+-- an Apprentice Jeweler's Apron and a Repair Hammer were told "sell now"
+-- (2026-10-27)
 local function Wearable(itemID)
-    if addon:IsGear(itemID) then return true end
-    local equipLoc = select(4, C_Item.GetItemInfoInstant(itemID))
-    return equipLoc ~= nil and equipLoc ~= "" and equipLoc ~= "INVTYPE_NON_EQUIP_IGNORE"
+    return addon:IsGear(itemID)
 end
 -- Not worth a callout under this in all (2 Repair Hammers, +4.60g)
 local SELL_NOW_MIN_GOLD = 10 * 10000
@@ -1783,14 +1781,27 @@ ItemBoards = function(prof, rangeKey)
         fastest = Top(function() return true end, "perDay"),
         held = {},
     }
+    -- What you could sell above break-even now (GetSellNow) goes first,
+    -- with its gain: the chat line at login was easy to miss (user,
+    -- 2026-10-27). The rest follow, longest held first as before.
+    local sellNow = {}
+    for _, s in ipairs(addon:GetSellNow()) do sellNow[s.itemID] = s end
     local stock = addon:GetStockValue(prof)
+    local sellable, rest = {}, {}
     for _, item in ipairs(stock.heldLong) do
-        if #boards.held >= BOARD_SIZE then break end
         if Shown(item.itemID, item.name) then
-            table.insert(boards.held, {
+            local s = sellNow[item.itemID]
+            table.insert(s and sellable or rest, {
                 name = item.name, itemID = item.itemID, count = item.count, value = item.value,
-                days = math.floor((time() - item.heldSince) / 86400),
+                days = math.floor((time() - item.heldSince) / 86400), sell = s,
             })
+        end
+    end
+    table.sort(sellable, function(a, b) return a.sell.gain > b.sell.gain end)
+    boards.heldSell = #sellable
+    for _, list in ipairs({ sellable, rest }) do
+        for _, item in ipairs(list) do
+            if #boards.held < BOARD_SIZE then table.insert(boards.held, item) end
         end
     end
     return boards

@@ -913,10 +913,19 @@ end
 
 -- Weapons, armor and profession equipment. They aren't commodities: each
 -- realm has its own listings, so region sales are spread over every realm.
+-- Anything else you can equip counts too, bags aside (crafted bags sell
+-- like any item): by class alone an Apprentice Jeweler's Apron wasn't gear
+-- in game, so its soulbound copy counted as stock for sale (user,
+-- 2026-10-27).
+local NOT_GEAR_SLOTS = { [""] = true, INVTYPE_NON_EQUIP_IGNORE = true, INVTYPE_BAG = true, INVTYPE_QUIVER = true }
 function addon:IsGear(itemID)
-    local classID = itemID and select(6, C_Item.GetItemInfoInstant(itemID))
-    return classID == Enum.ItemClass.Weapon or classID == Enum.ItemClass.Armor
-        or classID == Enum.ItemClass.Profession
+    if not itemID then return false end
+    local _, _, _, equipLoc, _, classID = C_Item.GetItemInfoInstant(itemID)
+    if classID == Enum.ItemClass.Weapon or classID == Enum.ItemClass.Armor
+        or classID == Enum.ItemClass.Profession then
+        return true
+    end
+    return equipLoc ~= nil and not NOT_GEAR_SLOTS[equipLoc]
 end
 
 function addon:HasTSM()

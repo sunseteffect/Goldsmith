@@ -197,8 +197,20 @@ local BOARDS = {
         empty = function()
             return string.format("Nothing you crafted has sat unsold for %d days.", addon:Setting("heldDays"))
         end,
-        value = function(i) return Plural(i.days, "day"), "warning" end,
+        -- Above break-even now: the gain, in green (Sell now)
+        value = function(i)
+            if i.sell then return Signed(i.sell.gain), "profit" end
+            return Plural(i.days, "day"), "warning"
+        end,
         tooltip = function(tooltip, i)
+            if i.sell then
+                local r, g, b = addon:Color("profit")
+                tooltip:AddLine("Sell now: above break-even", r, g, b)
+                tooltip:AddDoubleLine("AH price", Money(i.sell.price), 0.8, 0.8, 0.8, 1, 1, 1)
+                tooltip:AddDoubleLine("Break-even", Money(i.sell.breakEven), 0.8, 0.8, 0.8, 1, 1, 1)
+                tooltip:AddDoubleLine("If all sell now", Signed(i.sell.gain), 0.8, 0.8, 0.8, r, g, b)
+                tooltip:AddDoubleLine("Held", Plural(i.days, "day"), 0.8, 0.8, 0.8, 1, 1, 1)
+            end
             tooltip:AddDoubleLine("You have", tostring(i.count), 0.8, 0.8, 0.8, 1, 1, 1)
             -- Who holds it, as on the item page (user 2026-10-14: "how do
             -- I know which character is holding it?")
@@ -1393,7 +1405,14 @@ local function Refresh(v, state)
         local rangeLabel = addon:GetDateRange(state.range).label:lower()
         for _, board in ipairs(v.boards) do
             local key = board.def.key
-            board:Set(boards[key], key == "held" and WhoCounts() or rangeLabel)
+            local subtitle = rangeLabel
+            if key == "held" then
+                subtitle = WhoCounts()
+                if (boards.heldSell or 0) > 0 then
+                    subtitle = subtitle .. " · " .. addon:Colorize(boards.heldSell .. " to sell now", "profit")
+                end
+            end
+            board:Set(boards[key], subtitle)
             loading:Done(board)
         end
         -- What clicks do is in the window's click legend (Legend below)
