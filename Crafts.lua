@@ -3574,6 +3574,9 @@ local function Create(parent)
     -- In place of the search and filters, which don't apply while it's
     -- showing
     view.focusChip:SetPoint("TOPLEFT", 0, 0)
+    -- Hidden until a refresh says otherwise: while the first load ran it
+    -- showed empty over the search box (user, 2026-10-27)
+    view.focusChip:Hide()
 
     view.concSwitch = UI.Switch(list, "Concentration", function(on)
         -- The tour's steps show crafts with concentration (user, 2026-10-13)
