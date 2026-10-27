@@ -1049,6 +1049,13 @@ itemEvents:SetScript("OnEvent", function(self, event, itemID)
                         if out.itemID and not C_Item.GetItemInfo(out.itemID) then RequestItem(out.itemID) end
                     end
                 end
+                -- Finishing reagents too (Bazaar Bites): unloaded, a craft
+                -- is costed without them (ChooseFinishing)
+                for _, stats in pairs(c.recipeStats or {}) do
+                    for _, o in ipairs(stats.finishing or {}) do
+                        if o.itemID and not C_Item.GetItemInfo(o.itemID) then RequestItem(o.itemID) end
+                    end
+                end
             end
         end)
         return
@@ -2827,7 +2834,10 @@ local function FinishingSlot(o)
     if finishingSlots[key] then return finishingSlots[key] end
     local name = C_Item.GetItemNameByID(o.itemID)
     if not name then
-        C_Item.RequestLoadItemDataByID(o.itemID)
+        -- Refreshes when it arrives: Amani Cornucopia's page, opened right
+        -- after a /reload, stayed costed without Bazaar Bites (577.90g, not
+        -- 286g; user, 2026-10-27)
+        RequestItem(o.itemID)
         return nil
     end
     finishingSlots[key] = { names = { name }, itemIDs = { o.itemID }, quantity = o.quantity, finishing = true }
