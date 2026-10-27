@@ -140,17 +140,16 @@ local function RecordSale(sale)
         costBasis and costSource, itemID, { soldAt = sale.soldAt })
     addon:AuctionSold(sale.itemName, sale.count, itemID)
 
-    if prof == "Unassigned" then
-        addon:Notify("money", "Sold %s x%d for %.2fg (untracked, saved as Unassigned)",
-            sale.itemName, sale.count, sale.net / 10000)
-    else
-        addon:Notify("money", "Sold %s x%d for %.2fg (%.2fg each)",
-            sale.itemName, sale.count, sale.net / 10000, (sale.net / sale.count) / 10000)
-    end
+    -- One line: the item and its profit (user, 2026-10-27: "i don't care
+    -- about the quantity ... just tell me the profit"). History has the
+    -- rest. With no cost known, what it sold for.
     if costBasis then
         local profit = sale.net - costBasis
-        addon:Notify("money", "  Cost you %.2fg, profit %s%.2fg%s", costBasis / 10000,
-            profit >= 0 and "+" or "-", math.abs(profit) / 10000, partial and " (at most)" or "")
+        local text = string.format("%s%.2fg", profit >= 0 and "+" or "-", math.abs(profit) / 10000)
+        addon:Notify("money", "Sold %s: %s%s", sale.itemName, addon:Colorize(text, addon:MoneyColor(profit)),
+            partial and " at most" or "")
+    else
+        addon:Notify("money", "Sold %s for %.2fg", sale.itemName, sale.net / 10000)
     end
 end
 
