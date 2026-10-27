@@ -153,11 +153,14 @@ local function OwnStockNote(entry, unit)
         have, entry.name or "of these", who, Money(send * unit))
 end
 
-local function AltStockNote(entry)
-    if not (entry and entry.quantity and entry.quantity > 0 and entry.cost) then return nil end
-    local unit = entry.cost / entry.quantity
-    local mine = OwnStockNote(entry, unit)
-    if mine then return mine end
+-- Another character's stock, counted this AH visit with a shift-click:
+-- useAlt[itemID] = { name, count }. Only the rest is bought; the mailbox
+-- panel on that character then lists them for the queue (user,
+-- 2026-10-27: Maddoxius held 6 of 12 Petrified Root, "i can't send 6 and
+-- buy 6")
+local useAlt = {}
+
+local function AltStock(entry)
     local _, list = addon:GetStock(entry.itemID)
     -- Not the characters it's bought for: their plans already count what
     -- they hold ("Trypttamine has 22 ore" on Trypttamine's own ore; user,
@@ -169,12 +172,27 @@ local function AltStockNote(entry)
         if s.key ~= addon.charKey and s.key ~= "warband" and not forThem[s.key]
             and (not best or s.count > best.count) then best = s end
     end
+    return best
+end
+
+-- The note under Buy next about stock held elsewhere, and the other
+-- character a shift-click would count (nil when it's about your own)
+local function AltStockNote(entry)
+    if entry and entry.fromAlt then
+        return string.format("%s's %d count: mail them to %s from %s.", entry.fromAlt.name,
+            entry.fromAlt.count, ForWhom(entry) or UnitName("player"), entry.fromAlt.name)
+    end
+    if not (entry and entry.quantity and entry.quantity > 0 and entry.cost) then return nil end
+    local unit = entry.cost / entry.quantity
+    local mine = OwnStockNote(entry, unit)
+    if mine then return mine end
+    local best = AltStock(entry)
     if not best then return nil end
     local saves = math.min(best.count, entry.quantity) * unit
     if saves < ALT_WORTH then return nil end
     -- How to act on it, right there (user, 2026-10-24: "i can't skip it")
-    return string.format("%s has %d %s (saves %s). Right-click to skip.",
-        best.name or "Another character", best.count, entry.name or "of these", Money(saves))
+    return string.format("%s has %d %s (saves %s). Shift-click to buy only the rest. Right-click to skip.",
+        best.name or "Another character", best.count, entry.name or "of these", Money(saves)), best
 end
 
 
@@ -646,6 +664,34 @@ end
 -- it. Holding 1 Arcanoweave Bolt, Buy next bought 6 for Maddoxynn's 6
 -- (user, 2026-10-27: "i should only need to buy 5"). Same count as the
 -- mailbox panel's (MailJobs).
+-- Takes `used` off an entry and its parts (in order); gone at none left
+local function TakeOff(plan, i, used)
+    local e = plan.buyAH[i]
+    used = math.min(used, e.quantity)
+    local left = used
+    for _, part in ipairs(e.parts or {}) do
+        local n = math.min(left, part.quantity)
+        part.quantity, left = part.quantity - n, left - n
+    end
+    local unit = e.quantity > 0 and (e.cost or 0) / e.quantity or 0
+    e.quantity = e.quantity - used
+    e.cost = unit * e.quantity
+    if e.quantity <= 0 then table.remove(plan.buyAH, i) end
+    return used
+end
+
+-- The other characters' stock counted this visit (useAlt, a shift-click)
+local function UseAltStock(plan)
+    for i = #plan.buyAH, 1, -1 do
+        local e = plan.buyAH[i]
+        local alt = useAlt[e.itemID]
+        if alt then
+            e.fromAlt = alt
+            TakeOff(plan, i, alt.count)
+        end
+    end
+end
+
 local function UseOwnStock(plan)
     for i = #plan.buyAH, 1, -1 do
         local e = plan.buyAH[i]
@@ -660,19 +706,7 @@ local function UseOwnStock(plan)
             spare = math.max((C_Item.GetItemCount(e.itemID, true, false, true, false) or 0)
                 + addon:InMailCount(e.itemID) - addon:ReservedCount(e.itemID), 0)
         end
-        local used = math.min(spare, e.quantity)
-        if used > 0 then
-            local left = used
-            for _, part in ipairs(e.parts) do
-                local n = math.min(left, part.quantity)
-                part.quantity, left = part.quantity - n, left - n
-            end
-            local unit = e.quantity > 0 and (e.cost or 0) / e.quantity or 0
-            e.quantity = e.quantity - used
-            e.cost = unit * e.quantity
-            e.fromBags = used
-            if e.quantity <= 0 then table.remove(plan.buyAH, i) end
-        end
+        if spare > 0 then e.fromBags = TakeOff(plan, i, spare) end
     end
 end
 
@@ -699,6 +733,7 @@ local function PlanQueue()
             UseOwnStock(plan)
         end
     end
+    UseAltStock(plan)
     local mailed = {}
     for itemID, e in pairs(MailBook()) do
         if e.quantity > 0 then
@@ -825,6 +860,19 @@ local function Skip()
     Update()
 end
 
+-- Shift-click: count the other character's stock the note names, buy the rest
+local function UseAlt()
+    local entry = NextEntry()
+    if not entry or buying then return false end
+    local _, best = AltStockNote(entry)
+    if not best then return false end
+    Cancel()
+    useAlt[entry.itemID] = { name = best.name or "Another character", count = math.min(best.count, entry.quantity) }
+    q = nil
+    Update()
+    return true
+end
+
 -- The section under the scan panel
 
 local function Line(i)
@@ -887,7 +935,9 @@ function addon.CreateShopSection(panel, width)
     section.note:SetPoint("RIGHT", -10, 0)
 
     section.button = UI.Button(section, "Buy next", width - 20, 28, function(_, mouseButton)
-        if mouseButton == "RightButton" then Skip() else addon:BuyNext() end
+        if mouseButton == "RightButton" then Skip()
+        elseif IsShiftKeyDown() and UseAlt() then return
+        else addon:BuyNext() end
     end)
     UI.Style(section.button, "highlight", "borderGold")
     section.button.label:SetTextColor(addon:Color("gold"))
@@ -902,6 +952,7 @@ function addon.CreateShopSection(panel, width)
         addon:Explain(tooltip, "At or under the plan's cost it buys right away, and a little over too (Settings: Buy without asking). If the AH asks more, it says how much and waits for a second click.", 0.6, 0.6, 0.6, true)
 
         addon:Explain(tooltip, "Right-click to skip an item until you next open the AH.", 0.6, 0.6, 0.6, true)
+        addon:Explain(tooltip, "Another character holds some: shift-click to count theirs and buy only the rest.", 0.6, 0.6, 0.6, true)
         tooltip:AddLine(KeyText() and ("Key: " .. KeyText()) or "Set a key: Options > Keybindings > Goldsmith.",
             0.6, 0.6, 0.6, true)
         tooltip:ClearAllPoints()
@@ -1141,11 +1192,11 @@ events:SetScript("OnEvent", function(_, event, unit, total)
         return
     elseif event == "AUCTION_HOUSE_SHOW" then
         ahOpen = true
-        skipped, listingsError, waitingKey, lossAccepted = {}, nil, nil, {}
+        skipped, listingsError, waitingKey, lossAccepted, useAlt = {}, nil, nil, {}, {}
     elseif event == "AUCTION_HOUSE_CLOSED" then
         ahOpen = false
         quote, asking, buying, listingQty, waitingKey = nil, nil, nil, nil, nil
-        skipped = {}
+        skipped, useAlt = {}, {}
         return
     elseif event == "COMMODITY_PRICE_UPDATED" then
         -- Only the price Buy next asked for (the AH's own buy screen asks too)
