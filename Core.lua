@@ -125,6 +125,45 @@ local pendingSales = {}
 local knownMoney = nil
 local SALE_TIMEOUT = 15
 
+-- After the sale lines, their total profit (user, 2026-10-27: "after we
+-- display all of the lines can we have a total profit?"): once no AH sale
+-- is left in the mailbox, or it closes, for two or more sales. Sales with
+-- no cost aren't in it; the line says how many.
+local TOTAL_CHECK = 1
+local saleRun
+local function FlushSaleRun()
+    local r = saleRun
+    saleRun = nil
+    if not r or r.costed + r.uncosted < 2 or r.costed == 0 then return end
+    addon:Notify("money", "Total profit: %s%s", addon:Colorize((r.profit >= 0 and "+" or "-")
+        .. addon:FormatMoney(math.abs(r.profit)), addon:MoneyColor(r.profit)),
+        r.uncosted > 0 and string.format(" (%d with no cost not counted)", r.uncosted) or "")
+end
+local function SalesLeftInMail()
+    local shown, total = GetInboxNumItems()
+    if total and shown and total > shown then return true end
+    for i = 1, shown or 0 do
+        local money = select(5, GetInboxHeaderInfo(i))
+        if money and money > 0 and GetInboxInvoiceInfo(i) == "seller" then return true end
+    end
+    return false
+end
+local function AddToSaleRun(profit)
+    saleRun = saleRun or { profit = 0, costed = 0, uncosted = 0 }
+    if profit then
+        saleRun.profit, saleRun.costed = saleRun.profit + profit, saleRun.costed + 1
+    else
+        saleRun.uncosted = saleRun.uncosted + 1
+    end
+    C_Timer.After(TOTAL_CHECK, function() addon:CheckSaleTotal() end)
+end
+function addon:FlushSaleTotal() FlushSaleRun() end
+-- Also on each inbox update: the sale mail may still show its gold a
+-- moment after it's taken. Not while a sale waits for its gold.
+function addon:CheckSaleTotal()
+    if saleRun and #pendingSales == 0 and not SalesLeftInMail() then FlushSaleRun() end
+end
+
 local function RecordSale(sale)
     local prof = addon:GetProfessionForItemName(sale.itemName) or "Unassigned"
 
@@ -148,8 +187,10 @@ local function RecordSale(sale)
         local text = string.format("%s%.2fg", profit >= 0 and "+" or "-", math.abs(profit) / 10000)
         addon:Notify("money", "Sold %s: %s%s", sale.itemName, addon:Colorize(text, addon:MoneyColor(profit)),
             partial and " at most" or "")
+        AddToSaleRun(profit)
     else
         addon:Notify("money", "Sold %s for %.2fg", sale.itemName, sale.net / 10000)
+        AddToSaleRun(nil)
     end
 end
 
@@ -691,10 +732,12 @@ mailSummary:RegisterEvent("MAIL_INBOX_UPDATE")
 mailSummary:RegisterEvent("MAIL_CLOSED")
 mailSummary:SetScript("OnEvent", function(_, event)
     if event == "MAIL_SHOW" or event == "MAIL_CLOSED" then
+        if event == "MAIL_CLOSED" then addon:FlushSaleTotal() end
         mailSummed = event == "MAIL_CLOSED"
         mailOpened = mailOpened + 1
         return
     end
+    addon:CheckSaleTotal()
     if mailSummed ~= false then return end
     mailWait = mailWait + 1
     local opened, wait = mailOpened, mailWait
