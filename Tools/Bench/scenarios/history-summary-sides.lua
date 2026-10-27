@@ -29,4 +29,14 @@ bench.Advance(3)
 local bought = Summary()
 bench.Has("Purchases: gold out", bought, "out ", true)
 bench.HasNot("Purchases: no in", bought, " in ", true)
+
+-- Gathered: no gold moved, but what it was worth (user, 2026-10-27: "i
+-- feel like it should not be zero")
+GoldsmithDB.ui2.historyKind = "Gathered"
+addon.RefreshWindow()
+bench.Advance(3)
+local gathered = Summary()
+bench.Has("Gathered: what it was worth", gathered, "gathered worth ", true)
+bench.HasNot("Gathered: no in", gathered, " in ", true)
+bench.HasNot("Gathered: no out", gathered, "out ", true)
 bench.Done()

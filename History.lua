@@ -435,6 +435,9 @@ local function Refresh(view, state)
     local summary = { string.format("%d entr%s", #rows, #rows == 1 and "y" or "ies") }
     if totals.goldIn > 0 then table.insert(summary, "in " .. addon:Colorize(Money(totals.goldIn), "profit")) end
     if totals.goldOut > 0 then table.insert(summary, "out " .. addon:Colorize(Money(totals.goldOut), "loss")) end
+    -- Gathered: no gold moved, but what it was worth (user,
+    -- 2026-10-27: "i feel like it should not be zero")
+    if (totals.worth or 0) > 0 then table.insert(summary, "gathered worth " .. addon:Colorize(Money(totals.worth), "gold")) end
     view.summary:SetText(table.concat(summary, "  ·  "))
 
     local notes = {}

@@ -1892,7 +1892,7 @@ History = function(filters)
         addon.orderLotsRepaired = true
         addon:RepairOrderLots()
     end
-    local rows, totals = {}, { goldIn = 0, goldOut = 0 }
+    local rows, totals = {}, { goldIn = 0, goldOut = 0, worth = 0 }
     local estimates = {}
     local function Estimate(name)
         if estimates[name] == nil then estimates[name] = addon:GetUnitCostBasis(name) or false end
@@ -1995,7 +1995,9 @@ History = function(filters)
     end
 
     -- Gathered materials: one row a day, whatever and whoever gathered them.
-    -- No gold changed hands, so they're not in the totals.
+    -- No gold changed hands, so they're not in gold in or out; what they
+    -- were worth is totals.worth (user, 2026-10-27: "i feel like it should
+    -- not be zero").
     local days = {}
     for i, e in ipairs(GoldsmithDB.gathered or {}) do
         if i % 64 == 0 then addon:Yield() end
@@ -2021,6 +2023,7 @@ History = function(filters)
             row.time = math.max(row.time, e.time or 0)
             row.qty = row.qty + e.qty
             row.worth = row.worth + (e.value or 0)
+            if not e.box then totals.worth = totals.worth + (e.value or 0) end
             if e.cost then row.cost = (row.cost or 0) + e.cost end
             table.insert(row.entries, e)
             local item = row.items[e.itemID]
