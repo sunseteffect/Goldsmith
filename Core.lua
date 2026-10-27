@@ -372,8 +372,11 @@ local function CheckPostPrice(itemLocation, quantity, unitPrice)
     local key = itemID or name
     if key and postWarned[key] and GetTime() - postWarned[key] < POST_WARN_GAP then return end
     if key then postWarned[key] = GetTime() end
-    addon:Notify("info", "%s posted at %s, under break-even (%s). Cancel it if that's a mistake.",
-        name or "An item", addon:FormatMoney(unitPrice), addon:FormatMoney(breakEven))
+    -- Red with a warning icon, and the loss itself: two prices to compare
+    -- didn't stand out among the game's lines (user, 2026-10-27)
+    addon:Notify("loss", "%s posted at %s: a loss of %s each (break-even %s). Cancel it if that's a mistake.",
+        name or "An item", addon:FormatMoney(unitPrice), addon:FormatMoney(cost - unitPrice * (1 - AH_CUT)),
+        addon:FormatMoney(breakEven))
 end
 
 local function OnPostCommodity(itemLocation, duration, quantity, unitPrice)

@@ -27,20 +27,21 @@ local G = bench.Gold(100)
 addon.GetUnitCostBasis = function() return G, false, "paid" end
 addon.GetOwnCost = function() return G, "gathered", { { "gathered", G, 5 } } end
 Post(G * 0.9)
-bench.HasNot("bag loot at market: quiet", bench.Chat(), "under break-even (")
+bench.HasNot("bag loot at market: quiet", bench.Chat(), ": a loss of ")
 addon.GetOwnCost = function() return G, "paid+gathered", { { "paid", G, 5 }, { "gathered", G, 5 } } end
 Post(G * 0.6)
-bench.HasNot("half loot: over what you spent", bench.Chat(), "under break-even (")
+bench.HasNot("half loot: over what you spent", bench.Chat(), ": a loss of ")
 addon.GetUnitCostBasis, addon.GetOwnCost = basis, own
 Post(breakEven * 0.5)
-bench.Has("warns under break-even", bench.Chat(), "under break-even (")
+local warned = bench.Chat()
+bench.Has("warns under break-even", warned, ": a loss of ")
 local calls = bench.Calls()
 bench.HasNot("no sound", calls, "PlaySound(")
 bench.HasNot("no raid warning", calls, "RaidNotice(")
 -- The same item again soon: no second line
 Post(breakEven * 0.5)
-bench.HasNot("once per item", bench.Chat(), "under break-even (")
+bench.HasNot("once per item", bench.Chat(), ": a loss of ")
 Post(breakEven * 1.2)
-bench.HasNot("quiet over break-even", bench.Chat(), "under break-even (")
+bench.HasNot("quiet over break-even", bench.Chat(), ": a loss of ")
 bench.HasNot("no sound over break-even", bench.Calls(), "PlaySound(")
 bench.Done()
