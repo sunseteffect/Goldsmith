@@ -18,12 +18,12 @@ bench.Check("an order counted a rune (what this tests)", counted ~= nil)
 counted = counted or 0
 -- A rune sale saved with no cost, as before this change
 db.rewardSalesRepaired = nil
-table.insert(db.ledger, { type = "REVENUE", item = RUNE, quantity = 1, totalCopper = bench.Gold(1115.92),
+table.insert(db.entries, { id = -1, type = "REVENUE", item = RUNE, quantity = 1, totalCopper = bench.Gold(1115.93),
     timestamp = os.time() - 60, profession = "Unassigned", character = "Maddoxynn", realm = "Sargeras" })
 local addon = bench.Login("Maddoxynn", { db = db })
 local repaired
 for _, e in ipairs(addon.ledger:getAll()) do
-    if e.type == "REVENUE" and e.item == RUNE then repaired = e end
+    if e.id == -1 then repaired = e end
 end
 bench.Equal("old sale: the order's value as its cost", repaired and repaired.costSource, "reward")
 bench.Near("old sale: the newest order's value", repaired and repaired.costBasis or 0, counted, 1)
@@ -54,4 +54,29 @@ bench.Has("rune line: profit over the order's value", seen,
     string.format("Sold %s: +%.2fg", RUNE, (bench.Gold(1115.92) - counted) / 10000), true)
 bench.HasNot("total leaves nothing out", seen, "no cost not counted", true)
 bench.Has("a total", seen, "Total profit:", true)
+
+-- An old sale takes the orders finished before it, not later ones; a
+-- sale from before any order Goldsmith saw a rune from keeps no cost
+local function NewestBefore(t)
+    local value
+    for _, lot in ipairs(GoldsmithDB.orderCrafts or {}) do
+        if (lot.time or 0) <= t then
+            for _, r in ipairs(lot.rewards or {}) do if r.itemID == 259085 then value = r.value / r.count end end
+        end
+    end
+    return value
+end
+local checked = 0
+for _, e in ipairs(addon.ledger:getAll()) do
+    if e.type == "REVENUE" and e.item == RUNE and e.id ~= -1 and e.quantity == 1 then
+        local want = NewestBefore(e.timestamp)
+        if want then
+            checked = checked + 1
+            bench.Near("sale " .. date("%m-%d %H:%M", e.timestamp) .. ": a rune counted before it", e.costBasis or 0, want, 1)
+        else
+            bench.Equal("sale " .. date("%m-%d %H:%M", e.timestamp) .. ": no order before it, no cost", e.costBasis, nil)
+        end
+    end
+end
+bench.Check("old sales to check", checked > 0)
 bench.Done()

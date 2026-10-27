@@ -3042,8 +3042,8 @@ end
 -- order's profit, so the sale's profit is only what it sold for over it.
 -- A Void-Touched Augment Rune sold for 1,115.92g read "no cost" and was
 -- left out of the mail's total; the order counted it at 367.77g (user,
--- 2026-10-27).
-local function RewardCost(itemName, units, itemID)
+-- 2026-10-27). before: only orders finished by then (a sale's time).
+local function RewardCost(itemName, units, itemID, before)
     local need, covered, total = math.max(units or 1, 1), 0, 0
     local lots = GoldsmithDB.orderCrafts or {}
     -- A sale without its item: the ID from a reward with that name (some
@@ -3057,7 +3057,7 @@ local function RewardCost(itemName, units, itemID)
     end
     if not itemID then return nil end
     for i = #lots, 1, -1 do
-        for _, r in ipairs(lots[i].rewards or {}) do
+        for _, r in ipairs((not before or (lots[i].time or 0) <= before) and lots[i].rewards or {}) do
             local same = r.itemID == itemID
             if same and (r.count or 0) > 0 then
                 local take = math.min(r.count, need - covered)
@@ -3135,20 +3135,26 @@ function addon:RepairEstimatedSales()
 end
 
 -- Sales of order rewards saved with no cost before RewardCost (2026-10-27)
--- get what the order counted them at. Runs once (rewardSalesRepaired).
+-- get what an order finished before the sale counted them at. Runs once
+-- (rewardSalesRepaired = 2). The first version (true) took the newest
+-- order for every sale, even ones from before it: those are redone, and
+-- left with no cost when no order came first.
 function addon:RepairRewardSales()
-    if GoldsmithDB.rewardSalesRepaired then return 0 end
+    if GoldsmithDB.rewardSalesRepaired == 2 then return 0 end
     local changed = 0
     for _, e in ipairs(addon.ledger:getAll()) do
-        if e.type == "REVENUE" and not e.costBasis and e.item and (e.quantity or 0) > 0 then
-            local unit = RewardCost(e.item, e.quantity, e.itemID)
+        if e.type == "REVENUE" and (not e.costBasis or e.costSource == "reward") and e.item and (e.quantity or 0) > 0 then
+            local unit = RewardCost(e.item, e.quantity, e.itemID, e.timestamp)
             if unit then
                 e.costBasis, e.costSource = math.floor(unit * e.quantity + 0.5), "reward"
+                changed = changed + 1
+            elseif e.costSource == "reward" then
+                e.costBasis, e.costSource = nil, nil
                 changed = changed + 1
             end
         end
     end
-    GoldsmithDB.rewardSalesRepaired = true
+    GoldsmithDB.rewardSalesRepaired = 2
     return changed
 end
 

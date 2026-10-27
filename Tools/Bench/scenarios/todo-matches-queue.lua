@@ -34,9 +34,17 @@ for key, t in pairs(addon:GetCharacterTodo("All")) do
             if o and o.millHeld and node.best == o.mill and o.other and o.other.unit < o.mill.unit * 1.1 then
                 heldSalvage = node.name
             end
+            -- The same for crafting from held materials when buying is
+            -- a little cheaper (HELD_CRAFT_PREFERENCE): Trypttamine's
+            -- Gloaming Alloy made its gold ingots from held ore at 52.40g,
+            -- the to-do bought them at 49.69g, 5.05g apart (2026-10-27)
+            if o and o.craftHeld and node.best == o.craft and o.buy
+                and o.buy.unit < (o.craft.compareUnit or o.craft.unit) then
+                heldSalvage = node.name .. " (crafted from held materials)"
+            end
         end
         if heldSalvage and plan.revenue and plan.marketCost then
-            bench.Log("%s: salvages held herbs for %s, to-do %s, queue %s", name, heldSalvage,
+            bench.Log("%s: uses held materials for %s, to-do %s, queue %s", name, heldSalvage,
                 addon:FormatMoney(item.profit), addon:FormatMoney(plan.revenue - (plan.todayCost or plan.marketCost)))
         elseif plan and plan.revenue and plan.marketCost then
             lines = lines + 1
