@@ -784,10 +784,23 @@ local function BuildNode(itemID, name, need, depth, ctx, quality, gold)
             node.heldTooFew = true
         end
     end
-    if options.best and options.best.method == "Craft" and options.best.tierRow then
-        LimitByConcentration(node, ctx, (GetCraftNumbers(options.best.recipe)))
+    -- An item already being made further up this branch is bought here,
+    -- not made again: two materials each crafted from the other built
+    -- A from B from A... until "stack overflow" (a player's Lua error,
+    -- 2.7.0-beta, 2026-10-27). GetOptions stops loops while costing, but
+    -- its answers are kept per item (memo) and reused at any depth.
+    ctx.path = ctx.path or {}
+    local making = node.best and (node.best.method == "Craft" or node.best.method == "Mill")
+    if making and (ctx.path[itemID] or depth > MAX_DEPTH + 1) then
+        node.best = options.buy or options.vendor
+        node.loopBought = true
+    end
+    if node.best and node.best.method == "Craft" and node.best.tierRow then
+        LimitByConcentration(node, ctx, (GetCraftNumbers(node.best.recipe)))
     end
     local best = node.best
+    local onPath = best and (best.method == "Craft" or best.method == "Mill") and not ctx.path[itemID]
+    if onPath then ctx.path[itemID] = true end
     if best and best.method == "Craft" and node.toGet > 0 then
         local outputQty, slots = GetCraftNumbers(best.recipe)
         local crafts = WholeCrafts(node.craftItems or node.toGet, SurePerCraft(best.recipe, outputQty))
@@ -819,6 +832,7 @@ local function BuildNode(itemID, name, need, depth, ctx, quality, gold)
         local herbs = casts * perCast
         table.insert(node.children, BuildNode(best.herbID, best.herbName, herbs, depth + 1, ctx))
     end
+    if onPath then ctx.path[itemID] = nil end
     return node
 end
 
