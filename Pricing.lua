@@ -2930,6 +2930,37 @@ function addon:GetFinishingChoice(recipe)
     return stats and stats.finishing and ChooseFinishing(recipe, stats) or nil
 end
 
+-- /gsm finishing <craft name> (dev tools): the finishing reagent choice for
+-- the craft's crafter, option by option, for when one isn't counted (Amani
+-- Cornucopia without Bazaar Bites after a /reload, 2026-10-27)
+function addon:PrintFinishing(name)
+    name = name and strtrim(name) or ""
+    if name == "" then name = "Amani Cornucopia" end
+    for _, recipe in pairs(GoldsmithDB.recipes) do
+        if recipe.outputName and recipe.outputName:lower() == name:lower() then
+            local key = addon:GetCrafter(recipe.recipeID) or addon.charKey
+            addon:WithCharacter(key, function()
+                local stats = addon:StatsChar().recipeStats[recipe.recipeID]
+                print(string.format("Goldsmith: %s on %s: stats %s, finishing options %d", recipe.outputName, key,
+                    stats and "yes" or "NO", stats and stats.finishing and #stats.finishing or 0))
+                local c = addon:GetFinishingChoice(recipe)
+                if not c then return end
+                print(string.format("  picks %d, output priced %s, your pick %s, cost %s", #c.picks, tostring(c.priced),
+                    tostring(c.yours), addon:FormatMoney((addon:GetRecipeCost(recipe)) or 0)))
+                for _, e in ipairs(c.options) do
+                    local id = e.option.itemID
+                    print(string.format("  %s %s: %s, unit %s, value %s, ratio %.2f%s", id,
+                        C_Item.GetItemNameByID(id) or "(not loaded)", e.slot and "slot" or "NO SLOT",
+                        e.unit and addon:FormatMoney(e.unit) or "nil", e.value and addon:FormatSignedMoney(e.value) or "nil",
+                        e.ratio or 0, e.picked and ", PICKED" or ""))
+                end
+            end)
+            return
+        end
+    end
+    print("Goldsmith: no craft named " .. name)
+end
+
 -- Your pick of finishing reagent for a recipe: an item ID, false for none,
 -- or nil to let Goldsmith choose
 function addon:SetFinishingPick(recipeID, pick)
