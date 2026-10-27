@@ -866,6 +866,7 @@ end
 -- from many players' scans; commodity markets are region-wide), otherwise
 -- from your own sales over the last OWN_SALES_DAYS days.
 local OWN_SALES_DAYS = 14
+addon.OWN_SALES_DAYS = OWN_SALES_DAYS
 
 local function GetTSMSoldPerDay(itemID)
     if not (TSM_API and TSM_API.GetCustomPriceValue) or TourPrices() then return nil end

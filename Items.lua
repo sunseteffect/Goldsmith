@@ -970,7 +970,10 @@ local function CreatePage(parent)
         local sellLevel = not addon:HasTSM() and addon:GetSellLevel(d.itemID)
         if sellLevel then
             t[3]:Set("Sells", addon:SellLevelText(sellLevel), addon:SellLevelColor(sellLevel),
-                d.demand and ("you sell " .. addon:FormatDemand(d.demand) .. " a day") or "region, last 7 days")
+                -- Its window said: "you sell 263 a day" next to the board's
+                -- all-time 112 a day read as a mismatch (user, 2026-10-27)
+                d.demand and string.format("last %d days: %s a day", addon.OWN_SALES_DAYS, addon:FormatDemand(d.demand))
+                    or "region, last 7 days")
         else
             t[3]:Set("Sold per day", addon:FormatDemand(d.demand), addon:DemandColor(d.demand, d.itemID),
                 d.demand and demandNote or "no sales data")
