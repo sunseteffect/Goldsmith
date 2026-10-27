@@ -1515,10 +1515,20 @@ local function BuildItemIndex()
     for herbID, record in pairs(GoldsmithDB.milling) do
         Add(herbID, record.name, { material = true, profession = GoldsmithDB.reagents[record.name] })
     end
+    -- What you've bought, sold or posted: Mentor's Helpful Handiwork, sold
+    -- 19 times, wasn't found (user, 2026-10-27). Sales and deposits often
+    -- carry only the name; the game knows the ID of a cached item.
+    local idByName = {}
+    local instant = C_Item.GetItemInfoInstant
     for i, e in ipairs(addon.ledger:getAll()) do
         if i % 64 == 0 then addon:Yield() end
-        if e.type == "COST" and e.itemID then
-            Add(e.itemID, e.item, { profession = e.profession ~= "Unassigned" and e.profession or nil })
+        local itemID = e.itemID
+        if not itemID and e.item and instant and (e.type == "REVENUE" or e.kind == "DEPOSIT") then
+            if idByName[e.item] == nil then idByName[e.item] = instant(e.item) or false end
+            itemID = idByName[e.item] or nil
+        end
+        if itemID and e.item then
+            Add(itemID, e.item, { profession = e.profession ~= "Unassigned" and e.profession or nil })
         end
     end
     for _, ids in pairs(byName) do

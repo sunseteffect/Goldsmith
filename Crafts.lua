@@ -460,7 +460,7 @@ local function CraftTooltip(tooltip, item)
         local worst = addon:WithCharacter(item.charKey, addon.GetWorstCaseCost, addon, recipe, info)
         if worst then
             Line(tooltip, "Worst case (no procs)", Money(worst))
-            Why(tooltip, "The most the item can cost you.")
+            Why(tooltip, "The most the item can cost you: no multicraft, resourcefulness or finishing reagents.")
         end
     end
     local yours = item.itemID and addon:GetCraftedCost(item.itemID)

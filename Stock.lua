@@ -116,9 +116,35 @@ local function AddReading(history, itemID, today, price)
     history[itemID][today] = Median(list)
 end
 
--- Every material and crafted item Goldsmith knows: { [itemID] = name or true }
+-- Items whose page you opened, so their chart fills in from then on:
+-- GoldsmithDB.viewedItems[itemID] = when last opened (dropped after
+-- HISTORY_DAYS). Today's price is saved at once, the chart's first point.
+function addon:WatchItemPrice(itemID)
+    if type(itemID) ~= "number" then return end
+    GoldsmithDB.viewedItems = GoldsmithDB.viewedItems or {}
+    GoldsmithDB.viewedItems[itemID] = time()
+    local history = GoldsmithDB.priceHistory
+    local today = date("%Y-%m-%d")
+    if history[itemID] and history[itemID][today] then return end
+    local price = addon:GetAHPrice(itemID, true)
+    if price and price > 0 then
+        history[itemID] = history[itemID] or {}
+        history[itemID][today] = price
+    end
+end
+
+-- Every material and crafted item Goldsmith knows, what you've bought or
+-- sold, and pages you opened: { [itemID] = name or true }
 local function HistoryItems()
     local items = addon:GetTrackedMaterials()
+    for _, e in ipairs(addon.ledger and addon.ledger:getAll() or {}) do
+        if e.itemID and not items[e.itemID] then items[e.itemID] = e.item or true end
+    end
+    local cutoff = time() - HISTORY_DAYS * 86400
+    for itemID, when in pairs(GoldsmithDB.viewedItems or {}) do
+        if when < cutoff then GoldsmithDB.viewedItems[itemID] = nil
+        elseif not items[itemID] then items[itemID] = true end
+    end
     for _, recipe in pairs(GoldsmithDB.recipes) do
         items[recipe.outputItemID] = recipe.outputName
     end

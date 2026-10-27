@@ -896,6 +896,9 @@ local function CreatePage(parent)
         local d = addon:GetItemDetails(page.item.name, page.item.itemID)
         page.details = d
         page.item.itemID = d.itemID
+        -- Any item's chart fills in from the first time its page opens
+        -- (user, 2026-10-27)
+        if d.itemID and #d.history == 0 then addon:WatchItemPrice(d.itemID) end
 
         -- Header
         page.icon:SetTexture(d.itemID and C_Item.GetItemIconByID(d.itemID) or 134400)
@@ -1066,7 +1069,7 @@ local function CreatePage(parent)
             end
             r[2]:Set("Estimated", d.estimated and (Money(d.estimated) .. (d.partial and "+" or "")) or "-", "text",
                 StatsText(d.stats))
-            r[3]:Set("Worst case", d.worst and Money(d.worst) or "-", "muted", "no multicraft or resourcefulness")
+            r[3]:Set("Worst case", d.worst and Money(d.worst) or "-", "muted", "no procs or finishing reagents")
             if d.yours then ProfitNow(r[4], d.yours, "what yours cost") else ProfitNow(r[4], d.estimated, "the estimate") end
         else
             local sources = { paid = "bought", milled = "milled", crafted = "crafted",
@@ -1225,9 +1228,17 @@ local function Create(parent)
         view.searchBox:SetText(name)
         view.searchBox:ClearFocus()
         view.search = name
-        view.page.item = nil
         view.list:ScrollToTop()
-        addon:ShowTab("items")
+        -- Its page, for any item, as SHIFT-G does: a search only finds
+        -- items Goldsmith knows (user, 2026-10-27). < Items goes back to
+        -- the search.
+        local itemID = C_Item.GetItemInfoInstant and C_Item.GetItemInfoInstant(link)
+        if itemID then
+            addon:OpenItem(name, itemID)
+        else
+            view.page.item = nil
+            addon:ShowTab("items")
+        end
     end
     if ChatEdit_InsertLink then hooksecurefunc("ChatEdit_InsertLink", OnInsertLink) end
     if ChatFrameUtil and ChatFrameUtil.InsertLink then hooksecurefunc(ChatFrameUtil, "InsertLink", OnInsertLink) end
@@ -1419,7 +1430,7 @@ local function Refresh(v, state)
         SortItems(results, "search")
         local sort = GetSort("search")
         v.list:SetSort(sort and sort.key, sort and sort.descending)
-        v.list:SetEmptyText("No items match. Goldsmith knows the items in your saved recipes, their materials and what you've bought.")
+        v.list:SetEmptyText("No items match. Goldsmith knows your recipes, their materials and what you've bought or sold. Shift-click any item to open its page.")
         v.list:SetColumnsAndItems(addon:AvailableColumns(SEARCH_COLUMNS), results)
         v.footer:SetText(#results >= SEARCH_LIMIT and string.format("First %d matches. Type more to narrow it down.", SEARCH_LIMIT)
             or (#results == 1 and "1 match" or (#results .. " matches")))
