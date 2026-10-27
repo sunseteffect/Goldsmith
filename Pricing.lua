@@ -2829,19 +2829,23 @@ local finishingCache = addon:NewCache()
 
 -- A finishing reagent as a material slot, the same table each time (slot
 -- costs are cached by table)
+-- Priced by item ID, so it doesn't wait for the name: waiting, Amani
+-- Cornucopia was costed without Bazaar Bites after a /reload (574.42g, not
+-- 284.67g; user, 2026-10-27). A stand-in name until the game sends it
+-- (RequestItem refreshes then), filled into the same table.
+local FINISHING_NAME = "Finishing reagent"
 local function FinishingSlot(o)
     local key = o.itemID .. "x" .. o.quantity
-    if finishingSlots[key] then return finishingSlots[key] end
-    local name = C_Item.GetItemNameByID(o.itemID)
-    if not name then
-        -- Refreshes when it arrives: Amani Cornucopia's page, opened right
-        -- after a /reload, stayed costed without Bazaar Bites (577.90g, not
-        -- 286g; user, 2026-10-27)
-        RequestItem(o.itemID)
-        return nil
+    local slot = finishingSlots[key]
+    if not slot then
+        slot = { names = { FINISHING_NAME }, itemIDs = { o.itemID }, quantity = o.quantity, finishing = true }
+        finishingSlots[key] = slot
     end
-    finishingSlots[key] = { names = { name }, itemIDs = { o.itemID }, quantity = o.quantity, finishing = true }
-    return finishingSlots[key]
+    if slot.names[1] == FINISHING_NAME then
+        local name = C_Item.GetItemNameByID(o.itemID)
+        if name then slot.names[1] = name else RequestItem(o.itemID) end
+    end
+    return slot
 end
 
 ChooseFinishing = function(recipe, stats)
