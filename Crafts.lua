@@ -2744,7 +2744,6 @@ local function CreatePlanScreen(parent)
         end
         if #concParts > 0 then
             costNote = costNote .. ", " .. table.concat(concParts, " + ") .. " concentration"
-                .. (ingenuityNote and (" (" .. ingenuityNote .. ")") or "")
         end
         -- The concentration these crafts need to start, at the top too:
         -- under the cost alone it was easy to miss (user, 2026-10-16).
@@ -2762,6 +2761,8 @@ local function CreatePlanScreen(parent)
         elseif plan.choiceExtra and plan.choiceExtra > 0.5 then
             costNote = costNote .. ". Your choices add " .. Money(plan.choiceExtra) .. "."
         end
+        -- Its own line, last: it wrapped mid-phrase (user, 2026-10-28)
+        if ingenuityNote then costNote = costNote .. "\nIngenuity: " .. ingenuityNote end
         screen.cost.note:SetText(costNote)
         screen.cost.note:SetTextColor(addon:Color(plan.complete and "muted" or "warning"))
 
