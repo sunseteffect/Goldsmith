@@ -3775,7 +3775,8 @@ local function Refresh(v, state)
     end
     loading:Begin(v.list)
 
-    local concOn = ui.craftsConcentration == true
+    -- Never in Forever, whatever was saved (its switch is hidden)
+    local concOn = ui.craftsConcentration == true and not addon.isForever
     v.concSwitch:SetOn(concOn)
     v.show:SetLabel("Show: " .. ShowLabel(CraftsShow())
         .. (ui.craftsGear == "hide" and ", no gear" or ""))

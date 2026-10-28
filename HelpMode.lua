@@ -58,10 +58,12 @@ end
 local function HeaderParts(list)
     local filters = Part("filters")
     Add(list, "Filters",
-        "Pick one profession or all of them, the dates for profits and charts, and which expansions' items to show. They apply on every tab.",
+        addon.isForever and "Pick one profession or all of them, and the dates for profits and charts. They apply on every tab."
+            or "Pick one profession or all of them, the dates for profits and charts, and which expansions' items to show. They apply on every tab.",
         filters[1], filters[2])
     Add(list, "Prices",
-        "Where prices come from right now: Goldsmith's own AH scan, Goldsmith Data's daily prices for your region, an Auctionator scan, or TSM. It turns orange when they're old.",
+        addon.isForever and "Where prices come from right now: Goldsmith's own AH scan, an Auctionator scan, or TSM. It turns orange when they're old."
+            or "Where prices come from right now: Goldsmith's own AH scan, Goldsmith Data's daily prices for your region, an Auctionator scan, or TSM. It turns orange when they're old.",
         Part("price"))
     Add(list, "Settings",
         "Prices, when a craft is worth suggesting, item tooltips, chat messages and which characters count. Help, support and bug reports are in there too.",
@@ -86,9 +88,13 @@ TAB_PARTS.overview = function(list)
     Add(list, "Gold in stock",
         "What the crafted items and materials you hold are worth, on every character. Click it to see them.",
         view.tiles[3])
-    Add(list, "Concentration",
-        "Concentration on the character you're on, and what it's worth spent now. Hover for every character.",
-        view.tiles[4])
+    if addon.isForever then
+        Add(list, "Last AH scan", "When you last scanned the AH on this realm. Scan again for fresh prices.", view.tiles[4])
+    else
+        Add(list, "Concentration",
+            "Concentration on the character you're on, and what it's worth spent now. Hover for every character.",
+            view.tiles[4])
+    end
     if view.setup:IsShown() then
         Add(list, "Getting started",
             "The steps that get Goldsmith ready. Each one ticks itself off. Close it with X when they're done.",
@@ -152,9 +158,11 @@ TAB_PARTS.crafts = function(list)
         Add(list, "Only this character",
             "Only what the character you're on can make, with their own stats.", view.onlyMine)
         Add(list, "Find a craft", "Search every craft and salvage by name.", view.searchBox)
-        Add(list, "Concentration",
-            "Shows the better quality concentration reaches, and how much gold each point earns (g/conc).",
-            view.concSwitch)
+        if not addon.isForever then
+            Add(list, "Concentration",
+                "Shows the better quality concentration reaches, and how much gold each point earns (g/conc).",
+                view.concSwitch)
+        end
         Add(list, "Crafts",
             "Every craft with its cost from your own crafting stats, AH price, profit and how well it sells. A grey line under a row says who makes it, or whether it uses concentration. Click one for its plan.",
             view.list)
