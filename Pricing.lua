@@ -469,8 +469,26 @@ local function RecordVendorPrices()
     end
 end
 
+-- Forever's vendor crafting materials, so plans know them before you've
+-- opened a vendor: the prices recorded at the stress test (2026-10-21),
+-- before any Bartering discount. A vendor you open still records its own.
+local FOREVER_VENDOR = {
+    [2320] = 10, [2321] = 100, [4291] = 500, [8343] = 2000,       -- threads
+    [2324] = 25, [2325] = 1000, [2604] = 50, [2605] = 100,        -- bleach, dyes
+    [4340] = 350, [4341] = 500, [4342] = 2500, [6260] = 50,
+    [2880] = 100, [3466] = 2000, [3857] = 500,                    -- flux, coal
+    [3371] = 4, [3372] = 40, [8925] = 500,                        -- vials
+    [6217] = 124,                                                 -- copper rod
+    [4289] = 50, [4399] = 200, [4400] = 2000,                     -- salt, stocks
+    [2678] = 2, [2692] = 40, [3713] = 160,                        -- spices
+    [2928] = 20,                                                  -- dust of decay
+}
+
 function addon:GetVendorPrice(itemID)
-    return itemID and GoldsmithDB.vendorPrices and GoldsmithDB.vendorPrices[itemID]
+    if not itemID then return nil end
+    local price = GoldsmithDB.vendorPrices and GoldsmithDB.vendorPrices[itemID]
+    if not price and addon.isForever then price = FOREVER_VENDOR[itemID] end
+    return price
 end
 
 -- Sold by a vendor: you've opened a vendor selling it, or it's in TSM's

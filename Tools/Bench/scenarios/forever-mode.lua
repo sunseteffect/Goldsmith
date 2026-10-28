@@ -34,4 +34,5 @@ bench.Equal("no-price text after a scan", addon:NoPriceText("x"),
 bench.Equal("Exclude text drops concentration",
     addon:ForeverText("Excluded: not counted in stock, concentration, total gold, Crafts or Do this next."),
     "Excluded: not counted in stock, total gold, Crafts or Do this next.")
+bench.Equal("Coarse Thread priced from the built-in vendor list", GoldsmithDB.vendorPrices[2320] or addon:GetVendorPrice(2320), GoldsmithDB.vendorPrices[2320] or 10)
 bench.Done()

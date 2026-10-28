@@ -1811,6 +1811,15 @@ local HELP_SECTIONS = {
       "Everything is in the window; commands are for checking what Goldsmith recorded. /gsm help lists them all, for example /gsm cooldowns (every craft cooldown it's found, and what the game reports), /gsm recipes and /gsm milling. The buttons below bring back the getting started checklist and the tour." },
 }
 
+-- Forever's own text for sections that talk about Midnight-only things
+-- (Goldsmith Data's region prices, concentration, material qualities,
+-- crafting orders). By heading; the rest read the same in both games.
+local FOREVER_HELP = {
+    ["Getting started"] = "Open each profession once on every crafter (press K) so Goldsmith loads its recipes. Then open the auction house and press Scan the AH: Forever's prices come from your own scans. From then on, purchases, sales, crafts and AH deposits are recorded by themselves.",
+    ["In the game's windows"] = "Under the reagents in a profession window, Goldsmith shows what your materials cost and the profit, the same as on Crafts; hover it for the breakdown.",
+    ["If you already use TSM"] = "Not needed: Goldsmith scans the AH itself. If TSM works in Forever and is installed, Goldsmith uses its prices between your scans.",
+}
+
 -- The Help page in Settings: each section's heading and text, then the
 -- getting started checklist and the tour (user, 2026-10-25: in the panel,
 -- not a window of its own). page:Measure() sets and returns its height,
@@ -1833,7 +1842,12 @@ function addon:BuildHelpPage(parent, width, settings)
         text:SetWidth(width)
         text:SetWordWrap(true)
         text:SetSpacing(2)
-        text:SetText(section[2])
+        local body = section[2]
+        if addon.isForever then
+            -- No concentration or material qualities in the Crafts line
+            body = FOREVER_HELP[section[1]] or body:gsub(" With concentration it plans.- uses it instead%.", "")
+        end
+        text:SetText(body)
         table.insert(texts, heading)
         table.insert(texts, text)
         above = text
