@@ -2213,11 +2213,15 @@ local function CreatePlanScreen(parent)
             row.mix:SetTextColor(addon:Color(color))
             row.cost:SetText(Money(e.cost + offset) .. (e.partial and "+" or ""))
             row.cost:SetTextColor(addon:Color(color))
-            row.conc:SetText(e.concentrate and string.format("%d", e.concentration) or "-")
-            -- More to start than you have now: orange, the warning above
-            -- names one that fits. The column is after ingenuity, so 297
-            -- read as fitting 298 when the game wants 314 (user, 2026-10-28)
+            -- What the game charges to start, as Do this next, the title and
+            -- the game's own window say. It was the average after ingenuity:
+            -- 263 here, 278 on the card, and 297 read as fitting 298 when
+            -- the game wants 314 (user, 2026-10-28). The cost line under
+            -- the plan keeps the after-ingenuity average.
             local eFull = e.scenario and e.scenario.concentration
+            row.conc:SetText(e.concentrate and string.format("%d", math.floor((eFull or e.concentration) + 0.5)) or "-")
+            -- More to start than you have now: orange, the warning above
+            -- names one that fits
             local short = e.concentrate and eFull and screen.concNow and eFull > screen.concNow
             row.conc:SetTextColor(addon:Color(short and "warning" or color))
             row.conc:SetShown(conc)
