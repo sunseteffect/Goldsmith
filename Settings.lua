@@ -493,6 +493,17 @@ function addon:FollowedLabel(parent)
         if f.checked > 0 then
             tooltip:AddDoubleLine("On target", string.format("%d of %d items", f.heldUp, f.checked),
                 0.8, 0.8, 0.8, 1, 1, 1)
+            -- What sold made against what Goldsmith expected for it, all
+            -- items together (user, 2026-10-27: "the percent on plan")
+            local made, expected = 0, 0
+            for _, s in ipairs(f.items) do
+                if s.expected and s.sold > 0 then made, expected = made + s.profit, expected + s.expected end
+            end
+            if expected > 0 then
+                local pct = made / expected * 100
+                local pr, pg, pb = addon:Color(pct >= 100 and "profit" or pct >= 80 and "text" or "warning")
+                tooltip:AddDoubleLine("Of expected profit", string.format("%.0f%%", pct), 0.8, 0.8, 0.8, pr, pg, pb)
+            end
         end
         tooltip:AddLine(" ")
         local muted = addon:Colorize("%d/%d %s", "muted")
@@ -522,6 +533,7 @@ function addon:FollowedLabel(parent)
         addon:Explain(tooltip, "21/37 sold: of the 37 you made, 21 have sold. Profit is on those.")
         addon:Explain(tooltip, FOLLOWED_ON_TARGET .. " On target: its sales made at least 80% of the expected profit (or, when a loss was expected, lost no more than that).")
         addon:Explain(tooltip, FOLLOWED_SHORT .. " Fell short: its sales made less than that.")
+        addon:Explain(tooltip, "Of expected profit: what the sold ones made, all together, against what Goldsmith expected for them. Over 100% beat the plan.")
         addon:Explain(tooltip, "Expected: the AH price when you crafted it, after the AH cut, minus the craft cost.")
         addon:Explain(tooltip, "Counted for crafts from Oct 11, 2026 on.")
     end, "ANCHOR_BOTTOM")
