@@ -210,14 +210,26 @@ local function FillCraftRow(row, item)
         row.who = UI.Text(row, "label", "dim")
         row.who:SetWordWrap(false)
     end
-    if item.charKey ~= addon.charKey then
+    local whoText
+    local other = item.charKey ~= addon.charKey and CharName(item.charKey)
+    if item.unlearned then
+        whoText = "to learn on " .. CharName(item.charKey)
+    elseif item.twin then
+        -- Made both ways: say which this is
+        local how = info.description
+        whoText = info.concentrate and "with concentration"
+            or ("no concentration" .. (how and how:find("^all ") and (", " .. how .. " materials") or ""))
+        if other then whoText = whoText .. " on " .. other end
+    elseif other then
+        whoText = (info.concentrate and "concentration on " or "on ") .. other
+    end
+    if whoText then
         local _, _, _, x = cells.item:GetPoint(1)
         cells.item:SetPoint("LEFT", row, "LEFT", x, 7)
         row.who:ClearAllPoints()
         row.who:SetPoint("TOPLEFT", cells.item, "BOTTOMLEFT", WHO_INDENT, -2)
         row.who:SetWidth(cells.item:GetWidth() - WHO_INDENT)
-        row.who:SetText((item.unlearned and "to learn on " or info.concentrate and "concentration on " or "on ")
-            .. CharName(item.charKey))
+        row.who:SetText(whoText)
         row.who:Show()
     else
         row.who:Hide()
@@ -3864,6 +3876,22 @@ local function Refresh(v, state)
         v.focusChip:Show()
     else
         v.focusChip:Hide()
+    end
+    -- The same tier both with and without concentration: two rows alike
+    -- but for the CONC column, so each says which it is (user, 2026-10-28:
+    -- gold Refreshing Serum at +39.46g and -96.38g)
+    local ways = {}
+    for _, item in ipairs(items) do
+        if item.tier then
+            local key = string.format("%s:%s:%s", item.charKey or "", item.recipe.recipeID or "", item.tier)
+            ways[key] = ways[key] or {}
+            ways[key][item.info.concentrate and "conc" or "plain"] = true
+            item.twinKey = key
+        end
+    end
+    for _, item in ipairs(items) do
+        local w = item.twinKey and ways[item.twinKey]
+        item.twin = w and w.conc and w.plain or nil
     end
     SortItems(items)
 
