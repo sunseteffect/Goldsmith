@@ -475,7 +475,7 @@ function addon:GetAcquiredCost(itemName, exactItemID, skip)
     end
     local listed = #list
     for _, lot in ipairs(SalvageLots(itemName, exactItemID)) do
-        list[#list + 1] = { time = lot.time, qty = lot.qty, copper = lot.copper }
+        list[#list + 1] = { time = lot.time, qty = lot.qty, copper = lot.copper, salvaged = true }
         ids[lot.itemID] = true
     end
     if exactItemID then ids = { [exactItemID] = true } end
@@ -489,6 +489,7 @@ function addon:GetAcquiredCost(itemName, exactItemID, skip)
     for itemID in pairs(ids) do held = held + addon:HeldAnywhere(itemID) end
 
     local remaining, copper, paidQty, gatheredQty, gatheredIDs, ownIDs = math.max(held, 1), 0, 0, 0, {}, {}
+    local salvagedQty = 0
     if skip and skip > 0 and held > 0 then
         remaining = held - skip
         if remaining <= 0 then return nil, 0, 0, {}, {} end
@@ -503,12 +504,13 @@ function addon:GetAcquiredCost(itemName, exactItemID, skip)
         else
             copper = copper + a.copper / a.qty * take
             paidQty = paidQty + take
+            if a.salvaged then salvagedQty = salvagedQty + take end
         end
         remaining = remaining - take
         if remaining <= 0 then break end
     end
     return paidQty > 0 and copper / paidQty or nil, paidQty, gatheredQty, gatheredIDs, ownIDs,
-        held > 0 and math.max(remaining, 0) or 0
+        held > 0 and math.max(remaining, 0) or 0, salvagedQty
 end
 
 -- What the ones you hold cost you in gold, gathered ones counting as free:

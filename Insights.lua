@@ -1903,7 +1903,7 @@ end
 --   demand, demandSource, saleRate, have, byCharacter, heldSince,
 --   crafted: charKey, estimated, partial, worst, stats, concentration,
 --            yours (nil if never crafted)
---   bought:  paid, paidSource
+--   bought:  paid, paidSource, paidHow ("salvaged" or "bought and salvaged" when some came from your salvage runs)
 --   breakEven, breakEvenFrom ("yours", "paid" or "estimated"),
 --   earned = { units, sales, profit } (all time),
 --   activity = { { time, kind ("Sold", "Bought", "Posted", "Crafted"),
@@ -1970,8 +1970,15 @@ function addon:GetItemDetails(name, itemID)
     end
     -- This quality, like the item tooltip (by name if nothing has its ID)
     if not recipe or d.material then
-        d.paid, d.paidSource = addon:GetOwnCost(name, nil, itemID)
-        if not d.paid then d.paid, d.paidSource = addon:GetOwnCost(name) end
+        local sources
+        d.paid, d.paidSource, sources = addon:GetOwnCost(name, nil, itemID)
+        if not d.paid then d.paid, d.paidSource, sources = addon:GetOwnCost(name) end
+        -- Of the "paid" ones, how many you salvaged rather than bought
+        for _, s in ipairs(sources or {}) do
+            if s[1] == "paid" and (s.salvaged or 0) > 0 then
+                d.paidHow = s.salvaged >= s[3] and "salvaged" or "bought and salvaged"
+            end
+        end
     end
     -- Not crafted yet: the estimated cost. Gathered ones count at their AH
     -- price, as in every cost (user, 2026-10-11: "we are looking for cost

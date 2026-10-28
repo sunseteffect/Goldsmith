@@ -2690,8 +2690,10 @@ function addon:GetOwnCost(itemName, excludeItemID, exactItemID, forSale)
         crafted, craftedQty = addon:GetCraftedCostByName(itemName)
         if excludeItemID and C_Item.GetItemNameByID(excludeItemID) == itemName then crafted = nil end
     end
-    local paid, paidQty, _, gatheredIDs, ownIDs, uncovered = addon:GetAcquiredCost(itemName, exactItemID, crafted and craftedQty)
-    if paid then table.insert(sources, { "paid", paid, paidQty }) end
+    local paid, paidQty, _, gatheredIDs, ownIDs, uncovered, salvagedQty = addon:GetAcquiredCost(itemName, exactItemID, crafted and craftedQty)
+    -- salvaged: how many of them came out of your own salvage runs, so the
+    -- item page doesn't call butchered Plant Protein "bought" (2026-10-28)
+    if paid then table.insert(sources, { "paid", paid, paidQty, salvaged = salvagedQty }) end
     if forSale and ownIDs and next(ownIDs) then
         local free, rest = 0, {}
         for id, n in pairs(gatheredIDs) do

@@ -1106,7 +1106,9 @@ local function CreatePage(parent)
             local sources = { paid = "bought", milled = "milled", crafted = "crafted",
                               gathered = "gathered (at the AH price)" }
             local how = {}
-            for part in (d.paidSource or "paid"):gmatch("[^+]+") do table.insert(how, sources[part] or part) end
+            for part in (d.paidSource or "paid"):gmatch("[^+]+") do
+                table.insert(how, part == "paid" and d.paidHow or sources[part] or part)
+            end
             -- Gathered ones at their AH price, like every cost (2026-10-11)
             r[1]:Set("Yours cost you", d.paid and Money(d.paid) or "-", d.paid and "text" or "dim",
                 d.paid and ("average of what you " .. table.concat(how, " and ")) or "nothing bought yet")
