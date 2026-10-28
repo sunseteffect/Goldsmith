@@ -6,7 +6,7 @@ Most players don't want to study the auction house. Goldsmith gives you a short 
 
 ## What it does
 - **Do this next:** the best crafts right now, where to spend concentration, cooldowns ready to use, salvage worth doing, and materials selling cheap. How many to make follows how fast your own batches sell: more when they sell out quickly, fewer when they slow down. Suggestions are kept to solid bets: a craft has to make a profit *and* sell.
-- **Crafts:** every recipe your characters know, costed with each character's own stats (multicraft, resourcefulness, ingenuity) and the cheapest mix of material qualities for each tier, with and without concentration. Show Recommended, Profitable, All crafts, or Not learned yet (recipes you haven't learned, with what they'd earn and where to learn them). Hide gear, search, or ignore items you never want to see. Each craft shows how well it sells: Sells, Slow or Hardly sells.
+- **Crafts:** every recipe your characters know, costed with each character's own stats (multicraft, resourcefulness, ingenuity) and the cheapest mix of material qualities for each tier, with and without concentration. Show Recommended, All crafts, or Not learned yet (recipes you haven't learned, with what they'd earn and where to learn them). Hide gear, search, or ignore items you never want to see. Each craft shows how well it sells: Sells, Slow or Hardly sells.
 - **Planner:** for any craft, whether to buy, craft, mill or prospect each material (right-click one to choose another way, or which item to salvage for it, for that plan only), and a Craft button that walks you through each step. What to craft is picked on today's prices; the plan's profit is on what your materials cost you. Shopping lists cover the unlucky case, so one trip is always enough.
 - **Queue:** queue crafts on each character and shop for all of them at once; right-click a craft in Overview or Characters to queue it in one click. Then press Craft next (or its key binding) to work through them: mill, make materials, then craft. A button swaps in the profession tool that suits the next craft.
 - **Shopping:** Goldsmith scans the AH itself for every price. **Buy next** buys your queue's materials one item at a time right from the AH, for this character or every character's queue, and warns you when the AH asks more than the plan counted on. The vendor panel buys the exact vendor materials in one click. At the mailbox, a panel sends each character what their queue needs. (Or send the list to Auctionator: turn its button on in Settings.)
@@ -23,7 +23,7 @@ Most players don't want to study the auction house. Goldsmith gives you a short 
 - [Goldsmith Data](https://github.com/sunseteffect/GoldsmithData): region-wide AH prices for US, EU, KR and TW, refreshed daily, and how well each item sells. CurseForge installs it with Goldsmith.
 
 ## Using Auctionator?
-Not needed: Goldsmith scans the AH itself and Buy next does the shopping. Auctionator is still handy for posting your crafts, and Goldsmith reads its scans. To shop with Auctionator's shopping lists instead, turn on Settings > Send to Auctionator button.
+Not needed: Goldsmith scans the AH itself and Buy next does the shopping. If you have it, Goldsmith reads its scans. To shop with Auctionator's shopping lists instead, turn on Settings > Send to Auctionator button.
 
 ## If you already use TSM
 Not needed: Goldsmith Data covers prices and how well each item sells. If TradeSkillMaster and its desktop app are installed anyway, Goldsmith uses TSM's region sales per day and sale rates instead of Goldsmith Data's Sells / Slow / Hardly sells, plus prices between your AH scans and a check on listings far from the usual price.
@@ -46,7 +46,7 @@ You can also set keys for opening Goldsmith and for Craft next in the game's Key
 
 ## Good to know
 - Goldsmith never crafts, buys or posts on its own. Every craft and every purchase is one press of a button or key.
-- Posting your crafts on the AH is up to you (TSM or Auctionator do that well).
+- Posting your crafts on the AH is up to you.
 - Characters on more than one realm group: material prices from your AH scan count everywhere in your region (one AH for the whole region), gear prices only on the realms they came from.
 
 ## Support and feedback

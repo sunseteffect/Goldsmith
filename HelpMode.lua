@@ -95,7 +95,7 @@ TAB_PARTS.overview = function(list)
             view.actionsPanel)
     else
         Add(list, "Do this next",
-            "What to do now on the character you're on, best first. Only solid bets show here: things that sell. Click one to open its plan, or right-click to queue it.",
+            "What to do now on the character you're on, best first. Only solid bets show here: things that sell, and anything you hold that sells above break-even now. Click one to open it, or right-click a craft to queue it.",
             view.actionsPanel)
         Add(list, "Followed",
             "How the suggestions you crafted turned out: what they made compared to what Goldsmith expected. Hover it for each one.",
@@ -156,7 +156,7 @@ TAB_PARTS.crafts = function(list)
             "Shows the better quality concentration reaches, and how much gold each point earns (g/conc).",
             view.concSwitch)
         Add(list, "Crafts",
-            "Every craft with its cost from your own crafting stats, AH price, profit and how well it sells. Click one for its plan.",
+            "Every craft with its cost from your own crafting stats, AH price, profit and how well it sells. A grey line under a row says who makes it, or whether it uses concentration. Click one for its plan.",
             view.list)
         Add(list, "Concentration to spend",
             "Your concentration and the best way to spend it right now. Hover it for the details.",
@@ -190,7 +190,7 @@ TAB_PARTS.items = function(list)
         Add(list, "Break-even",
             "The lowest price that doesn't lose money on what yours cost you, after the AH cut. List above this.",
             t[5])
-        Add(list, "What it costs", "What yours cost you, crafted or bought, next to the AH price now.",
+        Add(list, "What it costs", "What yours cost you (crafted, bought or salvaged), what making one costs now, and the profit each at today's price.",
             page.concNote:GetParent())
         local firstTier, lastTier
         for _, row in ipairs(page.tierRows or {}) do
@@ -218,7 +218,7 @@ TAB_PARTS.items = function(list)
     local boards = view.boards or {}
     if Shown(boards[1]) then
         Add(list, "Leaderboards",
-            "Most profit, best margin, fastest sellers, and things held too long. Click an item for its page.",
+            "Most profit, best margin, fastest sellers, and what you hold: what sells above break-even now goes first. Click an item for its page. Right-click a held item you keep for yourself to leave it out.",
             boards[1], boards[#boards])
     else
         Add(list, "Items", "Click an item for its page.", view.list)
@@ -229,7 +229,7 @@ TAB_PARTS.history = function(list)
     local view = Screen("history")
     if not view then return end
     local chips = view.chips or {}
-    Add(list, "Kinds", "Show one kind: purchases, sales, crafts, orders, deposits or gathering.",
+    Add(list, "Kinds", "Show one kind: sales, purchases, deposits, crafts, orders, gathering or boxes opened.",
         chips[1], chips[#chips])
     Add(list, "Character", "Show one character's entries.", view.character)
     Add(list, "History",
