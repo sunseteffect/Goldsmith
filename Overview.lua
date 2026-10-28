@@ -1034,7 +1034,10 @@ local function SetupSteps()
     -- the shopping (user, 2026-10-26: "shouldn't encourage using it"). The
     -- old step "Recommended: Auctionator" also kept the checklist from ever
     -- finishing without it.
-    if addon:GetBlizzardDataTime() then
+    -- Forever: no Goldsmith Data (retail prices), so no step for it
+    if addon.isForever then
+        -- prices come from the scan step below
+    elseif addon:GetBlizzardDataTime() then
         table.insert(steps, { true, "Goldsmith Data found", "The region's AH prices, updated daily, from the start." })
     else
         table.insert(steps, { false, "Install Goldsmith Data",
@@ -1132,7 +1135,11 @@ local function FillSetup(setup)
     local steps = SetupSteps()
     local allDone = true
     for i, row in ipairs(setup.rows) do
-        local done, title, detail = unpack(steps[i])
+        -- Forever has one step fewer (no Goldsmith Data)
+        for _, part in ipairs({ row.icon, row.title, row.detail }) do
+            if steps[i] then part:Show() else part:Hide() end
+        end
+        local done, title, detail = unpack(steps[i] or { true, "", "" })
         allDone = allDone and done
         row.icon:SetTexture(done and READY_ICON or WAITING_ICON)
         row.title:SetText(title)

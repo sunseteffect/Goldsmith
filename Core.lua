@@ -612,11 +612,6 @@ function addon:Initialize()
         end)
     end
 
-    -- Goldsmith Data is retail's region prices. Forever has its own
-    -- economy on the same item IDs (Linen Cloth is 2589 in both), so its
-    -- prices would be retail's. Forever prices come from your own scans.
-    if addon.isForever then GoldsmithPriceData = nil end
-
     -- Forever mode on retail, to build and check it before Forever is out
     -- (/gsm forever, dev tools): prices, data and recipes stay retail's
     if GoldsmithDB.foreverTest and not addon.isForever then
@@ -627,6 +622,12 @@ function addon:Initialize()
             Print("|cffff8040Forever mode test is on|r (retail data). /gsm forever turns it off.")
         end)
     end
+
+    -- Goldsmith Data is retail's region prices. Forever has its own
+    -- economy on the same item IDs (Linen Cloth is 2589 in both), so its
+    -- prices would be retail's. Forever prices come from your own scans.
+    -- After the test switch above, so the test drops it too.
+    if addon.isForever then GoldsmithPriceData = nil end
 
     -- Fake data from Tools\Stress-Swap.ps1: say so, so nobody plays on it
     if GoldsmithDB.stressTest then

@@ -6,6 +6,9 @@ local db = bench.LoadSaved()
 db.foreverTest = true
 local addon = bench.Login("Mysticmead", { db = db })
 bench.Check("Forever mode on", addon.isForever == true)
+-- Test 57: the test switch kept Goldsmith Data's retail prices
+bench.Check("no Goldsmith Data", addon:GetBlizzardDataTime() == nil)
+db.setupDone = nil
 
 addon:ToggleWindow()
 bench.Advance(2)
@@ -23,6 +26,8 @@ bench.HasNot("Stats: no patron orders", screens.stats, "Patron orders filled")
 bench.Has("Stats: gathering section", screens.stats, "Gathering")
 bench.HasNot("History: no Orders chip", screens.history, "\nOrders\n")
 bench.Has("Overview: last AH scan tile", screens.overview:upper(), "LAST AH SCAN")
+bench.HasNot("Overview: no Goldsmith Data step", screens.overview, "Goldsmith Data")
+bench.HasNot("Stats: no players' orders", screens.stats, "From players' orders")
 
 bench.Equal("12s 40c", addon:FormatMoney(1240), "12s 40c")
 bench.Equal("3g 25s", addon:FormatMoney(32500), "3g 25s")

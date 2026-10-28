@@ -417,6 +417,8 @@ local FOREVER_HIDDEN = {
     ["Resourcefulness procs"] = true, ["Ingenuity procs"] = true, ["Concentration spent"] = true,
     ["First crafts"] = true, ["Players' orders filled"] = true, ["Patron orders filled"] = true,
     ["Biggest tip"] = true, ["Boxes opened"] = true, ["Milling and salvage runs"] = true,
+    -- No orders, so lifetime profit is all from sales
+    ["From sales"] = true, ["From players' orders"] = true,
 }
 local function ForeverRows(rows)
     if not addon.isForever then return rows end

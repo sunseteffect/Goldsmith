@@ -6,6 +6,7 @@
 local bench = dofile(BENCH_DIR .. "bench.lua")
 local db = bench.LoadSaved()
 db.sellNowTold = nil
+db.setupDone = true  -- Do this next, not the Getting started list
 local addon = bench.Login("Mysticmead", { db = db })
 -- Prices set here, whatever the saved scans say: everything held a while
 -- under its break-even, so only the one raised
