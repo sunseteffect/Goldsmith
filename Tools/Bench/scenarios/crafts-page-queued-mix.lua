@@ -16,6 +16,8 @@ db.ui2 = db.ui2 or {}
 db.ui2.planMixOpen = true
 -- Silver Powder Pigment held, as on 2026-10-24 (used up since)
 db.characters[MADDOXYNN].stock[245808] = 60
+-- and the silver Argentleaf for the rest (milled since)
+db.characters[MADDOXYNN].stock[236776] = 200
 local addon = bench.Login("Mysticmead", { db = db })
 
 addon:OpenCraftPlan(GoldsmithDB.recipes[SIENNA_INK], { tier = 2, concentrate = true }, MADDOXYNN, 6, "queue")

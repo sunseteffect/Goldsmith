@@ -2548,7 +2548,9 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTe
     -- is kept, to see later how the suggestion held up.
     if addon.TakeSuggested and addon:TakeSuggested(lot.name, lot.qty) then
         lot.suggested = true
-        lot.expectedPrice = addon:GetMarketPrice(resultData.itemID)
+        -- As plans price it: a spike counts at the usual price (PriceJump)
+        local price, source = addon:GetMarketPriceInfo(resultData.itemID)
+        lot.expectedPrice = addon:PriceJump(resultData.itemID, price, source) or price
     end
     table.insert(lots, lot)
     while #lots > CRAFT_LOT_LIMIT do

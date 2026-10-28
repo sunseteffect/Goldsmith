@@ -386,14 +386,20 @@ end
 local MIN_CHECKED = 5
 local function PickRows(s)
     local f = s.followed
-    local accuracy = f.checked >= MIN_CHECKED and (f.heldUp / f.checked * 100) or nil
+    -- By gold, not by item: one small miss counted like a big win made it
+    -- 44% while the gold was 59% (user: "its bad", 2026-10-27)
+    local accuracy = f.checked >= MIN_CHECKED and f.expectedTotal > 0
+        and (f.made / f.expectedTotal * 100) or nil
     return {
-        { "Goldsmith's accuracy", accuracy and Percent(accuracy) or "not enough yet",
-          accuracy and (accuracy >= 70 and "profit" or accuracy >= 50 and "warning" or "loss") or "muted",
+        { "Of expected profit", accuracy and Percent(accuracy) or "not enough yet",
+          accuracy and (accuracy >= 100 and "profit" or accuracy >= 80 and "text" or "warning") or "muted",
           tooltip = function(t)
-            White(t, "Goldsmith's accuracy")
-            Grey(t, "Of the suggestions you crafted that have sold, how many made at least 80% of the profit Goldsmith expected.")
-            Pair(t, "Held up", string.format("%d of %d", f.heldUp, f.checked))
+            White(t, "Of expected profit")
+            Grey(t, "Of the suggestions you crafted that have sold: the profit they made, against what Goldsmith expected.")
+            Pair(t, "Made", Signed(f.made))
+            Pair(t, "Expected", Signed(f.expectedTotal))
+            Pair(t, "Items on target", string.format("%d of %d", f.heldUp, f.checked))
+            Grey(t, "On target: made at least 80% of what was expected.")
             if not accuracy then Grey(t, string.format("Shows once %d of them have sold.", MIN_CHECKED)) end
             addon:Explain(t, "From the crafts Goldsmith still keeps: the last 30 of each item.")
         end },

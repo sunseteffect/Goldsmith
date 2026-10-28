@@ -495,12 +495,8 @@ function addon:FollowedLabel(parent)
                 0.8, 0.8, 0.8, 1, 1, 1)
             -- What sold made against what Goldsmith expected for it, all
             -- items together (user, 2026-10-27: "the percent on plan")
-            local made, expected = 0, 0
-            for _, s in ipairs(f.items) do
-                if s.expected and s.sold > 0 then made, expected = made + s.profit, expected + s.expected end
-            end
-            if expected > 0 then
-                local pct = made / expected * 100
+            if f.expectedTotal > 0 then
+                local pct = f.made / f.expectedTotal * 100
                 local pr, pg, pb = addon:Color(pct >= 100 and "profit" or pct >= 80 and "text" or "warning")
                 tooltip:AddDoubleLine("Of expected profit", string.format("%.0f%%", pct), 0.8, 0.8, 0.8, pr, pg, pb)
             end

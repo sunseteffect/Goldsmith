@@ -35,6 +35,9 @@ if recipe then
     tierInfo = tierInfo and addon:WithCharacter(key, addon.ChooseMix, addon, recipe, tierInfo, 1)
     local plan = addon:WithCharacter(key, addon.BuildPlan, addon, recipe, 1, true, tierInfo)
     bench.Log("Missive: cost %s, sells for %s", addon:FormatMoney(plan.cost), addon:FormatMoney(plan.revenue or 0))
-    bench.Check("Missive plan makes gold", plan.profit and plan.profit > 0, addon:FormatMoney(plan.profit or 0))
+    -- Not "makes gold": that follows the market (41g against 43g on
+    -- 2026-10-27). The bug cost about 3 times what it sells for.
+    bench.Check("Missive cost not inflated", plan.revenue and plan.cost < plan.revenue * 1.5,
+        addon:FormatMoney(plan.cost) .. " against " .. addon:FormatMoney(plan.revenue or 0))
 end
 bench.Done()

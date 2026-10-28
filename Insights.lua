@@ -1013,6 +1013,8 @@ end
 -- expected to make (price at craft time after the AH cut, less what the
 -- craft cost), when the lots kept that price. checked: items with sales
 -- and an expectation; heldUp: how many of them made HELD_UP_SHARE of it.
+-- made / expectedTotal: over those checked items, the profit made and the
+-- profit expected, for the share of expected profit made (Stats).
 -- days: since the item's first followed craft. A box that can't be sold
 -- (a Bouquet of Herbs) counts when opened instead, at what came out of it
 -- (worth after the AH cut, less the box's cost): opened = true, and sold
@@ -1053,11 +1055,11 @@ function addon:GetFollowedSummary(days)
                 s.cost = s.cost + lot.qty * (lot.unitCost or 0)
                 s.first = math.min(s.first, lot.time)
                 s.itemID = s.itemID or itemID
-                table.insert(s.lots, lot)
+                table.insert(s.lots, { lot = lot, itemID = itemID })
             end
         end
     end
-    local result = { crafted = 0, sold = 0, unsold = 0, profit = 0, checked = 0, heldUp = 0, items = {} }
+    local result = { crafted = 0, sold = 0, unsold = 0, profit = 0, checked = 0, heldUp = 0, made = 0, expectedTotal = 0, items = {} }
     local sales = addon.ledger:index().sales
     for name, s in pairs(byName) do
         s.sold, s.profit = 0, 0
@@ -1084,15 +1086,21 @@ function addon:GetFollowedSummary(days)
         -- like the sales. 13 Razorstones sold from a lot that kept no
         -- price were judged on two later losing lots (expected -441.51g,
         -- 2026-10-12).
-        table.sort(s.lots, function(a, b) return a.time < b.time end)
+        table.sort(s.lots, function(a, b) return a.lot.time < b.lot.time end)
         local left, expQty, expProfit = s.sold, 0, 0
-        for _, lot in ipairs(s.lots) do
+        for _, entry in ipairs(s.lots) do
             if left <= 0 then break end
+            local lot = entry.lot
             local take = math.min(lot.qty, left)
             left = left - take
             if lot.expectedPrice then
+                -- A price spike kept as the expectation is judged at the
+                -- usual price, as plans do: Enchant Ring - Thalassian Haste
+                -- kept 2,488g (usually 9g), half of all the "missing"
+                -- profit (2026-10-27). Lots before the craft-time check.
+                local price = addon:PriceJump(entry.itemID, lot.expectedPrice) or lot.expectedPrice
                 expQty = expQty + take
-                expProfit = expProfit + take * (lot.expectedPrice * (1 - AH_CUT) - (lot.unitCost or 0))
+                expProfit = expProfit + take * (price * (1 - AH_CUT) - (lot.unitCost or 0))
             end
         end
         if expQty > 0 then
@@ -1100,6 +1108,8 @@ function addon:GetFollowedSummary(days)
             s.expected = expProfit / expQty * s.sold
             if s.sold > 0 then
                 result.checked = result.checked + 1
+                result.made = result.made + s.profit
+                result.expectedTotal = result.expectedTotal + s.expected
                 if s.profit >= (s.expected > 0 and s.expected * HELD_UP_SHARE or s.expected) then
                     s.heldUp = true
                     result.heldUp = result.heldUp + 1
