@@ -40,14 +40,14 @@ local COLUMNS = {
 local view
 
 -- A queued craft's concentration: the full cost to start its crafts (what
--- crafts are counted at, like the top of a plan) and the average after
--- ingenuity (like the plan's cost line), or nil without concentration
+-- crafts are counted at, like the top of a plan), or nil without
+-- concentration
 local function RowConcentration(row)
     local ti, plan = row.tierInfo, row.plan
     if not (row.entry.concentrate and ti and ti.concentrate and plan and plan.crafts > 0) then return nil end
     local full = ti.scenario and ti.scenario.concentration or ti.concentration
     if not full then return nil end
-    return full * plan.crafts, (ti.concentration or full) * plan.crafts
+    return full * plan.crafts
 end
 
 -- The concentration icon in place of the word "conc" (Core.lua)

@@ -553,7 +553,7 @@ local function CraftTooltip(tooltip, item)
 
     if info.concentrate then
         tooltip:AddLine(" ")
-        Line(tooltip, "Concentration", string.format("about %d per craft", info.concentration), "conc")
+        Line(tooltip, "Concentration", string.format("%d per craft", info.concentration), "conc")
         Why(tooltip, "Ingenuity sometimes refunds some, so it's an average.")
         local perPoint = GoldPerConc(info)
         if perPoint and perPoint < 0 then
@@ -579,7 +579,7 @@ local function CraftTooltip(tooltip, item)
                 if not shown then tooltip:AddLine(" ") shown = true end
                 -- No price: "no price profit each" read as garbled (Bouquet of
                 -- Herbs, only silver ones opened, user 2026-10-27)
-                Note(tooltip, string.format("%s tier needs concentration: about %d per craft, %s. Turn on Concentration (top right) to see it.",
+                Note(tooltip, string.format("%s tier needs concentration: %d per craft, %s. Turn on Concentration (top right) to see it.",
                     addon:TierIconText(row.tier, row.tierCount), row.concentration or 0,
                     row.profit and (Signed(row.profit) .. " profit each") or "no price yet"), "conc")
             end
@@ -883,7 +883,7 @@ local function PlanTooltip(tooltip, node)
     -- With concentration: how much, and what each point earns
     local concValue, concPerItem, buyPrice = CraftConcValue(node)
     if concValue then
-        craftDetail = craftDetail .. string.format("\nuses about %d concentration each", math.floor(concPerItem + 0.5))
+        craftDetail = craftDetail .. string.format("\nuses %d concentration each", math.floor(concPerItem + 0.5))
             .. (buyPrice and string.format("\nsaves %s a point vs buying at %s", Money(concValue), Money(buyPrice))
                 or string.format("\nearns %s a point", Money(concValue)))
     end
@@ -2216,8 +2216,7 @@ local function CreatePlanScreen(parent)
             -- What the game charges to start, as Do this next, the title and
             -- the game's own window say. It was the average after ingenuity:
             -- 263 here, 278 on the card, and 297 read as fitting 298 when
-            -- the game wants 314 (user, 2026-10-28). The cost line under
-            -- the plan keeps the after-ingenuity average.
+            -- the game wants 314 (user, 2026-10-28).
             local eFull = e.scenario and e.scenario.concentration
             row.conc:SetText(e.concentrate and string.format("%d", math.floor((eFull or e.concentration) + 0.5)) or "-")
             -- More to start than you have now: orange, the warning above
@@ -2716,12 +2715,27 @@ local function CreatePlanScreen(parent)
                 -- The crafts the planner gave concentration to (it plans no
                 -- more than the crafter has now; Planner.lua)
                 local crafts = node.concCrafts or math.ceil(node.toGet / row.outputPerCraft)
-                subConc[key] = (subConc[key] or 0) + crafts * row.concentration
+                local rowFull = row.scenario and row.scenario.concentration or row.concentration
+                subConc[key] = (subConc[key] or 0) + crafts * rowFull
             end
         end
-        local concParts = {}
+        -- What the crafts take to start, and ingenuity as the game puts it:
+        -- a chance to get some back. "About 263 after ingenuity" (the
+        -- average) meant nothing for 1 craft: you get 139 back or none
+        -- (user, 2026-10-28)
+        local concParts, ingenuityNote = {}, nil
         if tierInfo and tierInfo.concentrate then
-            table.insert(concParts, string.format("%d", tierInfo.concentration * plan.crafts))
+            local full = tierInfo.scenario and tierInfo.scenario.concentration or tierInfo.concentration
+            table.insert(concParts, string.format("%d", math.floor(full * plan.crafts + 0.5)))
+            local stats = addon:WithCharacter(p.charKey, function()
+                return addon:StatsChar().recipeStats[recipe.recipeID]
+            end)
+            local chance = stats and stats.ingenuity or 0
+            local back = tierInfo.scenario and tierInfo.scenario.ingenuityRefund or 0
+            if chance > 0 and back >= 1 then
+                ingenuityNote = string.format("%d%% chance %s to get %d back", math.floor(chance + 0.5),
+                    plan.crafts > 1 and "a craft" or "", math.floor(back + 0.5)):gsub("  ", " ")
+            end
         end
         for _, key in ipairs(subOrder) do
             local c = GoldsmithDB.characters[key]
@@ -2729,12 +2743,12 @@ local function CreatePlanScreen(parent)
                 key ~= p.charKey and (" on " .. (c and c.name or key)) or " for materials"))
         end
         if #concParts > 0 then
-            costNote = costNote .. ", about " .. table.concat(concParts, " + ") .. " concentration after ingenuity"
+            costNote = costNote .. ", " .. table.concat(concParts, " + ") .. " concentration"
+                .. (ingenuityNote and (" (" .. ingenuityNote .. ")") or "")
         end
         -- The concentration these crafts need to start, at the top too:
         -- under the cost alone it was easy to miss (user, 2026-10-16).
-        -- The full cost, which is what crafts are counted at; the cost
-        -- line's is the average after ingenuity gives some back.
+        -- The full cost, which is what crafts are counted at.
         if tierInfo and tierInfo.concentrate then
             local full = tierInfo.scenario and tierInfo.scenario.concentration or tierInfo.concentration
             if full then

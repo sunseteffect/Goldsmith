@@ -792,12 +792,14 @@ function addon:DescribeMix(recipe, scenario)
     return table.concat(parts, ", "), "mix"
 end
 
--- Expected concentration spent per craft, after ingenuity refunds
+-- Concentration a craft spends: the full cost, what the game takes to
+-- start. Ingenuity isn't counted on: it was averaged in (263 for a 278
+-- craft), so gold per point and the numbers shown didn't match what you
+-- spend, and one craft gets 139 back or nothing. A refund is a bonus the
+-- next plan uses (user, 2026-10-28: "if we get some back cool. then we
+-- can plan around the concentration we got lucky on").
 local function ExpectedConcentration(recipe, scenario)
-    if scenario.concentration <= 0 then return 0 end
-    local stats = addon:StatsChar().recipeStats[recipe.recipeID]
-    local ingenuity = stats and stats.ingenuity or 0
-    return math.max(scenario.concentration - ingenuity / 100 * scenario.ingenuityRefund, 0)
+    return math.max(scenario.concentration, 0)
 end
 
 -- Whether concentration mix a beats b: more gold per point, and when both

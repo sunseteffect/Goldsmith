@@ -1123,7 +1123,7 @@ local function CreatePage(parent)
             end
         end
         page.concNote:SetText(d.concentration
-            and string.format("This tier needs about %d concentration per craft.", d.concentration) or "")
+            and string.format("This tier needs %d concentration per craft.", d.concentration) or "")
 
         local showTiers = #d.tiers > 1
         page.tiersLabel:ClearAllPoints()
