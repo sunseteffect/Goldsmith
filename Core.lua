@@ -8,6 +8,20 @@ addon.isForever = WOW_PROJECT_ID == (WOW_PROJECT_CAMELOT or 18)
 local pending = nil
 local awaitingMoney = false
 
+-- Text written for retail, in Forever: it has no concentration, so lists
+-- like "Gold in stock, concentration, total gold" drop it
+function addon:ForeverText(text)
+    if not (addon.isForever and text) then return text end
+    return (text:gsub(", concentration,", ","):gsub("concentration, ", ""))
+end
+
+-- Gold in a chat line: "12.40g" on retail as always; Forever's silver and
+-- copper (FormatMoney), where 0.12g told nothing (stress test, 2026-10-21)
+local function ChatGold(copper)
+    if addon.isForever then return addon:FormatMoney(copper) end
+    return string.format("%.2fg", copper / 10000)
+end
+
 local function Print(msg, ...)
     print("|cFF00FF00[Goldsmith]|r " .. string.format(msg, ...))
 end
@@ -85,11 +99,11 @@ function addon:RecordPurchase()
         if math.abs(diff) < 100 then
             plannedText = ", on plan"
         else
-            plannedText = string.format(", %.2fg %s plan", math.abs(diff) / 10000, diff > 0 and "over" or "under")
+            plannedText = string.format(", %s %s plan", ChatGold(math.abs(diff)), diff > 0 and "over" or "under")
         end
     end
-    addon:Notify("money", "Bought %s x%d for %.2fg (%.2fg each%s)",
-        p.name, p.quantity, spent / 10000, (spent / p.quantity) / 10000, plannedText)
+    addon:Notify("money", "Bought %s x%d for %s (%s each%s)",
+        p.name, p.quantity, ChatGold(spent), ChatGold(spent / p.quantity), plannedText)
     addon:ShoppingListBought(p.itemID, p.quantity)
     if addon.QueueBought then addon:QueueBought(p.itemID, p.quantity) end
 
@@ -126,7 +140,7 @@ local function OnBuyMerchantItem(index, quantity)
     local total = math.floor(price / stackCount * units + 0.5)
 
     addon.ledger:addCost(prof, name, units, total, "PURCHASE", GetMerchantItemID(index))
-    addon:Notify("money", "Bought %s x%d from a vendor for %.2fg", name, units, total / 10000)
+    addon:Notify("money", "Bought %s x%d from a vendor for %s", name, units, ChatGold(total))
 
     if addon.Refresh then
         addon.Refresh()
@@ -177,8 +191,27 @@ function addon:CheckSaleTotal()
     if saleRun and #pendingSales == 0 and not SalesLeftInMail() then FlushSaleRun() end
 end
 
+-- Whether Goldsmith recorded a deposit for this item in the 32 days before
+-- (AH mail lasts 30 days, a listing up to 2)
+local function DepositOnRecord(itemName)
+    local since = time() - 32 * 86400
+    for _, e in ipairs(GoldsmithDB.entries or {}) do
+        if e.type == "COST" and e.kind == "DEPOSIT" and e.item == itemName and (e.timestamp or 0) >= since then
+            return true
+        end
+    end
+    return false
+end
+
 local function RecordSale(sale)
     local prof = addon:GetProfessionForItemName(sale.itemName) or "Unassigned"
+    -- Posted before Goldsmith recorded deposits: its deposit was never
+    -- counted as a cost, so the refund isn't income either (a 1s refund
+    -- made a losing sale look 1s better; stress test, 2026-10-21)
+    if (sale.depositRefund or 0) > 0 and not DepositOnRecord(sale.itemName) then
+        sale.net = sale.net - sale.depositRefund
+        sale.depositRefund = 0
+    end
 
     -- Which quality it was, from your post at that price (the mail only
     -- names it), so silver and gold aren't costed as a blend
@@ -406,7 +439,7 @@ local function RecordDeposit()
     local prof = addon:GetProfessionForItemName(post.name) or "Unassigned"
     addon.ledger:addCost(prof, post.name, post.quantity, post.deposit, "DEPOSIT", nil,
         { postedID = post.itemID, sellLevel = post.level })
-    addon:Notify("money", "Posted %s x%d, deposit %.2fg", post.name, post.quantity, post.deposit / 10000)
+    addon:Notify("money", "Posted %s x%d, deposit %s", post.name, post.quantity, ChatGold(post.deposit))
 
     if addon.Refresh then
         addon.Refresh()
@@ -579,6 +612,22 @@ function addon:Initialize()
         end)
     end
 
+    -- Goldsmith Data is retail's region prices. Forever has its own
+    -- economy on the same item IDs (Linen Cloth is 2589 in both), so its
+    -- prices would be retail's. Forever prices come from your own scans.
+    if addon.isForever then GoldsmithPriceData = nil end
+
+    -- Forever mode on retail, to build and check it before Forever is out
+    -- (/gsm forever, dev tools): prices, data and recipes stay retail's
+    if GoldsmithDB.foreverTest and not addon.isForever then
+        addon.isForever = true
+        addon.foreverTest = true
+        addon:ApplyForeverSettings()
+        C_Timer.After(8, function()
+            Print("|cffff8040Forever mode test is on|r (retail data). /gsm forever turns it off.")
+        end)
+    end
+
     -- Fake data from Tools\Stress-Swap.ps1: say so, so nobody plays on it
     if GoldsmithDB.stressTest then
         C_Timer.After(8, function()
@@ -725,6 +774,9 @@ SlashCmdList["GOLDSMITH"] = function(msg)
     -- page forgets it.
     elseif cmd == "testerror" and GoldsmithDB.devTools then
         C_Timer.After(0, function() error("Goldsmith test error (/gsm testerror), not a real bug") end)
+    elseif cmd == "forever" and GoldsmithDB.devTools then
+        GoldsmithDB.foreverTest = not GoldsmithDB.foreverTest or nil
+        ReloadUI()
     elseif cmd == "prep" and GoldsmithDB.devTools then
         addon:PrintPrepCheck()
     elseif cmd == "perf" then
