@@ -14,6 +14,16 @@ local UI = addon.UI
 -- this is marked seen. /gsm news shows it again.
 local NEWS = {
     {
+        key = "2.7.2",
+        title = "What's new in Goldsmith 2.7.2",
+        items = {
+            { "Sell now", "When something you've held for days sells above break-even, Goldsmith tells you in chat, mid-screen and in Do this next." },
+            { "Held board", "Items > Held puts what sells above break-even first. Right-click what you keep for yourself to leave it out." },
+            { "How the suggestions did", "Stats shows how much of the expected profit your crafted suggestions made." },
+            { "Losses stand out", "Posting under break-even is now a red chat line with the loss each." },
+        },
+    },
+    {
         key = "2.7.0",
         title = "What's new in Goldsmith 2.7",
         items = {
