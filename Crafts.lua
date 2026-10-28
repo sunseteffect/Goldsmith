@@ -1102,7 +1102,8 @@ end
 -- again even if it's the same one.
 local selectedRecipeID
 
-function addon:OpenCraftPlan(recipe, info, charKey, quantity, returnTab, crafts)
+-- mix: the mix of material qualities to open with (Do this next's)
+function addon:OpenCraftPlan(recipe, info, charKey, quantity, returnTab, crafts, mix)
     selectedRecipeID = nil
     pending = {
         crafts = crafts,
@@ -1112,6 +1113,7 @@ function addon:OpenCraftPlan(recipe, info, charKey, quantity, returnTab, crafts)
             scenario = info and info.scenario, returnTab = returnTab,
             -- A queued crafting order: planned and changed as that entry
             order = info and info.order,
+            mix = mix,
         },
         quantity = quantity,
     }
@@ -2078,6 +2080,7 @@ local function CreatePlanScreen(parent)
                 screen.queued.prefMix = nil
                 addon:QueueEntryChanged()
             end
+            p.mix = nil
             screen:Update()
         end)
         row.hit = hit
@@ -2211,7 +2214,12 @@ local function CreatePlanScreen(parent)
             row.cost:SetText(Money(e.cost + offset) .. (e.partial and "+" or ""))
             row.cost:SetTextColor(addon:Color(color))
             row.conc:SetText(e.concentrate and string.format("%d", e.concentration) or "-")
-            row.conc:SetTextColor(addon:Color(color))
+            -- More to start than you have now: orange, the warning above
+            -- names one that fits. The column is after ingenuity, so 297
+            -- read as fitting 298 when the game wants 314 (user, 2026-10-28)
+            local eFull = e.scenario and e.scenario.concentration
+            local short = e.concentrate and eFull and screen.concNow and eFull > screen.concNow
+            row.conc:SetTextColor(addon:Color(short and "warning" or color))
             row.conc:SetShown(conc)
             if e.profit then
                 row.profit:SetText(Signed(e.profit - offset))
@@ -2522,7 +2530,11 @@ local function CreatePlanScreen(parent)
         -- still planned to craft the part (user, 2026-10-26)
         local order = p.order and addon:FindOrderEntry(p.order.orderID)
         local queued = order or (tierInfo and addon:FindQueueEntry(p.charKey, recipe.recipeID, p.tier, tierInfo.concentrate == true))
-        local set = queued and queued.prefMix and addon:MixByDescription(tierInfo, queued.prefMix)
+        -- Opened from Do this next: its mix, not your saved pick. It said
+        -- 278 concentration (7 gold), the plan opened on your all silver
+        -- pick at 314 with 298 (user, 2026-10-28)
+        local want = (queued and queued.prefMix) or p.mix
+        local set = want and addon:MixByDescription(tierInfo, want)
         if set then
             tierInfo = set
         elseif tierInfo then
@@ -2574,6 +2586,7 @@ local function CreatePlanScreen(parent)
         -- for 1 (user, 2026-10-12). The box keeps your number. Counted at
         -- the full cost: ingenuity's refund is luck (user, 2026-10-16)
         local concLimit, leftover
+        screen.concNow = nil
         if tierInfo and tierInfo.concentrate then
             local current = p.charKey == addon.charKey and addon:GetConcentration(recipe.profession)
                 or addon:GetCharacterConcentration(p.charKey, recipe.profession)
@@ -2604,6 +2617,8 @@ local function CreatePlanScreen(parent)
                 elseif affordable == 0 then
                     concLimit = { crafts = 0, current = current, full = full }
                 end
+                -- The mix table marks mixes you can't start now
+                screen.concNow = current
                 -- What the concentration left after these crafts covers with
                 -- a cheaper mix, as the to-do's "other mix, conc left" line
                 -- (4 Sterling Alloy at 1 gold ingot, then 1 at 2 gold; user
@@ -2659,8 +2674,23 @@ local function CreatePlanScreen(parent)
                 "  ·  %d conc left: 1 more with the %s", leftover.left, short), "muted"))
         end
         if concLimit and concLimit.crafts == 0 then
+            -- The best-ranked mix that fits, as the mix table ranks them
+            local fit, rank, n = nil, nil, 0
+            local sorted = {}
+            for _, e in ipairs(tierInfo.scenarios or {}) do
+                if e.tier == tierInfo.tier and e.concentrate and e.concentrationValue then
+                    table.insert(sorted, e)
+                end
+            end
+            table.sort(sorted, function(a, b) return addon:BetterConcentration(a, b) end)
+            for _, e in ipairs(sorted) do
+                n = n + 1
+                local eFull = e.scenario and e.scenario.concentration
+                if not fit and eFull and eFull <= concLimit.current then fit, rank = e, n end
+            end
             screen.crafts:SetText(screen.crafts:GetText() .. addon:Colorize(string.format(
-                "  (not enough concentration now: %d to start, you have %d)", concLimit.full, concLimit.current), "warning"))
+                "  (not enough concentration now: %d to start, you have %d%s)", concLimit.full, concLimit.current,
+                fit and string.format("; mix #%d needs %d", rank, fit.scenario.concentration) or ""), "warning"))
         end
 
         local made = math.max(plan.expectedOutput, 0.0001)

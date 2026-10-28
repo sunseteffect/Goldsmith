@@ -318,7 +318,7 @@ local function ConcentrationAction(conc)
             addon:ClickHint(tooltip, "Click to plan it: materials and shopping list.")
         end,
         onClick = function()
-            addon:OpenCraftPlan(first.recipe, first.row, best.key, nil, nil, first.crafts)
+            addon:OpenCraftPlan(first.recipe, first.row, best.key, nil, nil, first.crafts, first.row.description)
         end,
     }
 end
