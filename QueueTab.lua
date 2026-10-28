@@ -322,7 +322,15 @@ local function Create(parent)
     })
     view.list:SetPoint("TOPLEFT", 0, -(TOP_HEIGHT + 12))
     view.list:SetPoint("BOTTOMRIGHT", 0, SUMMARY_HEIGHT + 12)
-    view.list:SetColumns(COLUMNS)
+    -- Forever has no concentration: no Conc column
+    local columns = COLUMNS
+    if addon.isForever then
+        columns = {}
+        for _, c in ipairs(COLUMNS) do
+            if c.key ~= "conc" then table.insert(columns, c) end
+        end
+    end
+    view.list:SetColumns(columns)
 
     -- Totals, shopping and Craft next
     local summary = UI.Panel(parent)

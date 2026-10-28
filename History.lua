@@ -320,14 +320,17 @@ local function Create(parent)
     view.chips = {}
     local previous
     for _, kind in ipairs(KINDS) do
-        local chip = Chip(parent, kind.label, function()
-            ui.historyKind = kind.key
-            addon.RefreshWindow()
-        end)
-        chip.key = kind.key
-        if previous then chip:SetPoint("LEFT", previous, "RIGHT", 6, 0) else chip:SetPoint("TOPLEFT", 0, 0) end
-        previous = chip
-        table.insert(view.chips, chip)
+        -- Forever has no crafting orders or crafted boxes
+        if not (addon.isForever and (kind.key == "Order" or kind.key == "Opened")) then
+            local chip = Chip(parent, kind.label, function()
+                ui.historyKind = kind.key
+                addon.RefreshWindow()
+            end)
+            chip.key = kind.key
+            if previous then chip:SetPoint("LEFT", previous, "RIGHT", 6, 0) else chip:SetPoint("TOPLEFT", 0, 0) end
+            previous = chip
+            table.insert(view.chips, chip)
+        end
     end
 
     view.character = UI.Dropdown(parent, 150, function(root)

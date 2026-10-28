@@ -315,7 +315,9 @@ end
 -- (auctionatorButton); the button above it (Craft, Mill) moves down into
 -- its place when it's hidden
 function addon:PlaceShopButton(shop, above)
-    local show = addon:Setting("auctionatorButton")
+    -- In Forever only with Auctionator there (it may not have a Forever
+    -- build; stress test, 2026-10-21)
+    local show = addon:Setting("auctionatorButton") and (not addon.isForever or addon:HasAuctionator())
     shop:SetShown(show)
     if not above then return end
     above:ClearAllPoints()

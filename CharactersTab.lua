@@ -286,7 +286,7 @@ local function CreateCard(parent)
     card.name:SetPoint("RIGHT", card.exclude, "LEFT", -8, 0)
     UI.SetTooltip(card.exclude, function(tooltip)
         tooltip:AddLine("Exclude this character", 1, 1, 1)
-        tooltip:AddLine("Leaves it out of Gold in stock, concentration, total gold, the Crafts tab and Do this next: a bank alt, or one you've stopped playing. Its sales still count.",
+        tooltip:AddLine(addon:ForeverText("Leaves it out of Gold in stock, concentration, total gold, the Crafts tab and Do this next: a bank alt, or one you've stopped playing. Its sales still count."),
             0.8, 0.8, 0.8, true)
     end, "ANCHOR_BOTTOM")
 
@@ -420,7 +420,7 @@ local function FillCard(card, entry, todo, cooldowns)
 
     local message
     if not included then
-        message = "Excluded: not counted in stock, concentration, total gold, Crafts or Do this next."
+        message = addon:ForeverText("Excluded: not counted in stock, concentration, total gold, Crafts or Do this next.")
     elseif #items == 0 then
         message = next(c.professions) and "Nothing worth crafting right now."
             or "Nothing to craft. Log in on it and open its professions if it has any."

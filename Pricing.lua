@@ -255,6 +255,14 @@ function addon:GetScanPrice(itemID)
     return entry[1], math.max(0, math.floor((time() - scan.time) / 86400))
 end
 
+-- No price for an item: in Forever, after a scan of your own, it simply
+-- wasn't listed (most old items aren't), so "scan the AH" misled
+-- (stress test, 2026-10-21)
+function addon:NoPriceText(text)
+    if addon.isForever and addon:GetOwnScanTime() then return "None on the AH in your last scan." end
+    return text
+end
+
 function addon:GetOwnScanTime()
     if not addon:Setting("ahScan") then return nil end
     return GoldsmithDB.ownScan and GoldsmithDB.ownScan.time

@@ -409,6 +409,34 @@ local function PickRows(s)
     }
 end
 
+-- Midnight crafting that Forever doesn't have: crafting stats,
+-- concentration, crafting orders, crafted boxes and milling (stress test,
+-- 2026-10-21). Gathering stays. Rows by their label.
+local FOREVER_HIDDEN = {
+    ["Multicraft procs"] = true, ["Free items from multicraft"] = true, ["Biggest multicraft"] = true,
+    ["Resourcefulness procs"] = true, ["Ingenuity procs"] = true, ["Concentration spent"] = true,
+    ["First crafts"] = true, ["Players' orders filled"] = true, ["Patron orders filled"] = true,
+    ["Biggest tip"] = true, ["Boxes opened"] = true, ["Milling and salvage runs"] = true,
+}
+local function ForeverRows(rows)
+    if not addon.isForever then return rows end
+    local kept, skipProfit = {}, false
+    for _, row in ipairs(rows) do
+        local label = row[1]
+        -- An order kind's "  Profit" line goes with it
+        if label and (FOREVER_HIDDEN[label] or (skipProfit and label == "  Profit")) then
+            skipProfit = FOREVER_HIDDEN[label] and label:find("orders filled") and true or false
+        else
+            skipProfit = false
+            table.insert(kept, row)
+        end
+    end
+    -- A divider left at the top or bottom
+    while kept[1] and kept[1].divider do table.remove(kept, 1) end
+    while kept[#kept] and kept[#kept].divider do table.remove(kept) end
+    return kept
+end
+
 local LEFT = {
     { key = "money", title = "Gold", rows = MoneyRows },
     { key = "auctions", title = "Auctions", rows = AuctionRows },
@@ -419,7 +447,7 @@ local RIGHT = {
     { key = "characters", title = "Characters by profit", rows = CharacterRows },
     { key = "crafting", title = "Crafting", rows = CraftRows },
     { key = "picks", title = "Goldsmith's picks", rows = PickRows },
-    { key = "orders", title = "Orders and gathering", rows = OrderRows },
+    { key = "orders", title = "Orders and gathering", foreverTitle = "Gathering", rows = OrderRows },
 }
 
 -- Building blocks
@@ -454,7 +482,7 @@ local function CreateSection(parent, def)
     section.def = def
     section.title = UI.Text(section, "heading")
     section.title:SetPoint("TOPLEFT", SECTION_PAD + 4, -12)
-    section.title:SetText(def.title)
+    section.title:SetText(addon.isForever and def.foreverTitle or def.title)
     section.rows = {}
     return section
 end
@@ -621,7 +649,7 @@ local function Refresh(view, state)
     view.tiles[1].tooltip = function(t)
         White(t, s.title .. " Goldsmith")
         Grey(t, "Earned by lifetime profit. Compare yours with friends.")
-        for _, row in ipairs(addon.GOLDSMITH_TITLES) do
+        for _, row in ipairs(addon:GoldsmithTitles()) do
             local r, g, b = addon:Color(row[2] == s.title and "gold" or "muted")
             t:AddDoubleLine(row[2], Money(row[1] * 10000), r, g, b, r, g, b)
         end
@@ -639,7 +667,7 @@ local function Refresh(view, state)
     view.tiles[4].tooltip = nil
 
     for _, column in ipairs({ view.left, view.right }) do
-        for _, section in ipairs(column) do FillSection(section, section.def.rows(s)) end
+        for _, section in ipairs(column) do FillSection(section, ForeverRows(section.def.rows(s))) end
     end
     Layout(view)
 end

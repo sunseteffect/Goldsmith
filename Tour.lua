@@ -139,7 +139,8 @@ local preparing -- { onReady } while the sample is being prepared
 -- Swaps the sample in, then calls onReady (at once if it's already in, or
 -- without it when there's no sample)
 local function UseSampleData(onReady)
-    if saved or not addon.TourDataTable then
+    -- The sample is Midnight's items, which Forever doesn't have
+    if saved or not addon.TourDataTable or addon.isForever then
         onReady()
         return
     end
@@ -346,6 +347,10 @@ local function OpenScreen(which)
 end
 local function ScreenOpen(which) return OpenScreen(which) == "pick" end
 local wrongPick -- what they opened instead, to say so
+-- The Crafts list was empty (a new character, or Forever before any
+-- profession is opened): the plan steps say so once, then are skipped
+-- (stress test, 2026-10-21: step 2 waited for a craft that wasn't there)
+local skipPlans
 
 local watcher -- ticker while a step waits for a screen to open
 local function StopWatching()
@@ -719,6 +724,12 @@ function addon:TourStep(n)
         SetHole(function() return Part("tabs")[step.tab] end)
         return
     end
+    if skipPlans and step.screen == "plan" then
+        local m = n
+        repeat m = m + (goingBackward and -1 or 1) until not STEPS[m] or STEPS[m].screen ~= "plan"
+        if STEPS[m] then addon:TourStep(m) end
+        return
+    end
     if step.screen and not ScreenOpen(step.screen) then
         -- Something else open (they clicked another craft or item): back
         -- to the list, and ask again
@@ -747,6 +758,16 @@ function addon:TourStep(n)
             PICKS[step.screen].scroll()
             addon.RefreshWindow()
             C_Timer.After(0.3, function() if current == n then addon:TourStep(n) end end)
+            return
+        end
+        local crafts = Screen("crafts")
+        if step.screen == "plan" and not row and crafts and #crafts.list.items == 0 then
+            skipPlans = true
+            box.title:SetText(step.title)
+            box.text:SetText("Your Crafts list is empty for now, so there's no plan to show yet. Open each profession once (press K) and it fills in.")
+            box.ask:Hide()
+            box.next:Show()
+            Show(crafts.list)
             return
         end
         box.title:SetText(step.title)
@@ -803,7 +824,7 @@ end
 function addon:StartTour()
     GoldsmithDB.tourOffered = true
     current = nil
-    scrolled, noPick, pickTier, wrongPick = {}, {}, nil, nil
+    scrolled, noPick, pickTier, wrongPick, skipPlans = {}, {}, nil, nil, nil
     pickConc, pickTaken = nil, nil
     if addon.window and not addon.window:IsShown() then addon.window:Show() end
     ClosePopups()

@@ -235,7 +235,12 @@ local function FillCraftRow(row, item)
         row.who:Hide()
     end
 
-    cells.cost:SetText(Money(info.cost) .. (info.partial and "+" or ""))
+    -- Forever: no material priced at all read "0c+" (stress test)
+    if addon.isForever and info.partial and (info.cost or 0) == 0 then
+        cells.cost:SetText("?")
+    else
+        cells.cost:SetText(Money(info.cost) .. (info.partial and "+" or ""))
+    end
     if info.price then
         -- ~ marks a price Goldsmith adjusted (an undercut or shelf listing
         -- replaced by the usual price); the hover says why
@@ -510,7 +515,7 @@ local function CraftTooltip(tooltip, item)
     elseif box then
         Note(tooltip, "No worth yet: open one and Goldsmith notes what's inside.")
     else
-        Note(tooltip, "No AH price yet. Scan the AH.")
+        Note(tooltip, addon:NoPriceText("No AH price yet. Scan the AH."))
     end
     -- After the price, not under "How": next to "all silver" it read as
     -- part of the mix (user, 2026-10-16)
@@ -2760,7 +2765,7 @@ local function CreatePlanScreen(parent)
                 and string.format("Listed at %s, not counted: nothing backs it", Money(plan.doubtPrice))
                 or addon:IsBox(screen.tierItemID, screen.plan and screen.plan.recipe and screen.plan.recipe.outputItemID)
                     and "No worth yet: open one and Goldsmith notes what's inside."
-                or "No AH price yet. Scan the AH (Goldsmith panel beside it).")
+                or addon:NoPriceText("No AH price yet. Scan the AH (Goldsmith panel beside it)."))
             screen.profit.value:SetText("-")
             screen.profit.value:SetTextColor(addon:Color("dim"))
             screen.profit.note:SetText("")

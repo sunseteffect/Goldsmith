@@ -1505,11 +1505,13 @@ end
 -- What clicks do on the screen showing, for the window's click legend
 local function Legend(v)
     if v.page.item then
-        return {
-            { "click", "a quality: its prices" },
+        local legend = {
             { "hover", "a tile or the chart: details" },
             { "shift", "an item in your bags: look it up here" },
         }
+        -- Forever items have no qualities
+        if not addon.isForever then table.insert(legend, 1, { "click", "a quality: its prices" }) end
+        return legend
     elseif v.showingList then
         local legend = {
             { "click", "an item: its page" },

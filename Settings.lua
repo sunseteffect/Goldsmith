@@ -778,15 +778,20 @@ for _, value in ipairs({ 0, 5, 10, 15, 20, 30, 50 }) do
     table.insert(CHOICES.minROI, { value = value,
         label = value == 0 and "Any profit" or string.format("%d%%", value) })
 end
--- Forever's gold is scarce: silver amounts (in gold, as the setting is)
-local isForever = WOW_PROJECT_ID == (WOW_PROJECT_CAMELOT or 18)
-if isForever then DEFAULTS.minLine = 0.5 end
-for _, value in ipairs(isForever and { 0, 0.1, 0.25, 0.5, 1, 5 } or { 0, 5, 10, 25, 50, 100 }) do
-    table.insert(CHOICES.minLine, { value = value,
-        label = value == 0 and "Any profit"
-            or isForever and addon:FormatMoney(value * 10000) .. " a batch"
-            or string.format("%dg a batch", value) })
+-- Forever's gold is scarce: silver amounts (in gold, as the setting is).
+-- Built again by ApplyForeverSettings when /gsm forever turns Forever mode
+-- on in retail, which happens after this file loads.
+local function BuildMinLine(forever)
+    if forever then DEFAULTS.minLine = 0.5 end
+    CHOICES.minLine = {}
+    for _, value in ipairs(forever and { 0, 0.1, 0.25, 0.5, 1, 5 } or { 0, 5, 10, 25, 50, 100 }) do
+        table.insert(CHOICES.minLine, { value = value,
+            label = value == 0 and "Any profit"
+                or forever and addon:FormatMoney(value * 10000) .. " a batch"
+                or string.format("%dg a batch", value) })
+    end
 end
+BuildMinLine(addon.isForever)
 for _, value in ipairs({ 5, 10, 15, 20, 25 }) do
     table.insert(CHOICES.dealPercent, { value = value, label = string.format("%d%% below usual", value) })
 end
@@ -798,12 +803,20 @@ for _, value in ipairs({ 3, 5, 7, 14, 21, 30 }) do
     table.insert(CHOICES.heldDays, { value = value, label = string.format("%d days", value) })
 end
 -- Mark the defaults
-for key, list in pairs(CHOICES) do
-    for _, c in ipairs(list) do
-        if c.value == DEFAULTS[key] and not c.label:find("recommended") then
-            c.label = c.label .. " (recommended)"
+local function MarkDefaults()
+    for key, list in pairs(CHOICES) do
+        for _, c in ipairs(list) do
+            if c.value == DEFAULTS[key] and not c.label:find("recommended") then
+                c.label = c.label .. " (recommended)"
+            end
         end
     end
+end
+MarkDefaults()
+
+function addon:ApplyForeverSettings()
+    BuildMinLine(true)
+    MarkDefaults()
 end
 
 local function LabelFor(choices, value)
@@ -944,7 +957,7 @@ local function AddHelp(tooltip, key)
     if not help then return end
     tooltip:AddLine(help[1], 1, 1, 1)
     for i = 2, #help do
-        tooltip:AddLine(help[i], 0.8, 0.8, 0.8, true)
+        tooltip:AddLine(addon:ForeverText(help[i]), 0.8, 0.8, 0.8, true)
     end
 end
 
@@ -1645,7 +1658,7 @@ function addon:CreateSettingsPanel(parent)
             pageIntro:SetText(string.format("Settings that mention \"%s\". Click a heading for its page.", query))
         else
             pageTitle:SetText(page.title or page.label)
-            pageIntro:SetText(page.intro or "")
+            pageIntro:SetText(addon:ForeverText(page.intro) or "")
         end
         pageY = -2 - 20 - 8 - pageIntro:GetStringHeight() - 16
 

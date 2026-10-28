@@ -40,7 +40,14 @@ local TITLES = {
     { 5000000, "Mythic" },
     { 10000000, "Ascended" },
 }
-addon.GOLDSMITH_TITLES = TITLES
+-- Forever's gold is about a hundredth of retail's: Journeyman at 10g,
+-- Ascended at 100,000g (stress test, 2026-10-21)
+local FOREVER_TITLES = {}
+for i, t in ipairs(TITLES) do FOREVER_TITLES[i] = { t[1] / 100, t[2] } end
+
+function addon:GoldsmithTitles()
+    return addon.isForever and FOREVER_TITLES or TITLES
+end
 
 local function Store()
     GoldsmithDB.lifetime = GoldsmithDB.lifetime or {}
@@ -359,9 +366,10 @@ end
 
 function addon:GoldsmithTitle(profitCopper)
     local gold = math.max(profitCopper or 0, 0) / 10000
-    local at, nextTitle = TITLES[1], nil
-    for i, t in ipairs(TITLES) do
-        if gold >= t[1] then at, nextTitle = t, TITLES[i + 1] end
+    local titles = addon:GoldsmithTitles()
+    local at, nextTitle = titles[1], nil
+    for i, t in ipairs(titles) do
+        if gold >= t[1] then at, nextTitle = t, titles[i + 1] end
     end
     return at[2], nextTitle and nextTitle[2], nextTitle and (nextTitle[1] * 10000 - math.max(profitCopper or 0, 0))
 end

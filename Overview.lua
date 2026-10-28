@@ -185,7 +185,8 @@ local function FillConcentrationTile(tile, conc)
     if addon.isForever then
         local last = addon:GetOwnScanTime()
         local mins = last and math.floor((time() - last) / 60)
-        tile:Set("Last AH scan", last and (mins < 60 and (mins .. " min ago") or (math.floor(mins / 60) .. " h ago")) or "-",
+        tile:Set("Last AH scan", last and (mins < 1 and "just now" or mins < 60 and (mins .. " min ago")
+            or (math.floor(mins / 60) .. " h ago")) or "-",
             last and (mins < 60 and "text" or "muted") or "muted", last and "your own scan, this realm" or "open the AH to scan it")
         tile.tooltip = nil
         return
