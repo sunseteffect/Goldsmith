@@ -557,16 +557,19 @@ local function DealsAction(prof)
         }
     end
     if #cheap == 0 then return nil end
+    -- One per line like the other cards; two, since three on one line
+    -- wrapped mid-name and three lines don't fit as the fifth card
+    -- (user, 2026-10-29). The hover lists more.
     local parts = {}
-    for i = 1, math.min(#cheap, 3) do
+    for i = 1, math.min(#cheap, 2) do
         -- With its quality icon: two qualities of one material read as the
         -- same item twice without it (Void-Tempered Hide, user 2026-10-15)
-        table.insert(parts, string.format("%s %s", ItemText(cheap[i].itemID, cheap[i].name),
-            addon:Colorize(string.format("%.0f%%", cheap[i].diff * 100), "profit")))
+        table.insert(parts, string.format("%s   %s", ItemText(cheap[i].itemID, cheap[i].name),
+            addon:Colorize(string.format("%.0f%% below usual", -cheap[i].diff * 100), "profit")))
     end
     return {
         title = "Cheap materials today",
-        detail = table.concat(parts, "   ") .. " vs usual",
+        detail = table.concat(parts, "\n"),
         tooltip = function(tooltip)
             tooltip:AddLine("Cheap materials today", 1, 1, 1)
             addon:Explain(tooltip, string.format("%d%% or more below their usual price (Settings > Cheap materials)%s",
