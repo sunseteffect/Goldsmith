@@ -34,6 +34,29 @@ bench.Equal("shown as adjusted", addon:PriceAdjusted(note), true)
 bench.Equal("same when buying", (addon:GetAHPriceInfo(SCRAP, true)), g(17.62))
 bench.Has("source text", addon:AHPriceAgeText(SCRAP), "usual price")
 
+-- What test 62 looks at in game: not a cheap material, and the item page
+-- shows the usual price with a ~ and why in its hover
+local function InDeals()
+    addon:DataChanged()  -- the deals list is cached from login
+    for _, deal in ipairs((addon:GetDeals("All"))) do
+        -- Cheap materials: the ones this far under usual (Items.lua)
+        if deal.itemID == SCRAP then return deal.diff <= -addon:Setting("dealPercent") / 100 end
+    end
+    return false
+end
+bench.Equal("not in Cheap materials", InDeals(), false)
+addon:ToggleWindow()
+bench.Advance(2)
+addon:OpenItem(C_Item.GetItemNameByID(SCRAP) or "Photosynthesized Scrap", SCRAP)
+bench.Advance(5)
+local page = table.concat(bench.Screen(), "\n")
+bench.Has("item page: the usual price", page, "17.62g")
+bench.Has("item page: from the usual price", page, "usual price")
+bench.HasNot("item page: not 1.40g as the AH price", page, "\n1.40g\n")
+for line in page:gmatch("[^\n]+") do
+    if line:find("17.62") or line:find("usual") or line:find("~") then bench.Log("%s", line) end
+end
+
 -- Somewhat below usual is a price, not a doubt
 Search(12)
 price, source = addon:GetAHPriceInfo(SCRAP)
@@ -47,6 +70,7 @@ GoldsmithDB.orderBooks[SCRAP] = { time = time() - 60, total = 2131,
 price, source = addon:GetAHPriceInfo(SCRAP)
 bench.Equal("deep cheap listings used", price, g(1.40))
 bench.Equal("from the live listings", source, "Live")
+bench.Log("with real quantity at 1.40g, in Cheap materials: %s", tostring(InDeals()))
 GoldsmithDB.orderBooks[SCRAP] = nil
 
 -- Low for days: the price really fell
