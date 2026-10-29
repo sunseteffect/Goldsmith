@@ -927,7 +927,7 @@ function addon:AddShoppingBlocker(tooltip, line, plan)
     for part in text:gmatch("[^\n]+") do tooltip:AddLine(part, 1, 0.6, 0.2, false) end
 end
 
--- Over the button when it gives a reason instead of the step: which entry
+-- By the button (under it since 2026-10-29) when it gives a reason instead of the step: which entry
 -- it's on, "Next: Munsell Ink x2". The button stays short ("In the
 -- mailbox"); this says what it's about (user, 2026-10-24: the middle
 -- ground over a grayed "Craft" with the reason elsewhere)
@@ -1032,14 +1032,33 @@ local panel
 local function PanelLine(i)
     local line = CreateFrame("Frame", nil, panel)
     line:SetHeight(LINE_HEIGHT)
-    line:SetPoint("TOPLEFT", 10, -(30 + (i - 1) * LINE_HEIGHT))
-    line:SetPoint("RIGHT", panel, "RIGHT", -10, 0)
     line.status = UI.Text(line, "small", "muted", "RIGHT")
     line.status:SetPoint("RIGHT")
     line.text = UI.Text(line, "small", "text")
     line.text:SetPoint("LEFT")
     line.text:SetPoint("RIGHT", line.status, "LEFT", -6, 0)
     return line
+end
+
+-- Top down: title, the Craft next button and its key (fixed, so the
+-- button doesn't move while you craft; user, 2026-10-29), then what
+-- changes height: the Next or buff line, the prep button, the list.
+-- buffHeight: the Next or buff line's, 0 when there's none.
+local BUTTON_TOP, BELOW_BUTTON = 30, 80
+local function LayoutPanel(buffHeight, prep)
+    local y = BELOW_BUTTON
+    panel.buff:ClearAllPoints()
+    panel.buff:SetPoint("TOPLEFT", 10, -y)
+    y = y + buffHeight
+    panel.prep:ClearAllPoints()
+    panel.prep:SetPoint("TOPLEFT", 10, -y)
+    if prep then y = y + 26 end
+    for i, line in ipairs(panel.lines) do
+        line:ClearAllPoints()
+        line:SetPoint("TOPLEFT", 10, -(y + (i - 1) * LINE_HEIGHT))
+        line:SetPoint("RIGHT", panel, "RIGHT", -10, 0)
+    end
+    panel:SetHeight(y + (panel.shownLines or 0) * LINE_HEIGHT + 8)
 end
 
 -- The buff line, or in its place a button for what to do first
@@ -1053,9 +1072,6 @@ local function SetPanelPrep(row)
     local nextLine = not buff and addon:QueueNextLine(row)
     panel.buff:SetText(buff and (buff .. " isn't active") or nextLine or "")
     panel.buff:SetTextColor(addon:Color(buff and "warning" or "muted"))
-    local y = 56 + (action and 26 or 0)
-    panel.buff:ClearAllPoints()
-    panel.buff:SetPoint("BOTTOMLEFT", 10, y)
     buff = buff or nextLine
     panel.prep:SetShown(action ~= nil)
     if action then addon:SetPrepLabel(panel.prep, action) end
@@ -1065,7 +1081,7 @@ local function SetPanelPrep(row)
     local textHeight = math.ceil(panel.buff:GetStringHeight())
     panel.buff:SetHeight(math.max(textHeight, 1))
     local buffHeight = buff and math.max(textHeight + 4, 16) or 0
-    panel:SetHeight(30 + (panel.shownLines or 0) * LINE_HEIGHT + 64 + (action and 26 or 0) + buffHeight)
+    LayoutPanel(buffHeight, action ~= nil)
 end
 addon.UpdateQueuePanelPrep = function()
     if panel and panel:IsShown() and panel.row then SetPanelPrep(panel.row) end
@@ -1146,20 +1162,18 @@ local function CreatePanel()
     panel.button = UI.Button(panel, "Craft next", PANEL_WIDTH - 20, 28, function(_, mouseButton)
         if mouseButton == "RightButton" then addon:ShowTab("queue") else addon:CraftNext() end
     end)
-    panel.button:SetPoint("BOTTOMLEFT", 10, 24)
+    panel.button:SetPoint("TOPLEFT", 10, -BUTTON_TOP)
     UI.Style(panel.button, "highlight", "borderGold")
     panel.button.label:SetTextColor(addon:Color("gold"))
     panel.button:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderGold")) end)
     -- The next craft's crafting buff when it's off (QueueMissingBuff)
     panel.buff = UI.Text(panel, "small", "warning", "CENTER")
-    panel.buff:SetPoint("BOTTOMLEFT", 10, 56)
     panel.buff:SetWidth(PANEL_WIDTH - 20)
-    panel.buff:SetJustifyV("BOTTOM")
+    panel.buff:SetJustifyV("TOP")
     -- Two lines rather than cut off ("for Gloaming..."; user, 2026-10-24)
     panel.buff:SetWordWrap(true)
     panel.buff:SetMaxLines(2)
     panel.prep = UI.Button(panel, "", PANEL_WIDTH - 20, 22, function() addon:RunPrep(panel.prepAction) end)
-    panel.prep:SetPoint("BOTTOMLEFT", 10, 56)
     panel.prep.label:SetTextColor(addon:Color("warning"))
     panel.prep:Hide()
     UI.SetTooltip(panel.prep, function(tooltip)
@@ -1169,8 +1183,8 @@ local function CreatePanel()
         for _, line in ipairs(action.lines or {}) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
     end, "ANCHOR_RIGHT")
     panel.hint = UI.Text(panel, "small", "dim", "CENTER")
-    panel.hint:SetPoint("BOTTOMLEFT", 10, 8)
-    panel.hint:SetPoint("BOTTOMRIGHT", -10, 8)
+    panel.hint:SetPoint("TOPLEFT", 10, -(BUTTON_TOP + 32))
+    panel.hint:SetPoint("TOPRIGHT", -10, -(BUTTON_TOP + 32))
 
     UI.SetTooltip(panel.button, function(tooltip)
         local row = panel.row
@@ -1228,7 +1242,7 @@ local function UpdatePanel()
             panel.buff:SetText("")
             panel.prep:Hide()
             panel.prepAction = nil
-            panel:SetHeight(30 + LINE_HEIGHT + 64)
+            LayoutPanel(0, false)
             panel.button:SetLabel("Finishing the batch")
             panel.button:SetEnabled(false)
             panel.button:SetAlpha(0.5)

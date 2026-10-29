@@ -1437,7 +1437,7 @@ local function FindVellum(vellumID)
 end
 
 -- Button label: "Mill 15 Tranquility Bloom", shortened if it won't fit;
--- and the whole step (state.step), for the line over the button
+-- and the whole step (state.step), for the Next line by the queue panel's button
 local function StepLabel(verb, count, name)
     local full = string.format("%s %d %s", verb, count, name)
     local label = full
