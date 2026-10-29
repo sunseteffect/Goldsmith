@@ -20,6 +20,11 @@ local db = bench.LoadSaved()
 db.queues[MADDOXYNN] = { { recipeID = SIENNA_INK, quantity = 6, made = 0, tier = 2, concentrate = true,
                            prefMix = "17 gold Powder Pigment", added = os.time() } }
 if db.ui2 and db.ui2.planMix then db.ui2.planMix[SIENNA_INK] = nil end
+-- Full concentration, whatever was spent in game: with too little the page
+-- shows only the crafts it covers and the queue buys for the rest
+for _, snap in pairs(db.characters[MADDOXYNN].concentration or {}) do
+    snap.current, snap.time = snap.max or 1000, os.time()
+end
 -- The mix list open (Compare), whatever it was left at in game
 db.ui2 = db.ui2 or {}
 db.ui2.planMixOpen = true
@@ -27,6 +32,8 @@ db.ui2.planMixOpen = true
 db.characters[MADDOXYNN].stock[245808] = 60
 -- and the silver Argentleaf for the rest (milled since)
 db.characters[MADDOXYNN].stock[236776] = 200
+-- and Mana Lily (milled since, 2026-10-29)
+db.characters[MADDOXYNN].stock[236778] = 60
 local addon = bench.Login("Mysticmead", { db = db })
 
 addon:OpenCraftPlan(GoldsmithDB.recipes[SIENNA_INK], { tier = 2, concentrate = true }, MADDOXYNN, 6, "queue")

@@ -11,6 +11,7 @@ db.queues["Mysticmead-Sargeras"] = { { recipeID = TEA, quantity = 8, made = 0, a
 -- Azeroot Tea now sells for 1 copper
 db.ownScan.prices[db.recipes[TEA].outputItemID] = { 1 }
 db.searchPrices = {}  -- a search of the tea (newer) would set its price again
+db.orderBooks = {}  -- so would its listings, browsed in the last while
 local myst = db.characters["Mysticmead-Sargeras"]
 myst.stock[AZEROOT], myst.stock[AZEROOT + 1] = nil, nil
 bench.Login("Mysticmead", { db = db })
