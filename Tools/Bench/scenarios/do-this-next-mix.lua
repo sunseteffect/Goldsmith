@@ -60,7 +60,7 @@ for line in screen:gmatch("[^\n]+") do
 end
 bench.HasNot("no not-enough warning", screen, "not enough concentration now")
 -- What it takes to start and ingenuity's chance, not an average
-bench.HasNot("no after-ingenuity average", screen, "after ingenuity")
+bench.HasNot("no after-ingenuity average", screen, "concentration after ingenuity")
 bench.Has("ingenuity as a chance", screen, "% chance to get ")
 
 -- Add to queue from that plan: the queue uses the card's mix too

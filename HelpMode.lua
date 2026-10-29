@@ -135,7 +135,7 @@ TAB_PARTS.crafts = function(list)
             "Each material and where it comes from: your bags, a vendor, the AH, or crafting it first. Right-click one to change that, or to pick which item to salvage for it, for this plan and its queue entry.",
             plan.list)
         Add(list, "Material qualities",
-            "The mix of material qualities. Goldsmith picks the best one for this quality and lists the top three to compare. Click one to use it instead, or click the bar to hide or show them.",
+            "The mix of material qualities. Goldsmith picks the best one for this quality, or one that leaves concentration for your other crafts, and lists the top three to compare. Concentration is what a craft needs to start. Click one to use it instead (the queue follows), or click the bar to hide or show them.",
             plan.mixes)
         Add(list, "Cost and profit",
             "What it all costs (what your materials cost you), what it sells for and the profit, worked out from your own crafting stats. Hover a number for how.",

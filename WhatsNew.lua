@@ -14,6 +14,15 @@ local UI = addon.UI
 -- this is marked seen. /gsm news shows it again.
 local NEWS = {
     {
+        key = "2.7.3",
+        title = "What's new in Goldsmith 2.7.3",
+        items = {
+            { "Concentration as the game counts it", "Plans and to-dos count what a craft needs to start, not an average after ingenuity. Ingenuity shows as a chance on the plan." },
+            { "Plans say why", "When a plan uses a lower mix, it says so: to leave concentration for another craft, or because it's the mix in your queue." },
+            { "The queue keeps your mix", "The queue crafts the mix the plan showed, including Do this next's." },
+        },
+    },
+    {
         key = "2.7.2",
         title = "What's new in Goldsmith 2.7.2",
         items = {

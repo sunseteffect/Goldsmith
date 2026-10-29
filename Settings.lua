@@ -841,6 +841,7 @@ local HELP = {
         "Prefer Auctionator: Auctionator's last scan even if it's days old, TSM only for items it hasn't seen.",
         "Prefer TSM: TSM's price, Auctionator only for items TSM has no price for. Live AH searches are ignored.",
         "Either way, a listing far below or above the usual price is replaced by TSM's market value when TSM is installed.",
+        "A search or Auctionator only sees the lowest listing: under half the usual price, the usual price counts until a scan or the item's own listings show how many are that cheap.",
     },
     minROI = {
         "Worth crafting at",
