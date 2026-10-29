@@ -10,6 +10,7 @@ db.inMail["Mysticmead-Sargeras"] = {}
 db.queues["Mysticmead-Sargeras"] = { { recipeID = TEA, quantity = 8, made = 0, added = os.time() } }
 -- Azeroot Tea now sells for 1 copper
 db.ownScan.prices[db.recipes[TEA].outputItemID] = { 1 }
+db.searchPrices = {}  -- a search of the tea (newer) would set its price again
 local myst = db.characters["Mysticmead-Sargeras"]
 myst.stock[AZEROOT], myst.stock[AZEROOT + 1] = nil, nil
 bench.Login("Mysticmead", { db = db })
