@@ -942,8 +942,11 @@ function addon:QueueNextLine(row)
         -- The step names its material; the craft it feeds is the gold row
         -- (C6 cut, 2026-10-25). Was ", for <craft>": "Craft 2" alone didn't say what (user,
         -- 2026-10-24: "i like the label above the button its missing here")
-        if s.step and not s.final then return "Next: " .. s.step end
-        return "Next: " .. name
+        -- Not when the button already says it all: "Mill 30 Mana Lily"
+        -- twice (user, 2026-10-29). A label cut short still gets it.
+        local text = (s.step and not s.final) and s.step or name
+        if text == s.label then return nil end
+        return "Next: " .. text
     end
     return "Next: " .. name .. ((row.remaining or 0) > 1 and (" x" .. row.remaining) or "")
 end

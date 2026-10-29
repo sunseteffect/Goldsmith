@@ -32,7 +32,9 @@ local entry = GoldsmithDB.queues[MADDOXYNN][1]
 
 -- Another number: something to send
 local screen = button:GetParent()
-local asked = screen.qty:GetText()
+-- The number asked for, not the box: with little concentration left the
+-- box shows what it covers (2 of 3, 2026-10-29)
+local asked = tostring(screen:AskedCrafts())
 -- As typing in the box does (its handler clears the earlier ask)
 local function Type(text)
     screen.qty:SetText(text)
