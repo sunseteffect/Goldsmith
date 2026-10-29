@@ -5,6 +5,7 @@
 local bench = dofile(BENCH_DIR .. "bench.lua")
 local db = bench.LoadSaved()
 db.setupDone = true
+db.queues = {}  -- nothing queued, so the plan says Add to queue
 local key
 for k in pairs(db.characters) do if k:match("^Mysticmead") then key = k end end
 for _, snap in pairs(db.characters[key].concentration or {}) do
@@ -49,6 +50,16 @@ bench.HasNot("no not-enough warning", screen, "not enough concentration now")
 -- What it takes to start and ingenuity's chance, not an average
 bench.HasNot("no after-ingenuity average", screen, "after ingenuity")
 bench.Has("ingenuity as a chance", screen, "% chance to get ")
+
+-- Add to queue from that plan: the queue uses the card's mix too
+bench.Click("Add to queue")
+bench.Advance(2)
+addon:ShowTab("queue")
+bench.Advance(5)
+local queue = table.concat(bench.Screen(), "\n")
+bench.Has("queued it", queue, first.recipe.outputName)
+bench.HasNot("queue fits the concentration", queue, "(you have", true)
+bench.HasNot("queue: no needs concentration", queue, "Needs concentration", true)
 for line in screen:gmatch("[^\n]+") do
     if line:find("concentration (", 1, true) then bench.Log("%s", line) end
 end

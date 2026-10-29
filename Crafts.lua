@@ -1866,6 +1866,13 @@ local function CreatePlanScreen(parent)
             entry.choices = CopyTable(p.choices)
             addon:QueueEntryChanged()
         end
+        -- Opened from Do this next: queue its mix, as its right-click does.
+        -- Queued without it, the queue used the saved all silver pick, 314
+        -- with 305, while the plan showed 7 gold at 278 (user, 2026-10-28)
+        if entry and p.mix then
+            entry.prefMix = p.mix
+            addon:QueueEntryChanged()
+        end
         addon:Notify("info", "%s %d %s %s %s's queue.", updated and "Set" or "Added", quantity,
             p.recipe.outputName, updated and "in" or "to", CharName(p.charKey))
         screen:Update()
