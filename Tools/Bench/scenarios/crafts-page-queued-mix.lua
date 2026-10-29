@@ -24,6 +24,7 @@ addon:OpenCraftPlan(GoldsmithDB.recipes[SIENNA_INK], { tier = 2, concentrate = t
 bench.Advance(2)
 local screen = bench.Screen()
 bench.Has("shows the queued mix", screen, "Picked: 17 gold Powder Pigment")
+bench.Has("says it's the queued mix", screen, "in your queue")
 bench.Has("nothing to buy, as the queue", screen, "Nothing to buy on the AH")
 bench.Equal("the queue buys nothing", #addon:BuildQueue(MADDOXYNN).buyAH, 0)
 

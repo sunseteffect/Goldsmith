@@ -2188,6 +2188,7 @@ local function CreatePlanScreen(parent)
             and "The top %d of %d mixes that reach this tier, by gold per concentration point, then profit.%s"
             or "The top %d of %d mixes that reach this tier, cheapest first.%s", top, #candidates,
             ((tierInfo.built and " Picked: a mix in between that uses materials you have.")
+            or ((tierInfo.queuedPick and pickedRank) and string.format(" Using #%d: the mix in your queue.", pickedRank))
             or ((tierInfo.yourPick and pickedRank) and string.format(" Using #%d, your pick.", pickedRank))
             or ((tierInfo.heldPick and pickedRank and pickedRank > 1) and string.format(" Picked #%d: it uses materials you have.", pickedRank))
             or ((tierInfo.fitPick and pickedRank) and string.format(" Picked #%d: your concentration starts every craft with it.", pickedRank))
@@ -2207,7 +2208,8 @@ local function CreatePlanScreen(parent)
             and string.format("%s per point", Money(tierInfo.concentrationValue))
             or Money(tierInfo.cost + offset) .. " each" .. (math.abs(offset) >= 100 and " with your stock" or "")
         mixes.picked:SetText(string.format("Picked: %s  %s", pickedText,
-            addon:Colorize(string.format(tierInfo.yourPick and "(%s, your pick)"
+            addon:Colorize(string.format(tierInfo.queuedPick and "(%s, in your queue)"
+                or tierInfo.yourPick and "(%s, your pick)"
                 or tierInfo.heldPick and "(%s, uses materials you have)"
                 or tierInfo.fitPick and "(%s, your concentration covers every craft)" or "(%s, best of %d)",
                 pickedNumbers, #candidates), "muted")))
@@ -2263,7 +2265,8 @@ local function CreatePlanScreen(parent)
                 if recipe and addon:MixUsesCheaperGold(recipe, e.scenario) then
                     text = text .. addon:Colorize("  (gold is cheaper)", "dim")
                 end
-                Fill(row, e, picked and (text .. addon:Colorize(tierInfo.yourPick and "  (your pick)" or "  (picked)", "dim"))
+                Fill(row, e, picked and (text .. addon:Colorize(tierInfo.queuedPick and "  (queued)"
+                    or tierInfo.yourPick and "  (your pick)" or "  (picked)", "dim"))
                     or text, picked and "gold" or "text")
                 row.hit.entry, row.hit.picked, row.hit.yours = (not e.built) and e or nil, picked, tierInfo.yourPick
             elseif baselines[i - #list] then
@@ -2549,6 +2552,10 @@ local function CreatePlanScreen(parent)
         -- pick at 314 with 298 (user, 2026-10-28)
         local want = (queued and queued.prefMix) or p.mix
         local set = want and addon:MixByDescription(tierInfo, want)
+        -- Why it's this mix, for the "Why this mix" line: it said "earns
+        -- the most from your concentration" for the queued 248 mix once
+        -- prices moved it to #2 (user, 2026-10-29)
+        if set then set.queuedPick = queued and queued.prefMix == want end
         if set then
             tierInfo = set
         elseif tierInfo then
