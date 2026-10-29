@@ -1040,6 +1040,10 @@ local function BoxOpenedSince(boxID, since, unitCost)
     return opened, worth, cost
 end
 
+-- Lots kept since then had their price checked when crafted (13a4496,
+-- 2026-10-27 18:37 PDT); newer ones say so (lot.priceChecked)
+local PRICE_CHECKED_SINCE = 1793151420
+
 function addon:GetFollowedSummary(days)
     local since = time() - (days or 7) * 86400
     local byName = {}
@@ -1097,8 +1101,13 @@ function addon:GetFollowedSummary(days)
                 -- A price spike kept as the expectation is judged at the
                 -- usual price, as plans do: Enchant Ring - Thalassian Haste
                 -- kept 2,488g (usually 9g), half of all the "missing"
-                -- profit (2026-10-27). Lots before the craft-time check.
-                local price = addon:PriceJump(entry.itemID, lot.expectedPrice) or lot.expectedPrice
+                -- profit (2026-10-27). Lots before the craft-time check,
+                -- against the prices of their day: today's moved "expected"
+                -- with the market (2026-10-29). Checked lots keep theirs.
+                local price = lot.expectedPrice
+                if not (lot.priceChecked or lot.time >= PRICE_CHECKED_SINCE) then
+                    price = addon:PriceJumpAt(entry.itemID, price, lot.time) or price
+                end
                 expQty = expQty + take
                 expProfit = expProfit + take * (price * (1 - AH_CUT) - (lot.unitCost or 0))
             end

@@ -563,6 +563,29 @@ local function OwnUsualPrice(itemID)
     return list[math.floor((#list + 1) / 2)]
 end
 
+-- PriceJump as it was on a past day: against your saved prices from the
+-- JUMP_LOOKBACK days before `when`, not today's usual price. For a price
+-- kept back then: a Worldsoul Aegis kept at 1,250g on Oct 16 was judged
+-- at today's 306g, so a later price drop read as "expected" (2026-10-29).
+-- Without enough saved days then, today's check (PriceJump).
+local JUMP_LOOKBACK = 14
+function addon:PriceJumpAt(itemID, price, when)
+    local history = GoldsmithDB.priceHistory and GoldsmithDB.priceHistory[itemID]
+    if history and price and when then
+        local from, to, list = date("%Y-%m-%d", when - JUMP_LOOKBACK * 86400), date("%Y-%m-%d", when), {}
+        for day, p in pairs(history) do
+            if day >= from and day <= to then table.insert(list, p) end
+        end
+        if #list >= JUMP_MIN_DAYS then
+            table.sort(list)
+            local usual = list[math.floor((#list + 1) / 2)]
+            if usual > 0 and price > usual * JUMP_RATIO then return usual end
+            return nil
+        end
+    end
+    return (addon:PriceJump(itemID, price))
+end
+
 -- An item's usual price and where it's from, or nil
 function addon:UsualPrice(itemID)
     local data = GoldsmithPriceData
@@ -2602,6 +2625,8 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTe
         -- As plans price it: a spike counts at the usual price (PriceJump)
         local price, source = addon:GetMarketPriceInfo(resultData.itemID)
         lot.expectedPrice = addon:PriceJump(resultData.itemID, price, source) or price
+        -- Checked now, so not again later against later prices
+        lot.priceChecked = true
     end
     table.insert(lots, lot)
     while #lots > CRAFT_LOT_LIMIT do

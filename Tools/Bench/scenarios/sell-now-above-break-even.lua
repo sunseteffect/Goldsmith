@@ -18,13 +18,26 @@ addon.GetAHPrice = function(self, itemID, ...)
     if prices[itemID] then return prices[itemID] end
     return ahPrice(self, itemID, ...)
 end
+local candidates = {}
 for _, held in ipairs(addon:GetStockValue("All").heldLong) do
     local cost, _, source = addon:GetUnitCostBasis(held.name, held.count, held.itemID)
     if cost and cost > 0 then
         prices[held.itemID] = math.floor(cost * 0.9)
-        if not item and not addon:IsGear(held.itemID) and (source == "crafted" or source == "paid") then
-            item = { itemID = held.itemID, name = held.name, cost = cost }
+        if not addon:IsGear(held.itemID) and (source == "crafted" or source == "paid") then
+            table.insert(candidates, { itemID = held.itemID, name = held.name, cost = cost })
         end
+    end
+end
+-- One Sell now would name at a higher price: not one posted in the last
+-- day (a Sunglass Vial just posted, 2026-10-29)
+for _, c in ipairs(candidates) do
+    if not item then
+        prices[c.itemID] = math.floor(c.cost * 1.3)
+        addon:DataChanged()
+        for _, s in ipairs(addon:GetSellNow()) do
+            if s.itemID == c.itemID then item = c end
+        end
+        prices[c.itemID] = math.floor(c.cost * 0.9)
     end
 end
 bench.Check("something held a while, not gear", item ~= nil)
