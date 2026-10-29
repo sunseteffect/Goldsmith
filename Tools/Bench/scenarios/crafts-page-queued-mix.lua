@@ -4,6 +4,15 @@
 -- nothing bought; the page showed the 20 gold mix and 2 items to buy).
 -- Clicking another mix moves the queued entry to it.
 local bench = dofile(BENCH_DIR .. "bench.lua")
+-- The mix row marked as used: "(picked)", "(your pick)" or "(queued)"
+-- after its name (the "Picked:" line is hidden with the panel open)
+local function PickedRow(screen, label)
+    if type(screen) == "table" then screen = table.concat(screen, "\n") end
+    for line in screen:gmatch("[^\n]+") do
+        if line:find(label, 1, true) and (line:find("(picked)", 1, true) or line:find("(your pick)", 1, true)
+            or line:find("(queued)", 1, true)) then return line end
+    end
+end
 local SIENNA_INK = 1230016
 local MADDOXYNN = "Maddoxynn-Sargeras"
 
@@ -23,7 +32,7 @@ local addon = bench.Login("Mysticmead", { db = db })
 addon:OpenCraftPlan(GoldsmithDB.recipes[SIENNA_INK], { tier = 2, concentrate = true }, MADDOXYNN, 6, "queue")
 bench.Advance(2)
 local screen = bench.Screen()
-bench.Has("shows the queued mix", screen, "Picked: 17 gold Powder Pigment")
+bench.Check("shows the queued mix", PickedRow(screen, "17 gold Powder Pigment") ~= nil)
 bench.Has("says it's the queued mix", screen, "in your queue")
 bench.Has("nothing to buy, as the queue", screen, "Nothing to buy on the AH")
 bench.Equal("the queue buys nothing", #addon:BuildQueue(MADDOXYNN).buyAH, 0)
@@ -44,6 +53,6 @@ if hit then
     local e = GoldsmithDB.queues[MADDOXYNN][1]
     -- The clicked mix, not the queue's own pick (2026-10-28)
     bench.Equal("queue keeps the clicked mix", e.prefMix, clicked)
-    bench.Has("page shows the clicked mix", bench.Screen(), "Picked: " .. clicked:gsub("^%l", string.upper), true)
+    bench.Check("page shows the clicked mix", PickedRow(bench.Screen(), (clicked:gsub("^%l", string.upper))) ~= nil)
 end
 bench.Done()

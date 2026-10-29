@@ -2244,6 +2244,9 @@ local function CreatePlanScreen(parent)
                 or tierInfo.fitPick and "(%s, your concentration covers every craft)" or "(%s, best of %d)",
                 pickedNumbers, #candidates), "muted")))
         mixes.toggle:SetText(open and "Hide" or "Compare")
+        -- Closed, the bar's only summary; open, the gold row and the line
+        -- above it say the same (user, 2026-10-29)
+        mixes.picked:SetShown(not open)
 
         -- Rows are at AH prices, so they compare the same whichever is
         -- picked; what you hold at your cost (offset) is only in the

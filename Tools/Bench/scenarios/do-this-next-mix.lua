@@ -3,6 +3,15 @@
 -- 2026-10-28: the card said 278 concentration, the plan opened on the
 -- all silver pick at 314 with 298 and said not enough)
 local bench = dofile(BENCH_DIR .. "bench.lua")
+-- The mix row marked as used: "(picked)", "(your pick)" or "(queued)"
+-- after its name (the "Picked:" line is hidden with the panel open)
+local function PickedRow(screen, label)
+    if type(screen) == "table" then screen = table.concat(screen, "\n") end
+    for line in screen:gmatch("[^\n]+") do
+        if line:find(label, 1, true) and (line:find("(picked)", 1, true) or line:find("(your pick)", 1, true)
+            or line:find("(queued)", 1, true)) then return line end
+    end
+end
 local db = bench.LoadSaved()
 db.setupDone = true
 db.queues = {}  -- nothing queued, so the plan says Add to queue
@@ -45,7 +54,7 @@ bench.Advance(2)
 addon:OpenCraftPlan(first.recipe, first.row, key, nil, nil, first.crafts, first.row.description)
 bench.Advance(5)
 local screen = table.concat(bench.Screen(), "\n")
-bench.Has("plan uses the card's mix", screen, "Picked: " .. first.row.description:gsub("^%l", string.upper))
+bench.Check("plan uses the card's mix", PickedRow(screen, (first.row.description:gsub("^%l", string.upper))) ~= nil)
 for line in screen:gmatch("[^\n]+") do
     if line:find("The top ", 1, true) then bench.Log("%s", line) end
 end
