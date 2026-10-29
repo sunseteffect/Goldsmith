@@ -538,6 +538,8 @@ end
 -- slot is kept apart in world.splits[slot] = { itemID, count, lockedUntil }
 -- (still counted in world.bags), as the game puts it in its own slot.
 world.stacks, world.splits = {}, {}
+-- Soulbound items ({ [itemID] = true }), and whether the bank is open
+world.bound, world.bankOpen = {}, false
 local function BagSlots()
     local slots = {}
     local ids = {}
@@ -561,7 +563,17 @@ local function BagSlots()
     end
     return slots
 end
+-- The bank's slots (bag -1): readable only while world.bankOpen, as in
+-- the game; its counts (Count above) any time
+local function BankSlots()
+    local slots, ids = {}, {}
+    for id, n in pairs(world.bank) do if n > 0 then table.insert(ids, id) end end
+    table.sort(ids)
+    for _, id in ipairs(ids) do table.insert(slots, { itemID = id, stackCount = world.bank[id] }) end
+    return slots
+end
 local function SlotAt(bag, slot)
+    if bag == -1 then return world.bankOpen and BankSlots()[slot] or nil end
     if bag ~= 0 then return nil end
     local s = world.splits[slot]
     if s then return { itemID = s[1], stackCount = s[2], locked = (s[3] or 0) > world.clock, split = true } end
@@ -629,12 +641,16 @@ Item = {
 Item.CreateFromItemLink = function(_, link) return Item.CreateFromItemID(nil, tonumber(link:match("item:(%d+)"))) end
 
 C_Container = {
-    GetContainerNumSlots = function(bag) if bag == 0 then return NumSlots() end return 0 end,
+    GetContainerNumSlots = function(bag)
+        if bag == 0 then return NumSlots() end
+        if bag == -1 and world.bankOpen then return #BankSlots() + 8 end
+        return 0
+    end,
     GetContainerItemInfo = function(bag, slot)
         local s = SlotAt(bag, slot)
         if not s then return nil end
         return { itemID = s.itemID, stackCount = s.stackCount, hyperlink = ItemLink(s.itemID), iconFileID = 134400,
-            quality = 1, isLocked = s.locked == true, isBound = false }
+            quality = 1, isLocked = s.locked == true, isBound = world.bound[s.itemID] == true }
     end,
     GetContainerItemID = function(bag, slot) local s = SlotAt(bag, slot) return s and s.itemID end,
     GetContainerItemLink = function(bag, slot) local s = SlotAt(bag, slot) return s and ItemLink(s.itemID) end,

@@ -225,10 +225,13 @@ end
 -- as "tier unknown" (see GetHeld). Bound gear can't be sold, so it's left
 -- out and counted apart. Returns own tiers, warband tiers, bound
 -- ({ [itemID] = count } in your bags and bank), bound in the warband bank,
--- and bound in your bags alone (for the bags/bank split).
+-- bound in your bags alone (for the bags/bank split), and whether the
+-- bank's slots could be read (only while it's open; its counts can be
+-- read any time).
 local function ScanGearTiers(ids)
     local own, warband, seen = {}, {}, {}
     local bound, boundWarband, boundBags = {}, {}, {}
+    local bankRead = false
     for name, bag in pairs(Enum.BagIndex or {}) do
         local isBag = name == "Backpack" or name:find("^Bag_") or name == "ReagentBag"
         local tiers = (name:find("^Account") and warband)
@@ -238,6 +241,7 @@ local function ScanGearTiers(ids)
             seen[bag] = true
             for slot = 1, C_Container.GetContainerNumSlots(bag) or 0 do
                 local info = C_Container.GetContainerItemInfo(bag, slot)
+                if info and not isBag and tiers == own then bankRead = true end
                 if info and ids[info.itemID] and addon:IsGear(info.itemID) then
                     if info.isBound == true then
                         local count = info.stackCount or 1
@@ -252,7 +256,7 @@ local function ScanGearTiers(ids)
             end
         end
     end
-    return own, warband, bound, boundWarband, boundBags
+    return own, warband, bound, boundWarband, boundBags, bankRead
 end
 
 -- What you have equipped ({ [itemID] = count }): gear and profession tools
@@ -289,8 +293,19 @@ local function CountStock(job, budget)
         if debugprofilestop() - start >= budget then return false end
     end
     if not job.gearTiers then
-        job.gearTiers, job.warbandTiers, job.bound, job.boundWarband, job.boundBags = ScanGearTiers(job.set)
+        job.gearTiers, job.warbandTiers, job.bound, job.boundWarband, job.boundBags, job.bankRead =
+            ScanGearTiers(job.set)
         job.equipped = EquippedItems()
+        -- Bound gear in the bank: as seen the last time it was open. A
+        -- soulbound Apprentice Jeweler's Apron put in the bank was back on
+        -- the Held board (user, 2026-10-29)
+        job.boundBank = {}
+        if job.bankRead then
+            for itemID, n in pairs(job.bound) do
+                local inBank = n - (job.boundBags[itemID] or 0)
+                if inBank > 0 then job.boundBank[itemID] = inBank end
+            end
+        end
         if debugprofilestop() - start >= budget then return false end
     end
     local ids, equipped = job.ids, job.equipped
@@ -304,8 +319,14 @@ local function CountStock(job, budget)
         local inBags = (C_Item.GetItemCount(itemID, false, false, true, false) or 0) - (equipped[itemID] or 0)
             - (boundBags[itemID] or 0)
         local inWarband = withWarband - own
-        -- Not for sale: what you wear, and bound gear
-        own = own - (equipped[itemID] or 0) - (bound[itemID] or 0)
+        -- Not for sale: what you wear, and bound gear (in a closed bank, up
+        -- to what's there)
+        local boundHere = bound[itemID] or 0
+        if not job.bankRead then
+            local bankCount = own - (C_Item.GetItemCount(itemID, false, false, true, false) or 0)
+            boundHere = boundHere + math.min((addon.char.boundBank or {})[itemID] or 0, math.max(bankCount, 0))
+        end
+        own = own - (equipped[itemID] or 0) - boundHere
         inWarband = inWarband - (boundWarband[itemID] or 0)
         if own > 0 then job.stock[itemID] = own end
         local bank = math.min(own, math.max(own - math.max(inBags, 0), 0))
@@ -328,6 +349,7 @@ end
 local function SaveStock(job)
     local c = addon.char
     c.stock, c.gearTiers, c.stockTime, c.stockBank = job.stock, job.gearTiers, time(), job.inBank
+    if job.bankRead then c.boundBank = job.boundBank end
     -- Left over from when bags and bank were kept separately
     c.bagStock, c.bankStock, c.bankTime = nil, nil, nil
     if job.warbandTotal > 0 or next(GoldsmithDB.warbandStock) == nil then
