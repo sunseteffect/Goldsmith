@@ -1885,6 +1885,13 @@ local function CreatePlanScreen(parent)
         local p = screen.plan
         if not p then return end
         tooltip:AddLine(screen.queue.label:GetText(), 1, 1, 1)
+        -- Greyed out: only why, which was missed under the description
+        -- (user, 2026-10-29). A clicked mix goes to the queue at once (the
+        -- mix rows' click), so only the number is left to send.
+        if screen.upToDate then
+            tooltip:AddLine("Already queued like this. Change the number to update it. A mix you click goes to the queue right away.", 0.8, 0.8, 0.8, true)
+            return
+        end
         tooltip:AddLine(string.format("Queue this craft for %s: shop for everything in the queue at once, then craft it all from the Queue tab or the button on the profession window.",
             CharName(p.charKey)), 0.8, 0.8, 0.8, true)
         if screen.queued then
@@ -2602,6 +2609,14 @@ local function CreatePlanScreen(parent)
         screen.queue:SetLabel(screen.queued and "Update queue" or "Add to queue")
         -- An order's queued once, from the orders window
         screen.queue:SetShown(not p.order)
+        -- Greyed out when the queue already has this: same number, none
+        -- made yet, same mix (user, 2026-10-29: it looked clickable with
+        -- nothing to send)
+        local e, shown = screen.queued, screen.tierInfo
+        screen.upToDate = e and (e.made or 0) == 0 and math.abs(e.quantity - screen:PlannedItems()) < 0.001
+            and (not (shown and shown.description and not shown.built) or e.prefMix == shown.description) or false
+        screen.queue:SetEnabled(not screen.upToDate)
+        screen.queue:SetAlpha(screen.upToDate and 0.5 or 1)
         local tierIcon = tierInfo and (addon:TierIconText(tierInfo.tier, tierInfo.tierCount) .. " ") or ""
         if not tierInfo then
             -- A refine: the one quality it makes
@@ -3096,6 +3111,11 @@ local function CreateSalvageScreen(parent)
         local t = screen.target
         if not t then return end
         tooltip:AddLine(screen.queue.label:GetText(), 1, 1, 1)
+        -- Greyed out: only why (as the plan screen)
+        if screen.upToDate then
+            tooltip:AddLine("Already queued like this. Change the number to update it.", 0.8, 0.8, 0.8, true)
+            return
+        end
         tooltip:AddLine(string.format("Queue this batch for %s: shop for everything in the queue at once, then work through it from the Queue tab or the button on the profession window.",
             CharName(t.charKey)), 0.8, 0.8, 0.8, true)
         if screen.queued then
@@ -3246,6 +3266,11 @@ local function CreateSalvageScreen(parent)
         local mine = t.charKey == addon.charKey
         screen.queued = addon:FindQueueEntry(t.charKey, nil, nil, nil, t.itemID)
         screen.queue:SetLabel(screen.queued and "Update queue" or "Add to queue")
+        -- Greyed out when the queue already has this batch (as the plan screen)
+        local e = screen.queued
+        screen.upToDate = e and (e.made or 0) == 0 and e.quantity == (tonumber(screen.qty:GetText()) or 0) or false
+        screen.queue:SetEnabled(not screen.upToDate)
+        screen.queue:SetAlpha(screen.upToDate and 0.5 or 1)
         screen.verbLabel:SetText(t.verb)
         screen.title:SetText((t.profession and addon:ProfessionIconText(t.profession) or "") .. t.verb .. " " .. t.name)
         local sub = {}
