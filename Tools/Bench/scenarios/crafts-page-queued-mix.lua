@@ -41,7 +41,8 @@ if hit then
     hit:Click()
     bench.Advance(1)
     local e = GoldsmithDB.queues[MADDOXYNN][1]
-    bench.Equal("queued Do this next mix let go", e.prefMix, nil)
+    -- The clicked mix, not the queue's own pick (2026-10-28)
+    bench.Equal("queue keeps the clicked mix", e.prefMix, clicked)
     bench.Has("page shows the clicked mix", bench.Screen(), "Picked: " .. clicked:gsub("^%l", string.upper), true)
 end
 bench.Done()

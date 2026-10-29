@@ -60,6 +60,33 @@ local queue = table.concat(bench.Screen(), "\n")
 bench.Has("queued it", queue, first.recipe.outputName)
 bench.HasNot("queue fits the concentration", queue, "(you have", true)
 bench.HasNot("queue: no needs concentration", queue, "Needs concentration", true)
+
+-- Back on the plan: click another mix, then the card's again, Update
+-- queue: the queue keeps the card's (it went back to the 248 mix,
+-- user, 2026-10-28)
+local function MixRow(description, picked)
+    for _, f in ipairs(bench.wow.frames) do
+        if f.entry and f:IsVisible() and (picked == nil or f.picked == picked)
+            and (not description or f.entry.description == description) then return f end
+    end
+end
+addon:OpenCraftPlan(first.recipe, { tier = first.row.tier, concentrate = true }, key, nil, "queue")
+bench.Advance(5)
+local away = MixRow(nil, false)
+bench.Check("another mix row", away ~= nil)
+if away then
+    away:Click()
+    bench.Advance(2)
+    local entry = db.queues[key][1]
+    bench.Equal("queue follows the click", entry and entry.prefMix, away.entry.description)
+    local back = MixRow(first.row.description)
+    bench.Check("the card's mix row", back ~= nil)
+    if back then back:Click() end
+    bench.Advance(2)
+    bench.Click("Update queue")
+    bench.Advance(2)
+    bench.Equal("queue back on the card's mix", entry and entry.prefMix, first.row.description)
+end
 for line in screen:gmatch("[^\n]+") do
     if line:find("concentration (", 1, true) then bench.Log("%s", line) end
 end

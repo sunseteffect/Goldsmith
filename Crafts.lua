@@ -1866,11 +1866,14 @@ local function CreatePlanScreen(parent)
             entry.choices = CopyTable(p.choices)
             addon:QueueEntryChanged()
         end
-        -- Opened from Do this next: queue its mix, as its right-click does.
-        -- Queued without it, the queue used the saved all silver pick, 314
-        -- with 305, while the plan showed 7 gold at 278 (user, 2026-10-28)
-        if entry and p.mix then
-            entry.prefMix = p.mix
+        -- The queue crafts the mix this plan shows. Left to pick again, it
+        -- used the saved all silver pick (314 with 305) while the plan
+        -- showed 7 gold at 278, and after clicking 7 gold back (Goldsmith's
+        -- own pick, so nothing saved) its own pick was the 248 mix again
+        -- (user, 2026-10-28)
+        local shown = screen.tierInfo
+        if entry and shown and shown.description and not shown.built then
+            entry.prefMix = shown.description
             addon:QueueEntryChanged()
         end
         addon:Notify("info", "%s %d %s %s %s's queue.", updated and "Set" or "Added", quantity,
@@ -2081,10 +2084,11 @@ local function CreatePlanScreen(parent)
             if self.picked and not self.yours then return end
             addon:WithCharacter(p.charKey, addon.SetPlanMix, addon, p.recipe, base, e,
                 screen:PlannedItems())
-            -- The queued entry follows your click, as the queue uses your
-            -- pick once its Do this next mix is gone
-            if screen.queued and screen.queued.prefMix then
-                screen.queued.prefMix = nil
+            -- The queued entry follows your click: the mix clicked, not the
+            -- queue's own pick, which can differ (what's held, what other
+            -- crafts use; user, 2026-10-28)
+            if screen.queued then
+                screen.queued.prefMix = e and e.description or nil
                 addon:QueueEntryChanged()
             end
             p.mix = nil
