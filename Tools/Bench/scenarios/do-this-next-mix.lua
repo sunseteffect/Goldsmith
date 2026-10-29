@@ -46,6 +46,9 @@ addon:OpenCraftPlan(first.recipe, first.row, key, nil, nil, first.crafts, first.
 bench.Advance(5)
 local screen = table.concat(bench.Screen(), "\n")
 bench.Has("plan uses the card's mix", screen, "Picked: " .. first.row.description:gsub("^%l", string.upper))
+for line in screen:gmatch("[^\n]+") do
+    if line:find("The top ", 1, true) then bench.Log("%s", line) end
+end
 bench.HasNot("no not-enough warning", screen, "not enough concentration now")
 -- What it takes to start and ingenuity's chance, not an average
 bench.HasNot("no after-ingenuity average", screen, "after ingenuity")

@@ -2112,6 +2112,34 @@ local function CreatePlanScreen(parent)
     -- you, the plan at today's price, so every row is shifted by the
     -- difference: the mixes differ only in quality materials, so the order
     -- and the gaps stay, and the picked row matches the cost below.
+    -- When the day's concentration plan (to-dos, Do this next) uses this
+    -- mix to leave room for other crafts: "leaves 120 for Refreshing
+    -- Serum". A lower mix with no reason given looked wrong (user,
+    -- 2026-10-29: 248 picked over 278, which left too little for the Serum)
+    local function SharedConcentration(tierInfo)
+        local p = screen.plan
+        if not (p and tierInfo and tierInfo.concentrate and tierInfo.description) then return nil end
+        local conc = addon:GetConcentrationOverview(p.recipe.profession)
+        for _, row in ipairs(conc.rows) do
+            if row.key == p.charKey and row.plan then
+                local mine, others, points = false, {}, 0
+                for _, step in ipairs(row.plan) do
+                    if step.recipe.recipeID == p.recipe.recipeID then
+                        mine = mine or step.row.description == tierInfo.description
+                    else
+                        table.insert(others, step.recipe.outputName)
+                        points = points + step.points
+                    end
+                end
+                if mine and #others > 0 then
+                    return string.format("leaves %d for %s%s, more in all", math.floor(points + 0.5), others[1],
+                        #others > 1 and string.format(" and %d more", #others - 1) or "")
+                end
+            end
+        end
+        return nil
+    end
+
     function screen:UpdateMixes(tierInfo, planCostEach)
         -- Opening or closing the panel redraws it without the plan's cost:
         -- keep the last one for the same mix, so the numbers don't jump
@@ -2184,10 +2212,12 @@ local function CreatePlanScreen(parent)
         for i, e in ipairs(candidates) do
             if e.scenario == tierInfo.scenario then pickedRank = i end
         end
+        local shared = conc and pickedRank and pickedRank > 1 and SharedConcentration(tierInfo)
         mixes.why:SetText(string.format(conc
             and "The top %d of %d mixes that reach this tier, by gold per concentration point, then profit.%s"
             or "The top %d of %d mixes that reach this tier, cheapest first.%s", top, #candidates,
             ((tierInfo.built and " Picked: a mix in between that uses materials you have.")
+            or (shared and string.format(" Using #%d: %s.", pickedRank, shared))
             or ((tierInfo.queuedPick and pickedRank) and string.format(" Using #%d: the mix in your queue.", pickedRank))
             or ((tierInfo.yourPick and pickedRank) and string.format(" Using #%d, your pick.", pickedRank))
             or ((tierInfo.heldPick and pickedRank and pickedRank > 1) and string.format(" Picked #%d: it uses materials you have.", pickedRank))
