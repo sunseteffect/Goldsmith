@@ -588,6 +588,8 @@ end
 -- Most listings expire: under this share sold (TSM's sale rate), plans warn
 addon.LOW_SALE_RATE = 0.10
 
+local DepthCheck -- below
+
 -- buying: the price to pay for it (plans, material costs), without the
 -- checks against what it sold for (SaleCheck, SoldCap, TSM sale average),
 -- which are for valuing what you'd sell
@@ -608,9 +610,9 @@ function addon:GetAHPriceInfo(itemID, buying)
     -- undercut (see SEARCH_MAX_DROP)
     local searched = preferred ~= "tsm" and addon:GetSearchPrice(itemID)
     if searched and (not price or searched >= price * (1 - SEARCH_MAX_DROP)) then
-        return SaleCheck(itemID, searched, "Search", buying)
+        return DepthCheck(itemID, SaleCheck(itemID, searched, "Search", buying))
     end
-    return price, source, age, note
+    return DepthCheck(itemID, price, source, age, note)
 end
 
 -- The AH price from saved data (Auctionator, TSM, Goldsmith Data), as
@@ -692,6 +694,28 @@ local function SustainedLow(itemID, price)
     if #list < SUSTAINED_DAYS then return false end
     table.sort(list)
     return list[math.floor((#list + 1) / 2)] <= price * SUSTAINED_RATIO
+end
+
+-- A price counts when there's quantity behind it (user, 2026-10-28). A
+-- search and Auctionator see only the lowest listing, so a few far below
+-- the usual price may be gone before you buy:
+-- one search priced Photosynthesized Scrap at 1.40g with 2,131 listed at
+-- about 19g, and Auctionator saw the same search. Under FAR_BELOW_USUAL
+-- of the usual price, such a price is valued at the usual one until a
+-- full scan or the item's own listings (both see quantity) say otherwise,
+-- or it held for days (SustainedLow). TSM's minimum buyout is already
+-- checked against its market value (CheckAgainstMarket), which has
+-- quantity in it.
+local LOWEST_ONLY = { Search = true, Auctionator = true }
+local FAR_BELOW_USUAL = 0.5
+DepthCheck = function(itemID, price, source, age, note)
+    if not (price and LOWEST_ONLY[source]) or TourPrices() then return price, source, age, note end
+    local usual = addon:UsualPrice(itemID)
+    if usual and price < usual * FAR_BELOW_USUAL and not SustainedLow(itemID, price) then
+        return usual, "Usual", nil,
+            string.format("lowest listing %s is far below usual, with no sign how many there are", FormatGold(price))
+    end
+    return price, source, age, note
 end
 
 function addon:CheckAgainstMarket(itemID, price, source, age, buying)
@@ -802,6 +826,7 @@ function addon:PlainPriceSourceText(itemID, source, age)
     if source == "TSM" then return "TSM" end
     if source == "TSM market" then return "TSM market value" end
     if source == "TSM sale avg" then return "TSM sale average" end
+    if source == "Usual" then return "usual price" end
     if source == "Blizzard" then return BlizzardAgeText() end
     if source == "Vendor" then return "vendor" end
     if source == "Contents" then
