@@ -593,6 +593,10 @@ function addon:CountStockIfStale()
     stockStale = false
     SnapshotStock(function()
         if addon.Refresh then addon.Refresh() end
+        -- Something new in stock can be worth selling too, not only new
+        -- prices: a Sunglass Vial taken out after the scan made the card
+        -- but no chat line (user, 2026-10-29). Once a day per item anyway.
+        addon:CheckSellNow()
     end)
 end
 
