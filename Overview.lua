@@ -21,11 +21,13 @@ local WIDTH = 860
 local GAP = 12
 local TILE_WIDTH = (WIDTH - 3 * GAP) / 4
 local MIDDLE_TOP = -(76 + GAP)
--- Tall enough for four Do this next cards and the other characters line
-local MIDDLE_HEIGHT = 432
+-- Tall enough for five Do this next cards and the other characters line:
+-- the fifth (Cheap materials) didn't fit, so Profit by profession gave up
+-- 20 (user, 2026-10-29)
+local MIDDLE_HEIGHT = 452
 local HALF_WIDTH = (WIDTH - GAP) / 2
 local BOTTOM_TOP = MIDDLE_TOP - MIDDLE_HEIGHT - GAP
-local BOTTOM_HEIGHT = 64
+local BOTTOM_HEIGHT = 44
 local ACTION_COUNT = 5
 local CRAFTS_SHOWN = 3
 local ACTION_ROW_GAP = 8
@@ -691,7 +693,8 @@ local function FillActionRow(row, action)
     row.detail:SetText(action.detail or "")
     -- Tall enough for the title and however many detail lines there are
     local textHeight = row.title:GetStringHeight() + 5 + row.detail:GetStringHeight()
-    row:SetHeight(math.max(56, math.ceil(11 + textHeight + 12)))
+    -- 4 less at the bottom (and the minimum), so five cards fit (user, 2026-10-29)
+    row:SetHeight(math.max(52, math.ceil(11 + textHeight + 8)))
     row:Show()
 end
 
@@ -964,14 +967,14 @@ end
 local function CreateProfessionCell(parent, i)
     local width = (WIDTH - PROFESSION_LEFT - 16 - (PROFESSION_CELLS - 1) * 10) / PROFESSION_CELLS
     local cell = CreateFrame("Frame", nil, parent)
-    cell:SetSize(width, BOTTOM_HEIGHT - 20)
-    cell:SetPoint("TOPLEFT", PROFESSION_LEFT + (i - 1) * (width + 10), -10)
+    cell:SetSize(width, BOTTOM_HEIGHT - 12)
+    cell:SetPoint("TOPLEFT", PROFESSION_LEFT + (i - 1) * (width + 10), -6)
     cell.name = UI.Text(cell, "small", "text")
-    cell.name:SetPoint("TOPLEFT", 0, -4)
+    cell.name:SetPoint("TOPLEFT", 0, 0)
     cell.name:SetPoint("RIGHT", cell, "RIGHT", 0, 0)
     cell.name:SetWordWrap(false)
     cell.profit = UI.Text(cell, "body")
-    cell.profit:SetPoint("TOPLEFT", cell.name, "BOTTOMLEFT", 0, -4)
+    cell.profit:SetPoint("TOPLEFT", cell.name, "BOTTOMLEFT", 0, -2)
     cell:EnableMouse(true)
     UI.SetTooltip(cell, function(tooltip)
         if not cell.item then return end
@@ -1268,10 +1271,10 @@ local function Create(parent)
     professions:SetPoint("TOPLEFT", 0, BOTTOM_TOP)
     professions:SetSize(WIDTH, BOTTOM_HEIGHT)
     local professionsTitle = UI.Text(professions, "heading")
-    professionsTitle:SetPoint("TOPLEFT", 16, -14)
+    professionsTitle:SetPoint("TOPLEFT", 16, -6)
     professionsTitle:SetText("Profit by profession")
     view.professionsNote = UI.Text(professions, "label", "dim")
-    view.professionsNote:SetPoint("TOPLEFT", professionsTitle, "BOTTOMLEFT", 0, -5)
+    view.professionsNote:SetPoint("TOPLEFT", professionsTitle, "BOTTOMLEFT", 0, -2)
     view.professionsEmpty = UI.Text(professions, "small", "muted")
     view.professionsEmpty:SetPoint("LEFT", PROFESSION_LEFT, 0)
     view.professionsEmpty:SetText("Shows here once you've sold something.")
