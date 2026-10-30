@@ -1043,19 +1043,20 @@ local function PanelLine(i)
     return line
 end
 
--- Top down: title, the Craft next button and its key (fixed, so the
--- button doesn't move while you craft; user, 2026-10-29), then what
--- changes height: the Next or buff line, the prep button, the list.
+-- Top down: title, the key, the Craft next button (fixed, so the button
+-- doesn't move while you craft; user, 2026-10-29), then what changes
+-- height: the prep button, the Next or buff line, the list. The key above
+-- the button and the tool button right under it (user, 2026-10-30).
 -- buffHeight: the Next or buff line's, 0 when there's none.
-local BUTTON_TOP, BELOW_BUTTON = 30, 80
+local HINT_TOP, BUTTON_TOP, BELOW_BUTTON = 28, 44, 78
 local function LayoutPanel(buffHeight, prep)
     local y = BELOW_BUTTON
-    panel.buff:ClearAllPoints()
-    panel.buff:SetPoint("TOPLEFT", 10, -y)
-    y = y + buffHeight
     panel.prep:ClearAllPoints()
     panel.prep:SetPoint("TOPLEFT", 10, -y)
     if prep then y = y + 26 end
+    panel.buff:ClearAllPoints()
+    panel.buff:SetPoint("TOPLEFT", 10, -y)
+    y = y + buffHeight
     for i, line in ipairs(panel.lines) do
         line:ClearAllPoints()
         line:SetPoint("TOPLEFT", 10, -(y + (i - 1) * LINE_HEIGHT))
@@ -1070,8 +1071,7 @@ local function SetPanelPrep(row)
     local action = row and addon:CraftPrep(row.state, row.recipe or {}, row.entry and row.entry.concentrate) or nil
     panel.prepAction = action
     local buff = not action and addon:QueueMissingBuff(row, true)
-    -- The Next line goes above the tool button when both show (user,
-    -- 2026-10-24: the Equip button hid it)
+    -- Both show, the tool button over the Next line (LayoutPanel)
     local nextLine = not buff and addon:QueueNextLine(row)
     panel.buff:SetText(buff and (buff .. " isn't active") or nextLine or "")
     panel.buff:SetTextColor(addon:Color(buff and "warning" or "muted"))
@@ -1186,8 +1186,8 @@ local function CreatePanel()
         for _, line in ipairs(action.lines or {}) do tooltip:AddLine(line, 0.8, 0.8, 0.8, true) end
     end, "ANCHOR_RIGHT")
     panel.hint = UI.Text(panel, "small", "dim", "CENTER")
-    panel.hint:SetPoint("TOPLEFT", 10, -(BUTTON_TOP + 32))
-    panel.hint:SetPoint("TOPRIGHT", -10, -(BUTTON_TOP + 32))
+    panel.hint:SetPoint("TOPLEFT", 10, -HINT_TOP)
+    panel.hint:SetPoint("TOPRIGHT", -10, -HINT_TOP)
 
     UI.SetTooltip(panel.button, function(tooltip)
         local row = panel.row
