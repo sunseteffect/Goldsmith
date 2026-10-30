@@ -1086,8 +1086,11 @@ local function CreatePage(parent)
         local function ProfitNow(row, cost, costText)
             if not (cost and d.price) then return row:Set(nil) end
             local profit = d.price * (1 - AH_CUT) - cost
-            row:Set("Profit each now", string.format("%s (%s ROI)", Signed(profit), Roi(profit / cost * 100)),
-                addon:MoneyColor(profit), "AH price after the 5% cut, minus " .. costText)
+            -- ROI on the note line: "-221.35g (-39% ROI)" in the value nearly
+            -- touched the label on Amani Cornucopia, and a bigger number ran
+            -- into it (Reddit feedback, 2026-10-29)
+            row:Set("Profit each now", Signed(profit), addon:MoneyColor(profit),
+                Roi(profit / cost * 100) .. " ROI. AH price after the 5% cut, minus " .. costText)
         end
         if d.recipe and not d.material then
             if d.yours then
