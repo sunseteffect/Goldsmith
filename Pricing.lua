@@ -2683,13 +2683,17 @@ function addon:GetCraftLotsByName(itemName)
     return lotIndex[itemName]
 end
 
--- What the copies of this exact item (quality tier) in your bags and banks
--- cost you to craft, from your latest crafts of it (or the newest `units`
--- of them). nil if never crafted.
+-- What the copies of this exact item (quality tier) you hold on every
+-- character cost you to craft, from your latest crafts of it (or the newest
+-- `units` of them). nil if never crafted.
+-- Counted on every character, AH listings included, as a sale's cost is:
+-- counting only the character you're on, an alt holding none judged 24
+-- Amani Cornucopia on Mysticmead by the newest craft alone (553.82g, not
+-- 462g; 2026-10-29)
 function addon:GetCraftedCost(itemID, units)
     local lots = GoldsmithDB.craftLots[itemID]
     if not lots or #lots == 0 then return nil end
-    local onHand = C_Item.GetItemCount(itemID, true, false, true, true) or 0
+    local onHand = addon:GetHeld(itemID)
     return LotAverage(lots, units or onHand)
 end
 
