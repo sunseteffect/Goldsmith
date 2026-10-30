@@ -1975,7 +1975,10 @@ function addon:GetItemDetails(name, itemID)
                 table.insert(d.finishing, C_Item.GetItemNameByID(pick.option.itemID) or "a finishing reagent")
             end
         end)
-        d.yours = itemID and addon:GetCraftedCost(itemID)
+        if itemID then
+            d.yours, d.yoursCount = addon:GetCraftedCost(itemID)
+            d.yoursHeld = addon:GetHeld(itemID)
+        end
     end
     -- This quality, like the item tooltip (by name if nothing has its ID)
     if not recipe or d.material then

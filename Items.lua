@@ -750,9 +750,11 @@ local function StatsText(stats, finishing)
     local parts = {}
     if stats.multicraft > 0 then table.insert(parts, string.format("multicraft %.1f%%", stats.multicraft)) end
     if stats.resourcefulness > 0 then table.insert(parts, string.format("resourcefulness %.1f%%", stats.resourcefulness)) end
-    if #parts == 0 then return "From your stats: no multicraft or resourcefulness yet." end
-    local with = finishing and #finishing > 0 and (", with " .. table.concat(finishing, " and ")) or ""
-    return "From your stats: " .. table.concat(parts, ", ") .. with
+    -- Says what it is first: "From your stats" alone didn't say it's the
+    -- cost of one made now (Reddit feedback, 2026-10-29)
+    if #parts == 0 then return "One made now, at today's prices (no multicraft or resourcefulness yet)" end
+    local with = finishing and #finishing > 0 and (" and " .. table.concat(finishing, " and ")) or ""
+    return "One made now, at today's prices, with your " .. table.concat(parts, ", ") .. with
 end
 
 local ACTIVITY_COLORS = { Sold = "profit", Bought = "loss", Posted = "warning", Crafted = "line" }
@@ -1063,11 +1065,24 @@ local function CreatePage(parent)
             worst = "the worst-case cost (see Settings)" }
         if d.breakEven then
             local selling = d.price and d.price * 0.95 - (d.breakEven * 0.95)
-            t[5]:Set("Break-even", Money(d.breakEven), "gold", "list above this")
+            -- Says whose break-even it is: a concentration craft recommended
+            -- at today's cost next to a break-even far above the AH price
+            -- read as a contradiction (Reddit feedback, 2026-10-29)
+            local held = d.breakEvenFrom ~= "estimated"
+            local crafted = d.recipe and not d.material
+            t[5]:Set("Break-even", Money(d.breakEven), "gold", held and "for the ones you hold" or "for ones you make now")
             t[5].tooltip = function(tooltip)
                 tooltip:AddLine("Break-even", 1, 1, 1)
-                tooltip:AddLine("The lowest price that doesn't lose gold: " .. fromText[d.breakEvenFrom]
-                    .. " plus the 5% AH cut.", 0.6, 0.6, 0.6, true)
+                tooltip:AddLine(string.format("Sell above this and %s don't lose gold: %s (%s) plus the 5%% AH cut.",
+                    held and "the ones you hold" or "ones you make now", fromText[d.breakEvenFrom],
+                    Money(d.breakEven * (1 - AH_CUT))), 0.6, 0.6, 0.6, true)
+                if crafted then
+                    tooltip:AddLine("Concentration costs no gold, so it isn't in it.", 0.6, 0.6, 0.6, true)
+                end
+                if held and crafted and d.estimated then
+                    tooltip:AddDoubleLine("Making one now", "break-even " .. Money(d.estimated / (1 - AH_CUT)),
+                        0.8, 0.8, 0.8, 1, 1, 1)
+                end
                 if selling then
                     tooltip:AddDoubleLine("At today's AH price", Signed(selling) .. " each", 0.8, 0.8, 0.8,
                         addon:Color(addon:MoneyColor(selling)))
@@ -1094,14 +1109,24 @@ local function CreatePage(parent)
         end
         if d.recipe and not d.material then
             if d.yours then
-                r[1]:Set("Yours cost you", Money(d.yours), "text",
-                    (d.have or 0) > 0 and "your latest crafts of it" or "your last crafts, all sold")
+                -- How many it averages: more held than crafts recorded (some
+                -- bought) names the crafts instead
+                local held, count = d.yoursHeld or 0, d.yoursCount or 0
+                local note = "your last crafts, all sold"
+                if (d.have or 0) > 0 then
+                    if count >= held then
+                        note = held == 1 and "the one you hold" or string.format("average of the %d you hold", held)
+                    else
+                        note = count == 1 and "your latest craft" or string.format("average of your latest %d crafts", count)
+                    end
+                end
+                r[1]:Set("Yours cost you", Money(d.yours), "text", note)
             else
                 r[1]:Set("Yours cost you", "-", "dim", "not crafted yet")
             end
             r[2]:Set("Estimated", d.estimated and (Money(d.estimated) .. (d.partial and "+" or "")) or "-", "text",
                 StatsText(d.stats, d.finishing))
-            r[3]:Set("Worst case", d.worst and Money(d.worst) or "-", "muted", "no procs or finishing reagents")
+            r[3]:Set("Worst case", d.worst and Money(d.worst) or "-", "muted", "one made now, with no procs or finishing reagents")
             -- Held ones at what they cost, else what the next ones will
             if d.yours and (d.have or 0) > 0 then ProfitNow(r[4], d.yours, "what yours cost")
             else ProfitNow(r[4], d.estimated, "the estimated cost") end

@@ -196,7 +196,7 @@ TAB_PARTS.items = function(list)
         Add(list, "Sells", "How well it sells in your region, and how many you sell a day.", t[3])
         Add(list, "You have", "How many you hold on every character: bags, banks and AH listings.", t[4])
         Add(list, "Break-even",
-            "The lowest price that doesn't lose money on what yours cost you, after the AH cut. List above this.",
+            "The lowest price that doesn't lose money on what yours cost you, after the AH cut. List the ones you hold above this.",
             t[5])
         Add(list, "What it costs", "What yours cost you (crafted, bought or salvaged), what making one costs now, and the profit each at today's price.",
             page.concNote:GetParent())
