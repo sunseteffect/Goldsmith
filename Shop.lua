@@ -208,15 +208,16 @@ local function Cancel()
     quote, asking = nil, nil
 end
 
--- What the price means for the plan: extra over the plan's cost, and the
--- queue's profit then (nil when the queue has no profit to show)
+-- What the price means for the plan: extra over the plan's cost, the
+-- queue's profit then (nil when the queue has no profit to show), and
+-- whether the price takes it below zero (it made money before)
 local function Gap()
     if not quote then return end
     local extra = quote.total - (quote.planCost or quote.total)
     -- A stock-up isn't in the queue's profit, so its price doesn't change it
     local stock = q and q.stockOnly and q.stockOnly[quote.itemID]
     local profitThen = not stock and q and q.complete and q.profit and (q.profit - extra) or nil
-    return extra, extra > 0, profitThen
+    return extra, extra > 0, profitThen, profitThen and profitThen < 0 and q.profit >= 0
 end
 
 -- A queued craft this item is for loses gold at current prices: what it
@@ -272,7 +273,9 @@ end
 -- plan, the price already accepted, or a little over the plan (Settings'
 -- Buy without asking): under that % of the item's cost or of the queue's
 -- profit (user, 2026-10-19: a second click for 1.75g over 820g, and 3.38g
--- over a 1.20g item on a 1,000g queue). Never when the queue would lose.
+-- over a 1.20g item on a 1,000g queue). Never when it takes the queue
+-- below zero; a queue already below zero (losing orders taken on purpose)
+-- keeps the % rule: 0.06g over on a -90g queue asked (user, 2026-10-30).
 local function BuyWithoutAsking(qt, total)
     if qt.accepted and total <= qt.accepted then return true end
     if LossNeedsAsking(qt) then return false end
@@ -284,7 +287,7 @@ local function BuyWithoutAsking(qt, total)
     -- A stock-up: only its own cost counts (it isn't in the queue's profit)
     local stock = q and q.stockOnly and q.stockOnly[qt.itemID]
     local profit = not stock and q and q.complete and q.profit or nil
-    if profit and profit - extra < 0 then return false end
+    if profit and profit >= 0 and profit - extra < 0 then return false end
     return extra <= qt.planCost * share or (profit and profit > 0 and extra <= profit * share) or false
 end
 
@@ -1052,7 +1055,7 @@ function addon.UpdateShopSection()
     elseif not nextEntry then
         note = "All skipped. Reopen the AH to retry."
     elseif quote then
-        local extra, warn, profitThen = Gap()
+        local extra, warn, profitThen, sinks = Gap()
         if warn then
             -- "(0%)" read oddly for 1.75g over 820.75g (2026-10-19)
             local pct = math.floor(extra / quote.planCost * 100 + 0.5)
@@ -1064,7 +1067,7 @@ function addon.UpdateShopSection()
                     and string.format(" Queue still makes %s.", addon:FormatSignedMoney(profitThen))
                     or string.format(" Queue would lose %s.", Money(-profitThen)))
             end
-            color = profitThen and profitThen < 0 and "loss" or "warning"
+            color = sinks and "loss" or "warning"
         elseif LossNeedsAsking(quote) then
             note, color = LossNote(LossNeedsAsking(quote)), "loss"
         end
@@ -1217,13 +1220,13 @@ events:SetScript("OnEvent", function(_, event, unit, total)
             Confirm(quote)
         else
             -- Waits for a second click: a popup too when you'd lose gold
-            local _, _, profitThen = Gap()
+            local _, _, profitThen, sinks = Gap()
             local losers = LossNeedsAsking(quote)
             -- The losing craft first: it names the cause
             if losers then
                 addon:Alert("loss", string.format("%s loses %s at current prices.",
                     addon:QueueRowName(losers[1]), Money(-NowProfit(losers[1].plan))))
-            elseif profitThen and profitThen < 0 then
+            elseif sinks then
                 addon:Alert("loss", string.format("buying %s puts the queue at %s.", quote.name,
                     addon:FormatSignedMoney(profitThen)))
             else
