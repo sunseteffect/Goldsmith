@@ -356,7 +356,12 @@ local function Create(parent)
     UI.Style(view.itemChip, "highlight", "borderGold")
     view.itemChip:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderGold")) end)
     view.itemChip.label:SetTextColor(addon:Color("gold"))
+    view.itemChip.label:SetWordWrap(false)
+    -- Fills what's left of the row: at a fixed 200 it ran past the window's
+    -- edge (Reddit feedback, Harandar Celebration, 2026-10-29); long names
+    -- end in "..."
     view.itemChip:SetPoint("LEFT", view.character, "RIGHT", 10, 0)
+    view.itemChip:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
 
     -- Bottom right, on the footnote's line: by the filters, long totals ran
     -- under the character dropdown (user 2026-10-14, "plenty of space there")
