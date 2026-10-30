@@ -343,16 +343,31 @@ local function PostedLately()
     return names
 end
 
+-- What the ones you hold cost you, as the item page says: a material you
+-- also buy blends what you paid and what your crafts cost. 6 Sunglass
+-- Vial, 2 crafted at 75g and the rest bought at 266g, had a 78.69g
+-- break-even here (all as crafted) and 199.48g on the item page (user,
+-- 2026-10-30). Else the cost a sale would get.
+local function HeldCost(item, materials)
+    if materials[item.itemID] then
+        local own, ownSource = addon:GetOwnCost(item.name, nil, item.itemID)
+        if own and own > 0 and ownSource and ownSource:find("paid") then return own, "paid" end
+    end
+    local cost, _, source = addon:GetUnitCostBasis(item.name, item.count, item.itemID)
+    return cost, source
+end
+
 function addon:GetSellNow()
     local list = {}
     local posted = PostedLately()
+    local materials = addon:GetTrackedMaterials()
     for _, item in ipairs(addon:GetStockValue("All").heldLong) do
         addon:Yield()
         -- Not gear or tools: one realm's listing that may never sell (an
         -- Apprentice Jeweler's Apron "above break-even" at 953g, 2026-10-27)
         local selling = posted[item.name] or ListedNow(item.itemID)
         local price = not selling and not Wearable(item.itemID) and addon:GetAHPrice(item.itemID)
-        local cost, _, source = addon:GetUnitCostBasis(item.name, item.count, item.itemID)
+        local cost, source = HeldCost(item, materials)
         if price and cost and cost > 0 and (source == "crafted" or source == "paid") then
             local each = price * (1 - AH_CUT) - cost
             if each >= cost * SELL_NOW_MIN and each * item.count >= SELL_NOW_MIN_GOLD then
@@ -373,11 +388,12 @@ function addon:PrintSellNow()
     local M = function(c) return c and addon:FormatMoney(c) or "-" end
     local stock = addon:GetStockValue("All")
     local posted = PostedLately()
+    local materials = addon:GetTrackedMaterials()
     print(string.format("Goldsmith: %d held %d+ days, %d kept for yourself", #stock.heldLong,
         addon:Setting("heldDays"), #addon:GetKeptItems()))
     for _, item in ipairs(stock.heldLong) do
         local price = addon:GetAHPrice(item.itemID)
-        local cost, _, source = addon:GetUnitCostBasis(item.name, item.count, item.itemID)
+        local cost, source = HeldCost(item, materials)
         local why
         if posted[item.name] or ListedNow(item.itemID) then why = "posted in the last day or on the AH now"
         elseif Wearable(item.itemID) then why = "gear or a tool"

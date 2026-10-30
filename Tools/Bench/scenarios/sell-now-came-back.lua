@@ -24,7 +24,9 @@ for _, held in ipairs(addon:GetStockValue("All").heldLong) do
     end
 end
 bench.Check("something held a while, not gear", item ~= nil)
-prices[item.itemID] = math.floor(item.cost * 1.3)
+-- Well over: Sell now may count a blended cost above this one (bought and
+-- crafted, sell-now-bought-and-crafted)
+prices[item.itemID] = math.floor(item.cost * 5)
 local me = db.characters["Mysticmead-Sargeras"]
 for _, c in pairs(db.characters) do if c.auctions then c.auctions[item.itemID] = nil end end
 
