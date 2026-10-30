@@ -322,13 +322,22 @@ local SELL_NOW_MIN_GOLD = 10 * 10000
 -- sold. 2 Soul Cipher were told "sell now" right after they were posted
 -- (the stock count hadn't caught up; user, 2026-10-27).
 local SELL_NOW_POSTED_HOURS = 24
+-- A post is over once that character's auctions were read at least this
+-- long after it and the item wasn't there: it came back unsold. A Sunglass
+-- Vial and 4 Quel'dorei Medley back in the bags stayed "posted" for the
+-- whole day (2026-10-30). The margin covers a read right after posting
+-- that doesn't have the new listing yet.
+local POST_SEEN_AFTER = 10 * 60
 local function PostedLately()
     local names, since = {}, time() - SELL_NOW_POSTED_HOURS * 3600
     local all = addon.ledger:getAll()
     for i = #all, 1, -1 do
         local e = all[i]
         if e.timestamp and e.timestamp >= since and e.type == "COST" and e.kind == "DEPOSIT" and e.item then
-            names[e.item] = true
+            local c = e.character and GoldsmithDB.characters[e.character .. "-" .. (e.realm or "")]
+            if not (c and c.auctionsTime and c.auctionsTime >= e.timestamp + POST_SEEN_AFTER) then
+                names[e.item] = true
+            end
         end
     end
     return names
