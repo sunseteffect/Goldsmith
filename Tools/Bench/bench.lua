@@ -250,6 +250,9 @@ function B.Login(who, opts)
     if opts.money then world.money = opts.money end
     if opts.time then world.baseTime = opts.time end
 
+    -- Goldsmith's own look: the World of Warcraft one builds on the game's
+    -- frame templates, which the bench doesn't have
+    if db and db.settings then db.settings.theme = nil end
     GoldsmithDB = db
     LoadAddon()
     B.addon = _G.Goldsmith
