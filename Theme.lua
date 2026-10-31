@@ -27,6 +27,9 @@ addon.themes = {
             dialog      = Hex("17181d"),
             header      = Hex("24252c"),
             panel       = Hex("1f2027"),
+            -- Panels on their own by the game's windows (queue, AH,
+            -- mailbox, vendor)
+            floating    = Hex("1f2027"),
             panelRaised = Hex("26272e"),
             highlight   = Hex("26221a"),
             border      = Hex("2c2d34"),
@@ -93,6 +96,9 @@ addon.themes = {
             dialog      = Hex("0b0b0d", 0.96),
             header      = Hex("000000", 0),
             panel       = Hex("000000", 0.35),
+            -- Nothing behind them but the world: near solid, like the
+            -- game's tooltips (user, 2026-10-31: too see-through)
+            floating    = Hex("0b0b0d", 0.95),
             panelRaised = Hex("000000", 0.5),
             highlight   = Hex("2a2208", 0.6),
             border      = Hex("8c8c8c"),

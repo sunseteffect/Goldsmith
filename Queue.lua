@@ -1134,7 +1134,7 @@ local function CreatePanel()
     -- Above the whole profession window when dragged over it
     UI.RaiseAbove(panel, ProfessionsFrame)
     panel:SetWidth(PANEL_WIDTH)
-    UI.Style(panel, "panel", "borderGold")
+    UI.Style(panel, "floating", "borderGold")
     panel:EnableMouse(true)
 
     -- Drag it anywhere; it stays put relative to the profession window

@@ -293,7 +293,7 @@ local function CreatePanel()
     if panel or not MailFrame then return end
     panel = CreateFrame("Frame", nil, MailFrame, "BackdropTemplate")
     panel:SetWidth(PANEL_WIDTH)
-    UI.Style(panel, "panel", "borderGold")
+    UI.Style(panel, "floating", "borderGold")
     panel:EnableMouse(true)
     MakeMovable()
 

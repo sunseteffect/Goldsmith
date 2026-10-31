@@ -125,7 +125,7 @@ local function CreatePanel()
     panel = CreateFrame("Frame", nil, MerchantFrame, "BackdropTemplate")
     UI.RaiseAbove(panel, MerchantFrame)
     panel:SetWidth(PANEL_WIDTH)
-    UI.Style(panel, "panel", "borderGold")
+    UI.Style(panel, "floating", "borderGold")
     panel:EnableMouse(true)
     panel:SetPoint("TOPLEFT", MerchantFrame, "TOPRIGHT", 4, 0)
 

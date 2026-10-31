@@ -476,7 +476,7 @@ local function CreatePanel()
         GoldsmithDB.ui2.scanPanel = nil
         GoldsmithDB.ui2.scanPanelUnder = true
     end
-    UI.Style(panel, "panel", "borderGold")
+    UI.Style(panel, "floating", "borderGold")
     panel:EnableMouse(true)
     panel:SetMovable(true)
     panel:SetClampedToScreen(true)
@@ -603,7 +603,7 @@ local function ShowFlips()
     if not panel or not panel:IsShown() then return end
     if not flipFrame then
         flipFrame = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-        UI.Style(flipFrame, "panel", "borderGold")
+        UI.Style(flipFrame, "floating", "borderGold")
         flipFrame:SetWidth(PANEL_WIDTH)
         flipFrame:SetPoint("TOPLEFT", panel, "BOTTOMLEFT", 0, -4)
         flipFrame.title = UI.Text(flipFrame, "label", "gold")
