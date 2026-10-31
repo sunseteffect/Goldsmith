@@ -979,7 +979,16 @@ local function WaitsOnConcentration(s)
     return false
 end
 
+-- Milling (any salvage) ready to go comes first, for the whole queue: one
+-- tool swap to mill everything, one back to craft. Row by row it went mill,
+-- ink, mill, ink over a list of patron orders, swapping tools every time
+-- (user, 2026-10-30). Safe ahead of the rows above: each plans from what's
+-- in your bags again after every step.
 function addon:QueueNextRow(q)
+    for _, row in ipairs(q.rows) do
+        local s = row.state
+        if s and s.enabled and not s.open and s.salvage then return row end
+    end
     local open, stuck, station, waiting
     for _, row in ipairs(q.rows) do
         local s = row.state
