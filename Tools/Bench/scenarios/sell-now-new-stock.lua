@@ -10,8 +10,12 @@ db.searchPrices = {}
 -- One crafted item, held weeks, in nobody's stock yet
 local itemID, lot
 for id, lots in pairs(db.craftLots) do
-    if #lots > 0 and lots[1].unitCost and lots[1].unitCost > 0 and lots[1].time < os.time() - 10 * 86400 then
-        itemID, lot = id, lots[1]
+    -- The newest lot old too: a Missive crafted again lately is held
+    -- since then (2026-10-30)
+    local last = lots[#lots]
+    if #lots > 0 and last.unitCost and last.unitCost > 0 and last.time < os.time() - 10 * 86400
+        and lots[1].time < os.time() - 10 * 86400 then
+        itemID, lot = id, last
         break
     end
 end

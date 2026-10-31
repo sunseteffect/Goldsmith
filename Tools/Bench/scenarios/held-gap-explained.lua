@@ -62,7 +62,9 @@ bench.Equal("a 5g gap says nothing", addon:HeldGap(small), nil)
 -- The to-do's Missive: profit for the whole craft, as the queue counts it
 local todo = addon:GetCharacterTodo("All")[MADDOXYNN]
 for _, t in ipairs(todo and todo.items or {}) do
-    if t.recipe.recipeID == MISSIVE then
+    -- The queue's silver one, without concentration (a gold Missive with
+    -- concentration can be on the to-do too)
+    if t.recipe.recipeID == MISSIVE and t.row.tier == 1 and not t.row.concentrate then
         local m = q.rows[2].plan
         local today = m.revenue - (m.todayCost or m.marketCost)
         bench.Log("Missive: to-do %s for %d craft (about %.2f made), queue at today's prices %s",

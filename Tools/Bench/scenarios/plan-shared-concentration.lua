@@ -18,8 +18,14 @@ for _, amount in ipairs({ 384, 400, 450, 350, 520, 600 }) do
     for _, snap in pairs(db.characters[key].concentration or {}) do snap.current, snap.time = amount, os.time() end
     addon = bench.Login("Mysticmead", { db = db })
     local items = addon:GetCharacterTodo("All")[key].items
+    -- Shared with another item: two mixes of the same craft (gold herbs,
+    -- then all silver with what's left) is the plain "earns the most" case
+    local recipes = {}
+    for _, item in ipairs(items) do
+        if item.concentration then recipes[item.recipe.recipeID] = true end
+    end
     local conc = 0
-    for _, item in ipairs(items) do if item.concentration then conc = conc + 1 end end
+    for _ in pairs(recipes) do conc = conc + 1 end
     for _, item in ipairs(items) do
         if item.concentration and conc > 1 and not found then
             local rows = addon:WithCharacter(key, addon.GetTierRows, addon, item.recipe) or {}

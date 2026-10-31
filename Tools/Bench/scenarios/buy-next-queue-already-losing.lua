@@ -53,9 +53,10 @@ bench.HasNot("no \"puts the queue at\" popup", calls, "puts the queue at")
 bench.Has("says over plan", bench.Screen(), "over plan")
 bench.CloseAH()
 
--- A queue that makes money (the tea at 100g): a price that takes it
--- below zero still asks
-profit, unit = Start(nil, bench.Gold(100))
+-- A queue that makes money (the tea at 40g): a price that takes it
+-- below zero still asks. Not 100g: over 3x its usual 19.74g, the jump
+-- check prices it at usual once there are 4 days of history (2026-10-30)
+profit, unit = Start(nil, bench.Gold(40))
 bench.Check("the queue makes money", profit > 0)
 bench.OpenAH()
 bench.Click("Buy 8 Azeroot")
