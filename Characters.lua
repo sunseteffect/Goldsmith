@@ -543,7 +543,7 @@ end
 -- AH, the mailbox, a vendor or the bank is open. A gap shorter than
 -- GOLDMAKING_GAP between two of them (walking from the AH to the mailbox)
 -- counts too. Dungeons, questing and idling in town don't.
-local GOLDMAKING_GAP = 5 * 60
+local GOLDMAKING_GAP = 2 * 60 -- the city flight from professions to the AH is 15-20 s (user, 2026-10-30); was 5 min
 local GOLDMAKING_TICK = 30
 
 local GOLDMAKING_OPEN = {

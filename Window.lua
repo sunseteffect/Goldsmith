@@ -904,6 +904,8 @@ function addon:CreateWindow()
     local refreshPending = false
     addon.Refresh = function()
         addon:DataChanged()
+        -- Buy next at the AH plans from the same prices (Shop.lua)
+        if addon.ShopDataChanged then addon.ShopDataChanged() end
         if frame:IsShown() and not refreshPending then
             refreshPending = true
             C_Timer.After(0.5, function()

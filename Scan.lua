@@ -25,7 +25,9 @@ local FULL_COOLDOWN = 15 * 60   -- the server's limit on full scans
 local FULL_WAIT = 120           -- seconds for the full scan's data before paging instead
 local SETTLE = 2                -- seconds after the first data event before reading
 local PAGE_STALL = 20           -- seconds without a page before stopping
-local PAGES_GUESS = 40          -- pages in a page scan, until one has run
+local PAGES_GUESS = 70          -- pages in a page scan, until one has run (69 on retail)
+local PAGES_MIN = 10            -- a remembered page count under this is from a cut-short scan
+local SHORT_KEEP = 0.25         -- a scan with under a quarter of the last one's items keeps the last
 local LOW_KEEP = 0.5            -- a page scan's price under half the last one keeps the last
 -- Reading and pricing stop for the frame once FRAME_MS is used (checked
 -- every CHECK_EVERY rows or items): fixed counts of 15,000 auctions and
@@ -70,22 +72,34 @@ local function Timed(key, started, into)
 end
 
 local StartPages -- below
+local sendingQuery = false -- the page scan's own browse search is being sent
 local function Finish(prices, auctions, method)
     local items = 0
     for _ in pairs(prices) do items = items + 1 end
-    if items == 0 then
+    -- Far fewer items than the last scan here is a scan cut short: another
+    -- search took over the page scan's results (29 items replaced the whole
+    -- scan; user, 2026-10-30), or the listings went with the AH.
+    local last = GoldsmithDB.ownScan
+    local short = items > 0 and last and last.items and last.group == addon:RealmGroup()
+        and items < last.items * SHORT_KEEP
+    if items == 0 or short then
         -- Nothing came back: keep the last scan as it was. What happened is
         -- kept (GoldsmithDB.scanFail): one failed with nothing to say why
         -- (user, 2026-10-27). A full scan that came back empty pages
         -- instead, once, as when it never answers.
-        GoldsmithDB.scanFail = { time = time(), method = method, auctions = auctions,
+        GoldsmithDB.scanFail = { time = time(), method = method, auctions = auctions, items = items,
             borrowed = run and run.borrowed or nil, pages = run and run.pages or nil,
             waited = run and run.started and time() - run.started or nil }
         if method == "full" and run and not run.borrowed and ahOpen then
             StartPages()
             return
         end
-        addon:Notify("info", "Goldsmith scan: the AH sent nothing back, so the last scan is kept. Try again in a minute.")
+        if short then
+            addon:Notify("info", "Goldsmith scan: only %s items came back, so the last scan is kept. Try again in a minute.",
+                BreakUpLargeNumbers(items))
+        else
+            addon:Notify("info", "Goldsmith scan: the AH sent nothing back, so the last scan is kept. Try again in a minute.")
+        end
         run = nil
         UpdatePanel()
         return
@@ -95,6 +109,10 @@ local function Finish(prices, auctions, method)
         realm = GetRealmName(),
         seconds = time() - run.started, borrowed = run.borrowed or nil, prices = prices,
     }
+    -- How many pages it took, for the next page scan's percent; only from
+    -- a scan that's kept (a cut-short one remembered 6 and showed 99% from
+    -- page 6 of 69; user, 2026-10-31)
+    if method == "pages" and (run.pages or 0) >= PAGES_MIN then GoldsmithDB.scanPages = run.pages end
     run = nil
     addon:Notify("info", "Goldsmith scan: %s items priced.", BreakUpLargeNumbers(items))
     -- Buy to vendor (below): Forever only for now; retail's 350,000
@@ -235,8 +253,6 @@ local function FinishPages()
         local before = last and addon:PriceHoldsHere(lastScan.group, itemID) and last[itemID]
         if before and before[1] and p[1] < before[1] * LOW_KEEP then p[1] = before[1] end
     end
-    -- How many pages it took, for the next page scan's percent
-    if run and (run.pages or 0) > 1 then GoldsmithDB.scanPages = run.pages end
     timing = {}
     Timed("pricing", started)
     Finish(prices, #(ok and type(results) == "table" and results or {}), "pages")
@@ -266,7 +282,9 @@ StartPages = function()
         searchString = "", minLevel = 0, maxLevel = 0, filters = {}, itemClassFilters = {},
         sorts = { { sortOrder = Enum.AuctionHouseSortOrder.Price, reverseSort = false } },
     }
+    sendingQuery = true
     local ok, err = pcall(C_AuctionHouse.SendBrowseQuery, query)
+    sendingQuery = false
     if not ok then
         addon:Notify("info", "Goldsmith scan couldn't start: %s", tostring(err))
         run = nil
@@ -362,15 +380,33 @@ events:SetScript("OnEvent", function(_, event)
     end
 end)
 
+-- Any other browse search (Auctionator, the Buy tab) replaces the page
+-- scan's results, and they'd be saved as the scan: stop instead
+if C_AuctionHouse and C_AuctionHouse.SendBrowseQuery then
+    hooksecurefunc(C_AuctionHouse, "SendBrowseQuery", function()
+        if sendingQuery or not run or run.phase ~= "pages" then return end
+        run = nil
+        addon:Notify("info", "Goldsmith scan stopped: another AH search started. The last scan is kept.")
+        UpdatePanel()
+    end)
+end
+
 -- A full scan that never answers (asked too soon) pages instead; paging
--- that stops answering saves what came back
+-- that stops answering saves what came back. Paging with no page at all
+-- asks once more first: twice no page came in 20 s and the next press
+-- worked (user, 2026-10-30 and 31).
 C_Timer.NewTicker(1, function()
     if not run then return end
     if run.phase == "waiting" and time() - run.started > FULL_WAIT then
         if run.borrowed then run = nil else StartPages() end
         UpdatePanel()
     elseif run.phase == "pages" and GetTime() - run.lastPage > PAGE_STALL then
-        FinishPages()
+        if run.pages == 0 and not run.retried then
+            run.retried = true
+            StartPages()
+        else
+            FinishPages()
+        end
     elseif run.phase == "waiting" then
         UpdatePanel() -- the seconds counting up
     end
@@ -420,7 +456,8 @@ local function ButtonLabel()
     elseif run.phase == "pages" then
         -- The game doesn't say how many pages there are, so the last page
         -- scan's count (a guess the first time); never 100% until done
-        local total = GoldsmithDB.scanPages or PAGES_GUESS
+        local total = GoldsmithDB.scanPages
+        if not total or total < PAGES_MIN then total = PAGES_GUESS end
         return string.format("Scanning %d%%", math.min(99, math.floor((run.pages or 0) / total * 100)))
     end
     return "Scanning..."

@@ -1189,6 +1189,14 @@ RefreshSoon = function()
     end)
 end
 
+-- Prices changed (an AH search, a scan; addon.Refresh): planned again.
+-- Searching each herb for Plant Protein moved the plan to Winged Stalk,
+-- and Buy next kept the old list until the AH was reopened (user,
+-- 2026-10-31)
+function addon.ShopDataChanged()
+    if ahOpen and section then RefreshSoon() end
+end
+
 local events = CreateFrame("Frame")
 for _, event in ipairs({ "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED", "COMMODITY_PRICE_UPDATED",
     "COMMODITY_PRICE_UNAVAILABLE", "COMMODITY_PURCHASE_SUCCEEDED", "COMMODITY_PURCHASE_FAILED",

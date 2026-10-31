@@ -130,7 +130,7 @@ local function MoneyRows(s)
         { "Gold an hour", s.perHour and Signed(s.perHour) or "-", s.perHour and addon:MoneyColor(s.perHour) or "muted",
           tooltip = function(t)
             White(t, "Gold an hour")
-            Grey(t, "Lifetime profit over the time you spent at the AH, the mailbox and professions: " .. HoursText(s.seconds) .. ".")
+            Grey(t, "Lifetime profit over the time a profession, the AH, the mailbox, a vendor or the bank was open, short walks between them included: " .. HoursText(s.seconds) .. ".")
         end },
         { "Paid to the AH goblins", Money(a.ahCut), "warning", tooltip = function(t)
             White(t, "Paid to the AH goblins")

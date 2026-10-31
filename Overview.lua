@@ -948,6 +948,9 @@ local function ChartData(key, state)
                 tooltip:AddDoubleLine("Profit", Signed(d.profit), 0.8, 0.8, 0.8, 1, 1, 1)
                 tooltip:AddDoubleLine("Goldmaking time", string.format("%dh %02dm",
                     math.floor(d.seconds / 3600), math.floor(d.seconds % 3600 / 60)), 0.8, 0.8, 0.8, 1, 1, 1)
+                addon:Explain(tooltip, "Profit over the time a profession, the AH, the mailbox, a vendor or the bank was open, short walks between them included."
+                    .. (state.profession ~= "All" and " Time counts every profession." or ""), 0.6, 0.6, 0.6, true)
+                addon:Explain(tooltip, "Averaged over 7 days: sales come in days after the crafting.", 0.6, 0.6, 0.6, true)
             end })
         end
         local subtitle = "per hour of goldmaking, 7-day average"
