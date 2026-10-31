@@ -45,6 +45,16 @@ local Update, RefreshSoon       -- below
 
 local function Money(copper) return addon:FormatMoney(copper) end
 
+-- The AH can't take a press yet: a purchase's gold isn't settled (the press
+-- is ignored) or the AH is busy with a search (a price request goes
+-- unanswered). The button waits greyed: after Azeroot, "Buy 1 Mote of
+-- Light" looked ready while the listings were searching (user, 2026-10-30)
+local function AHBusy()
+    if addon:PurchaseSettling() then return true end
+    local ok, ready = pcall(C_AuctionHouse.IsThrottledMessageSystemReady)
+    return ok and ready == false
+end
+
 local function ItemName(entry)
     local icon = entry.qualityTier and (addon:TierIconText(entry.qualityTier, entry.tierCount) .. " ") or ""
     return icon .. (entry.name or ("item " .. entry.itemID))
@@ -788,7 +798,7 @@ function addon:BuyNext()
     -- AH (nothing to buy, and everyone knows it) does nothing (user,
     -- 2026-10-25)
     if not addon:Setting("ahScan") or not ahOpen then return end
-    if buying or asking or addon:PurchaseSettling() then return end
+    if buying or asking or AHBusy() then return end
     if addon:IsScanning() then
         -- No sound: the panel says so too; sounds are for what matters
         -- (user, 2026-10-25)
@@ -1094,6 +1104,8 @@ function addon.UpdateShopSection()
         label, enabled = "Buying...", false
     elseif asking then
         label, enabled = "Getting the price...", false
+    elseif nextEntry and AHBusy() then
+        label, enabled = "Waiting for the AH...", false
     elseif quote then
         label = string.format("Buy %d %s for %s", quote.quantity, quote.name, Money(quote.total))
     elseif nextEntry then
@@ -1238,6 +1250,7 @@ events:SetScript("OnEvent", function(_, event, unit, total)
         -- After the AH window's own handling of the same event
         if listingQty and (unit == nil or unit == listingQty.itemID) then C_Timer.After(0, FillQuantity) end
     elseif event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
+        if not buying then Update() end
         if buying and buying.waitThrottle then
             buying.waitThrottle = nil
             buying.sent = GetTime()
@@ -1294,7 +1307,15 @@ end)
 -- A price kept too long is let go: the next click asks again. No answer
 -- to a price request or a purchase: give up, so the button never sticks
 -- (core.lua's money check records nothing when nothing was paid)
+local wasBusy
 C_Timer.NewTicker(1, function()
+    -- The button greys and comes back as the AH gets busy and ready again
+    -- (a purchase's gold settling has no event of its own)
+    local busy = ahOpen and AHBusy()
+    if busy ~= wasBusy then
+        wasBusy = busy
+        if ahOpen and not buying then Update() end
+    end
     if quote and GetTime() - quote.at >= QUOTE_LIFE then
         Cancel()
         Update()
