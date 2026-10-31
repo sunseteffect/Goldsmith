@@ -75,12 +75,83 @@ addon.themes = {
             value   = { "Fonts\\ARIALN.TTF", 18, "", "text" },
             big     = { "Fonts\\ARIALN.TTF", 24, "", "text" },
             close   = { "Fonts\\ARIALN.TTF", 22, "", "muted" },
+            button  = { "Fonts\\ARIALN.TTF", 12, "", "text" },
         },
         texture = "Interface\\Buttons\\WHITE8x8",
+    },
+
+    -- World of Warcraft: made to look like the game's own windows, so
+    -- Goldsmith doesn't read as an addon (user, 2026-10-31; experiment).
+    -- game = true swaps in Blizzard's art where the widgets allow it: the
+    -- window frame, red buttons, tabs under the window (Window.lua,
+    -- Widgets.lua). Colors are the game's font colors.
+    game = {
+        game = true,
+        colors = {
+            -- The game's frame art is behind the window
+            window      = Hex("000000", 0),
+            dialog      = Hex("0b0b0d", 0.96),
+            header      = Hex("000000", 0),
+            panel       = Hex("000000", 0.35),
+            panelRaised = Hex("000000", 0.5),
+            highlight   = Hex("2a2208", 0.6),
+            border      = Hex("8c8c8c"),
+            borderStrong = Hex("a6a6a6"),
+            borderGold  = Hex("ffd100"),
+            hover       = Hex("ffffff", 0.08),
+
+            text        = Hex("ffffff"),
+            muted       = Hex("a5a5a5"),
+            dim         = Hex("808080"),
+            gold        = Hex("ffd100"),
+            expansion   = Hex("71d5ff"),
+            hint        = Hex("71d5ff"),
+            hintRight   = Hex("c4adef"),
+            hintShift   = Hex("efb79c"),
+
+            profit      = Hex("1eff00"),
+            loss        = Hex("ff2020"),
+            conc        = Hex("ffd100"),
+            warning     = Hex("ff8000"),
+            bar         = Hex("1eaa00"),
+            band        = Hex("ffd100", 0.10),
+            bandLine    = Hex("ffd100", 0.35),
+            line        = Hex("a335ee"),
+            barEmpty    = Hex("404040"),
+            tierTop     = Hex("ffd100"),
+            tierMid     = Hex("b08d57"),
+            tierLow     = Hex("aeb3bc"),
+        },
+        -- Friz Quadrata everywhere, at the sizes of GameFontNormal and
+        -- friends
+        fonts = {
+            title   = { "Fonts\\FRIZQT__.TTF", 14, "", "gold" },
+            heading = { "Fonts\\FRIZQT__.TTF", 13, "", "gold" },
+            tab     = { "Fonts\\FRIZQT__.TTF", 12, "", "muted" },
+            body    = { "Fonts\\FRIZQT__.TTF", 12, "", "text" },
+            small   = { "Fonts\\FRIZQT__.TTF", 11, "", "muted" },
+            label   = { "Fonts\\FRIZQT__.TTF", 10, "", "muted" },
+            value   = { "Fonts\\FRIZQT__.TTF", 16, "", "text" },
+            big     = { "Fonts\\FRIZQT__.TTF", 20, "", "text" },
+            close   = { "Fonts\\FRIZQT__.TTF", 18, "", "muted" },
+            button  = { "Fonts\\FRIZQT__.TTF", 12, "", "gold" },
+        },
+        texture = "Interface\\Buttons\\WHITE8x8",
+        -- Bordered boxes get the game's tooltip edge instead of a 1px line
+        edge = "Interface\\Tooltips\\UI-Tooltip-Border",
+        edgeSize = 12,
+        inset = 3,
     },
 }
 
 addon.theme = addon.themes.clean
+
+-- The look is picked once, when Goldsmith loads, before the window is made
+-- (Core.lua, Initialize; Settings > Display > Look): every frame takes its
+-- colors when it's made, so a change shows after a reload
+function addon:PickTheme()
+    addon.theme = addon.themes[addon:Setting("theme")] or addon.themes.clean
+end
 
 -- r, g, b, a of a theme color
 function addon:Color(name)

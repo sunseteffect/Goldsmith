@@ -210,6 +210,20 @@ function addon:CreateWindow()
     frame:SetMovable(true)
     frame:Hide()
     UI.Style(frame, "window", "borderGold")
+    -- World of Warcraft theme: the game's own window behind everything (its
+    -- frame, title bar and portrait, with the logo in the portrait)
+    local game = addon.theme.game
+    local gameArt
+    if game then
+        frame:ClearBackdrop()
+        gameArt = CreateFrame("Frame", nil, frame, "PortraitFrameTemplate")
+        gameArt:SetAllPoints()
+        gameArt:SetFrameLevel(frame:GetFrameLevel())
+        gameArt:SetTitle("Goldsmith")
+        gameArt:SetPortraitToAsset("Interface\\AddOns\\Goldsmith\\Media\\Logo")
+        gameArt.CloseButton:SetScript("OnClick", function() frame:Hide() end)
+        gameArt.CloseButton:SetFrameLevel(frame:GetFrameLevel() + 20)
+    end
     -- Whether Goldsmith is in front of the game's windows. Drawing order
     -- can't be read reliably (a lowered Goldsmith can share a frame level
     -- with the AH), so it's tracked: opening or clicking Goldsmith puts it
@@ -430,6 +444,14 @@ function addon:CreateWindow()
     local title = UI.Text(header, "title")
     title:SetPoint("LEFT", logo, "RIGHT", 8, 0)
     title:SetText("GOLDSMITH")
+    -- The game's title bar and portrait say it instead; the filters start
+    -- past the portrait, under the title bar
+    if game then
+        logo:Hide()
+        title:ClearAllPoints()
+        title:SetPoint("LEFT", header, "LEFT", 54, -10)
+        title:SetText("")
+    end
 
     local Refresh -- defined below
 
@@ -489,6 +511,11 @@ function addon:CreateWindow()
         tooltip:AddLine(key and ("Close (Esc or " .. key .. ")") or "Close (Esc)", 1, 1, 1)
     end, "ANCHOR_BOTTOM")
     closeButton:SetPoint("RIGHT", -8, 0)
+    -- The game's close button, in the title bar's corner
+    if game then
+        closeButton:Hide()
+        closeButton:SetWidth(1)
+    end
 
     -- Help mode (HelpMode.lua): the window's only "?", so explanations are
     -- there when asked for without question marks everywhere (user,
@@ -569,6 +596,39 @@ function addon:CreateWindow()
     end)
     tabBar:SetPoint("TOPLEFT", 10, 0)
     tabBar:SetPoint("TOPRIGHT", 0, 0)
+
+    -- World of Warcraft theme: the game's tabs hang under the window, as on
+    -- the character or professions window. Clicks go through the hidden
+    -- tab bar, so both stay in step.
+    if game then
+        tabBar:Hide()
+        frame.Tabs = {}
+        for i, tab in ipairs(TABS) do
+            local button = CreateFrame("Button", "GoldsmithWindowTab" .. i, frame, "PanelTabButtonTemplate")
+            button:SetID(i)
+            button:SetText(tab.label)
+            PanelTemplates_TabResize(button, 0)
+            if i == 1 then
+                button:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 12, 2)
+            else
+                button:SetPoint("TOPLEFT", frame.Tabs[i - 1], "TOPRIGHT", 3, 0)
+            end
+            button:SetScript("OnClick", function()
+                PlaySound(SOUNDKIT.IG_CHARACTER_INFO_TAB)
+                tabBar.buttons[tab.key]:Click()
+            end)
+            frame.Tabs[i] = button
+        end
+        PanelTemplates_SetNumTabs(frame, #TABS)
+        hooksecurefunc(tabBar, "Select", function(_, key)
+            for i, tab in ipairs(TABS) do
+                if tab.key == key then PanelTemplates_SetTab(frame, i) end
+            end
+        end)
+        -- The gold line under the old tabs isn't the game's
+        tabLine:Hide()
+        headerLine:Hide()
+    end
 
     -- Settings: at the right end of the tabs, under the close button (user,
     -- 2026-10-06: the header was crowded). The panel opens below the tabs,

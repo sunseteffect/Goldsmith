@@ -67,6 +67,7 @@ local DEFAULTS = {
     auctionatorButton = false,
     sounds = true,
     peekKey = "alt",
+    theme = "clean",
 }
 
 function addon:Setting(key)
@@ -773,6 +774,10 @@ local CHOICES = {
         { value = "alt", label = "Hold Alt" },
         { value = "off", label = "Key binding only" },
     },
+    theme = {
+        { value = "clean", label = "Goldsmith" },
+        { value = "game", label = "World of Warcraft" },
+    },
 }
 for _, value in ipairs({ 0, 5, 10, 15, 20, 30, 50 }) do
     table.insert(CHOICES.minROI, { value = value,
@@ -945,6 +950,11 @@ local HELP = {
         "While you hold this key, Goldsmith fades almost away and clicks go through it, so you can click the auctioneer or a mailbox behind it without moving the window. Let go and it's back.",
         "Alt is the only choice here: Shift and Ctrl already do things in Goldsmith (shift-click an item, Ctrl to explain a hover). For any other key, pick Key binding only and set it in Options > Keybindings > Goldsmith: Hold to see through. The game can't bind Alt, Shift or Ctrl alone there.",
     },
+    theme = {
+        "Look",
+        "Goldsmith: Goldsmith's own dark look. World of Warcraft: the game's window frame, red buttons and tabs, so Goldsmith looks like part of the game.",
+        "Changes after a reload.",
+    },
     keybind = {
         "Key to open Goldsmith",
         "Set key opens the game's Keybindings at Goldsmith's section: click the box next to Show or hide the window and press the key you want.",
@@ -988,7 +998,7 @@ local PAGES = {
     { group = "Interface" },
     { key = "display", label = "Display",
       intro = "Goldsmith's lines in the game's own windows, and its minimap button.",
-      rows = { "tooltips", "craftCost", "showMinimap" } },
+      rows = { "theme", "tooltips", "craftCost", "showMinimap" } },
     { key = "alerts", label = "Chat and sounds",
       intro = "What Goldsmith tells you as things happen.",
       rows = { "chat", "sounds" } },
@@ -1104,13 +1114,19 @@ local function Dropdown(row, key, build)
     return dropdown
 end
 
--- A row whose dropdown picks one of CHOICES[key]
-local function ChoiceRow(parent, panel, key, title, description)
+-- A row whose dropdown picks one of CHOICES[key]. onChange(value) runs
+-- after a new choice is saved.
+local function ChoiceRow(parent, panel, key, title, description, onChange)
     local row = Row(parent, key, title, description)
     Dropdown(row, key, function(root)
         for _, c in ipairs(CHOICES[key]) do
             root:CreateRadio(c.label, function() return addon:Setting(key) == c.value end,
-                function() addon:SetSetting(key, c.value); panel:Update() end)
+                function()
+                    local changed = addon:Setting(key) ~= c.value
+                    addon:SetSetting(key, c.value)
+                    panel:Update()
+                    if changed and onChange then onChange(c.value) end
+                end)
         end
     end)
     function row:Update() row.control:SetLabel(ButtonLabel(CHOICES[key], addon:Setting(key))) end
@@ -1357,6 +1373,15 @@ function addon:CreateSettingsPanel(parent)
         "A shopping list in Auctionator, on the queue and plans.",
         function() if addon.RefreshWindow then addon.RefreshWindow() end end)
 
+    -- Every frame takes its look when it's made: offer the reload
+    StaticPopupDialogs.GOLDSMITH_RELOAD_THEME = StaticPopupDialogs.GOLDSMITH_RELOAD_THEME or {
+        text = "Goldsmith's new look shows after a reload.",
+        button1 = "Reload now", button2 = "Later",
+        OnAccept = function() ReloadUI() end,
+        timeout = 0, whileDead = true, hideOnEscape = true,
+    }
+    rows.theme = ChoiceRow(content, panel, "theme", "Look", "Goldsmith's own look, or the game's.",
+        function() StaticPopup_Show("GOLDSMITH_RELOAD_THEME") end)
     rows.tooltips = ChoiceRow(content, panel, "tooltips", "Item tooltips", "Goldsmith's lines in the game's item tooltips.")
     rows.craftCost = ToggleRow(content, panel, "craftCost", "Cost in the profession window", "Your materials and Profit under a recipe's materials.",
         function() if addon.UpdateCraftCostLines then addon:UpdateCraftCostLines() end end)

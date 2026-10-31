@@ -668,6 +668,7 @@ function addon:Initialize()
     GoldsmithDB.harmoniousLotsRepaired = nil
     -- Keep history for (Settings); after login settles, like the other chores
     C_Timer.After(15, function() addon:TrimHistory() end)
+    addon:PickTheme()
     addon:CreateWindow()
     addon:CreateMinimapButton()
     -- Items assigned to Archaeology or Fishing (older versions offered them)

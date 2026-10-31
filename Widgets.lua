@@ -11,12 +11,21 @@ addon.UI = UI
 
 -- Flat background and 1px border in theme colors
 function UI.Style(frame, bg, border)
+    -- A button drawn with the game's art (World of Warcraft theme) keeps it
+    if frame.gameArt then return end
     if not frame.SetBackdrop then
         Mixin(frame, BackdropTemplateMixin)
         frame:HookScript("OnSizeChanged", frame.OnBackdropSizeChanged)
     end
-    local texture = addon.theme.texture
-    frame:SetBackdrop({ bgFile = texture, edgeFile = border and texture or nil, edgeSize = 1 })
+    local theme = addon.theme
+    local texture = theme.texture
+    if theme.edge and border then
+        local i = theme.inset
+        frame:SetBackdrop({ bgFile = texture, edgeFile = theme.edge, edgeSize = theme.edgeSize,
+            insets = { left = i, right = i, top = i, bottom = i } })
+    else
+        frame:SetBackdrop({ bgFile = texture, edgeFile = border and texture or nil, edgeSize = 1 })
+    end
     frame:SetBackdropColor(addon:Color(bg or "panel"))
     if border then
         frame:SetBackdropBorderColor(addon:Color(border))
@@ -431,12 +440,22 @@ function UI.MoveIcon(panel, x, y)
     return icon
 end
 
--- A flat button. onClick(self, mouseButton).
+-- A flat button, or the game's red button in the World of Warcraft theme.
+-- onClick(self, mouseButton).
+local function NoBackdrop() end
 function UI.Button(parent, text, width, height, onClick)
-    local button = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    local game = addon.theme.game
+    local button = CreateFrame("Button", nil, parent, game and "UIPanelButtonTemplate" or "BackdropTemplate")
     button:SetSize(width or 100, height or 24)
-    UI.Style(button, "panelRaised", "borderStrong")
-    button.label = UI.Text(button, "small", "text", "CENTER")
+    if game then
+        -- Callers that recolor a button's box (the filter chip) leave the
+        -- game's art alone
+        button.gameArt = true
+        button.SetBackdrop, button.SetBackdropColor, button.SetBackdropBorderColor = NoBackdrop, NoBackdrop, NoBackdrop
+    else
+        UI.Style(button, "panelRaised", "borderStrong")
+    end
+    button.label = UI.Text(button, "button", game and "gold" or "text", "CENTER")
     button.label:SetPoint("LEFT", 8, 0)
     button.label:SetPoint("RIGHT", -8, 0)
     button.label:SetText(text or "")
@@ -445,8 +464,16 @@ function UI.Button(parent, text, width, height, onClick)
     -- A greyed-out button still shows its hover, which says why it's off
     -- (WoW skips hover scripts on disabled buttons otherwise)
     button:SetMotionScriptsWhileDisabled(true)
-    button:HookScript("OnEnter", function(self) self:SetBackdropBorderColor(addon:Color("gold")) end)
-    button:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderStrong")) end)
+    if game then
+        -- The game's buttons: gold text, grey when off, white on hover
+        button:HookScript("OnDisable", function(self) self.label:SetTextColor(addon:Color("dim")) end)
+        button:HookScript("OnEnable", function(self) self.label:SetTextColor(addon:Color("gold")) end)
+        button:HookScript("OnEnter", function(self) if self:IsEnabled() then self.label:SetTextColor(1, 1, 1) end end)
+        button:HookScript("OnLeave", function(self) if self:IsEnabled() then self.label:SetTextColor(addon:Color("gold")) end end)
+    else
+        button:HookScript("OnEnter", function(self) self:SetBackdropBorderColor(addon:Color("gold")) end)
+        button:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderStrong")) end)
+    end
 
     -- A new label usually means the button does something else now (Open
     -- Alchemy becomes Craft 1), so an open hover on it is drawn again
