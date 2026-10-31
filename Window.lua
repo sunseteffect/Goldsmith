@@ -238,8 +238,8 @@ function addon:CreateWindow()
             local logoMark = holder:CreateTexture(nil, layer, nil, math.min(7, (sublevel or 0) + 1))
             logoMark:SetTexture("Interface\\AddOns\\Goldsmith\\Media\\Logo")
             -- 4 px up: the art sits low in its square (user, 2026-10-31)
-            logoMark:SetPoint("TOPLEFT", portrait, "TOPLEFT", 6, -2)
-            logoMark:SetPoint("BOTTOMRIGHT", portrait, "BOTTOMRIGHT", -6, 10)
+            logoMark:SetPoint("TOPLEFT", portrait, "TOPLEFT", 7, -2)
+            logoMark:SetPoint("BOTTOMRIGHT", portrait, "BOTTOMRIGHT", -5, 10)
         end
         -- The game's close button on the window itself. The frame's border
         -- and title bar are drawn very high up, which hid the template's
