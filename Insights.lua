@@ -1713,6 +1713,16 @@ function addon:GetItemTier(itemID)
     if item then return item.tier, item.tierCount end
 end
 
+-- "both tiers" or "all tiers" when an item's tiers share its name, else
+-- nil. Your sales and posts are saved by name (an AH sale mail doesn't say
+-- the tier), so they mix the tiers: the gold Crystalline Glass page showed
+-- the silver ones' sales and cost, +85g profit at 928% (user, 2026-10-30)
+function addon:SharedNameNote(name)
+    local _, byName = ItemIndex()
+    local ids = name and byName[name]
+    if ids and #ids > 1 then return #ids == 2 and "both tiers" or "all tiers" end
+end
+
 -- The quality icon in a recipe's name (refines: "Refine Duskshrouded Stone
 -- |A:Professions-ChatIcon-Quality-12-Tier2:20:20|a"): tier, tierCount or nil.
 -- "Quality-12" icons are Midnight's 2 tiers, the others The War Within's 3.
@@ -1965,6 +1975,7 @@ function addon:GetItemDetails(name, itemID)
         table.insert(d.tiers, { itemID = id, tier = byID[id] and byID[id].tier,
             price = addon:GetMarketPrice(id), have = (addon:GetStock(id)) })
     end
+    d.sharedName = addon:SharedNameNote(name)
 
     if itemID then
         d.price, d.priceSource, d.priceAge, d.priceNote = addon:GetMarketPriceInfo(itemID)
@@ -2009,7 +2020,9 @@ function addon:GetItemDetails(name, itemID)
     if not recipe or d.material then
         local sources
         d.paid, d.paidSource, sources = addon:GetOwnCost(name, nil, itemID)
-        if not d.paid then d.paid, d.paidSource, sources = addon:GetOwnCost(name) end
+        -- By name only when no other tier shares it: that's the other
+        -- tier's cost (silver glass at 9.16g on the gold page)
+        if not d.paid and not d.sharedName then d.paid, d.paidSource, sources = addon:GetOwnCost(name) end
         -- Of the "paid" ones, how many you salvaged rather than bought
         for _, s in ipairs(sources or {}) do
             if s[1] == "paid" and (s.salvaged or 0) > 0 then

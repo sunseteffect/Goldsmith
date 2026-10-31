@@ -295,13 +295,16 @@ end
 -- milled any. Each herb's cost is split across the pigments it gave you by
 -- their AH value (or by count if a pigment has no AH price), then averaged
 -- over every herb that produced this pigment.
-function addon:GetMilledCost(itemName)
+-- exactItemID: only that tier. By name, the silver Crystalline Glass you
+-- prospected was the gold one's cost too: 9.16g against 99g, +85g profit at
+-- 928% on its page (user, 2026-10-30)
+function addon:GetMilledCost(itemName, exactItemID)
     local totalCost, totalQty = 0, 0
 
     for herbID, record in pairs(GoldsmithDB.milling) do
         local target
-        for _, out in pairs(record.outputs) do
-            if out.name == itemName then
+        for outID, out in pairs(record.outputs) do
+            if out.name == itemName and (not exactItemID or outID == exactItemID) then
                 target = out
             end
         end

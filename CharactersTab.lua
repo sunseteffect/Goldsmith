@@ -234,7 +234,12 @@ local function CreateTodoLine(card, i)
             addon:Explain(tooltip, "How often it sold across the region's AH this past week, and how much is listed near the lowest price.")
         end
         local demand, source = addon:GetDemand(item.itemID, item.recipe.outputName)
-        if demand then
+        if demand and source == "your sales" then
+            local shared = addon:SharedNameNote(item.recipe.outputName)
+            tooltip:AddDoubleLine("You sell", addon:FormatDemand(demand) .. " a day"
+                .. (shared and (" (" .. shared .. ")") or ""), 0.8, 0.8, 0.8, 1, 1, 1)
+            addon:Explain(tooltip, "How many you've sold a day lately. The whole market sells more.")
+        elseif demand then
             local r, g, b = addon:Color(addon:DemandColor(demand, item.itemID))
             tooltip:AddDoubleLine("Sold per day", string.format("%s (%s)", addon:FormatDemand(demand), source),
                 0.8, 0.8, 0.8, r, g, b)

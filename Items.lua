@@ -1011,7 +1011,10 @@ local function CreatePage(parent)
             t[3]:Set("Sells", addon:SellLevelText(sellLevel), addon:SellLevelColor(sellLevel),
                 -- Its window said: "you sell 263 a day" next to the board's
                 -- all-time 112 a day read as a mismatch (user, 2026-10-27)
-                d.demand and string.format("last %d days: %s a day", addon.OWN_SALES_DAYS, addon:FormatDemand(d.demand))
+                -- Tiers sharing a name: your rate is both tiers', so it's
+                -- only in the hover (on the tile it was cut short)
+                d.demand and not d.sharedName
+                    and string.format("last %d days: %s a day", addon.OWN_SALES_DAYS, addon:FormatDemand(d.demand))
                     or "region, last 7 days")
         else
             t[3]:Set("Sold per day", addon:FormatDemand(d.demand), addon:DemandColor(d.demand, d.itemID),
@@ -1024,7 +1027,8 @@ local function CreatePage(parent)
                 tooltip:AddDoubleLine("Sells", addon:SellLevelText(sellLevel) .. " (Goldsmith Data, last 7 days)",
                     0.8, 0.8, 0.8, r, g, b)
                 if d.demand then
-                    tooltip:AddDoubleLine("You sell", addon:FormatDemand(d.demand) .. " a day", 0.8, 0.8, 0.8, 1, 1, 1)
+                    tooltip:AddDoubleLine("You sell", addon:FormatDemand(d.demand) .. " a day"
+                        .. (d.sharedName and (" (" .. d.sharedName .. ")") or ""), 0.8, 0.8, 0.8, 1, 1, 1)
                 end
                 addon:Explain(tooltip, "From the region's AH every hour: how often it sells, and how much is listed near the lowest price. Sells: often, with little stock ahead of you. Slow: now and then. Hardly sells: rarely. With TSM installed, this shows sales per day and sale rate instead.", 0.6, 0.6, 0.6, true)
                 return
@@ -1142,7 +1146,9 @@ local function CreatePage(parent)
                 d.paid and ("average of what you " .. table.concat(how, " and ")) or "nothing bought yet")
             r[2]:Set("AH price now", d.price and Money(d.price) or "-", "text", d.priceText)
             ProfitNow(r[3], d.paid, "what yours cost")
-            local got = addon:GetOwnSalePrice(d.name)
+            -- Not when tiers share the name: sales are saved by name, so the
+            -- gold glass page said 9.68g (the silver ones') next to 98g
+            local got = not d.sharedName and addon:GetOwnSalePrice(d.name)
             if got then
                 r[4]:Set("Your sales got", Money(got), "text",
                     string.format("each, after the AH cut, last %d days", addon.OWN_SALES_DAYS))
@@ -1208,8 +1214,9 @@ local function CreatePage(parent)
 
         -- Activity
         if d.earned and d.earned.units > 0 then
-            page.earned:SetText(string.format("Sold %d for %s, %s profit", d.earned.units, Money(d.earned.sales),
-                addon:Colorize(Signed(d.earned.profit), addon:MoneyColor(d.earned.profit))))
+            page.earned:SetText(string.format("Sold %d for %s, %s profit%s", d.earned.units, Money(d.earned.sales),
+                addon:Colorize(Signed(d.earned.profit), addon:MoneyColor(d.earned.profit)),
+                d.sharedName and (" (" .. d.sharedName .. ")") or ""))
         else
             page.earned:SetText("Nothing sold yet.")
         end

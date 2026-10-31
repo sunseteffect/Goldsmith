@@ -533,12 +533,17 @@ local function CraftTooltip(tooltip, item)
             addon:SellLevelColor(sellLevel))
         Why(tooltip, "From the region's AH every hour: how often it sells, and how much is listed near the lowest price. Sells: often, with little stock ahead of you. Slow: now and then. Hardly sells: rarely.")
     end
-    if info.demand then
+    -- Your own sales say "You sell", as on the item page and the plan:
+    -- "Sold per day 1.1 (your sales)" under "Sells" read as the market's
+    -- (Razorstone, TSM 19 a day; user, 2026-10-30)
+    if info.demand and info.demandSource == "your sales" then
+        local shared = addon:SharedNameNote(recipe.outputName)
+        Line(tooltip, "You sell", addon:FormatDemand(info.demand) .. " a day" .. (shared and (" (" .. shared .. ")") or ""))
+        Why(tooltip, "How many you've sold a day lately. The whole market sells more.")
+    elseif info.demand then
         Line(tooltip, "Sold per day", string.format("%s (%s)", addon:FormatDemand(info.demand), info.demandSource or "?"),
             addon:DemandColor(info.demand, item.itemID))
-        Why(tooltip, info.demandSource == "your sales"
-            and "How many you've sold a day lately. The whole market sells more."
-            or "TSM: average sold per day in your region by TSM users, shared by every seller.")
+        Why(tooltip, "TSM: average sold per day in your region by TSM users, shared by every seller.")
     end
     if info.saleRate then
         Line(tooltip, "Sale rate", addon:FormatSaleRate(info.saleRate) .. " of listings sell",
@@ -2799,8 +2804,9 @@ local function CreatePlanScreen(parent)
             local chance = stats and stats.ingenuity or 0
             local back = tierInfo.scenario and tierInfo.scenario.ingenuityRefund or 0
             if chance > 0 and back >= 1 then
-                ingenuityNote = string.format("%d%% chance %s to get %d back", math.floor(chance + 0.5),
-                    plan.crafts > 1 and "a craft" or "", math.floor(back + 0.5)):gsub("  ", " ")
+                -- "11% chance a craft to get 68 back" read badly (2026-10-30)
+                ingenuityNote = string.format("%d%% chance to get %d back%s", math.floor(chance + 0.5),
+                    math.floor(back + 0.5), plan.crafts > 1 and ", each craft" or "")
             end
         end
         for _, key in ipairs(subOrder) do
@@ -2906,7 +2912,9 @@ local function CreatePlanScreen(parent)
             -- shown as a fact, with no days' worth and no warning.
             local ownOnly = level == addon.SELL_LEVEL.sells and plan.demandSource == "your sales"
             if ownOnly and plan.demand and plan.demand > 0 then
-                table.insert(parts, string.format("You've sold about %s a day.", addon:FormatDemand(plan.demand)))
+                local shared = addon:SharedNameNote(plan.recipe.outputName)
+                table.insert(parts, string.format("You've sold about %s a day%s.", addon:FormatDemand(plan.demand),
+                    shared and (" (" .. shared .. ")") or ""))
             elseif plan.demand and plan.demand > 0 then
                 local made = plan.expectedOutput or quantity
                 local days = made / plan.demand

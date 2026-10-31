@@ -2791,7 +2791,7 @@ function addon:GetOwnCost(itemName, excludeItemID, exactItemID, forSale)
     -- (purchases, gathering, your recent salvage runs) don't cover, and
     -- only for that many: it weighed every pigment ever milled against the
     -- few you hold
-    local milled, milledQty = addon:GetMilledCost(itemName)
+    local milled, milledQty = addon:GetMilledCost(itemName, exactItemID)
     if milled and paid == nil and #sources == 0 and not gatheredIDs then
         table.insert(sources, { "milled", milled, milledQty })
     elseif milled and (uncovered or 0) > 0 then
