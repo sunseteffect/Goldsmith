@@ -237,8 +237,8 @@ function addon:CreateWindow()
             fill:AddMaskTexture(mask)
             local logoMark = holder:CreateTexture(nil, layer, nil, math.min(7, (sublevel or 0) + 1))
             logoMark:SetTexture("Interface\\AddOns\\Goldsmith\\Media\\Logo")
-            logoMark:SetPoint("TOPLEFT", portrait, "TOPLEFT", 10, -10)
-            logoMark:SetPoint("BOTTOMRIGHT", portrait, "BOTTOMRIGHT", -10, 10)
+            logoMark:SetPoint("TOPLEFT", portrait, "TOPLEFT", 8, -8)
+            logoMark:SetPoint("BOTTOMRIGHT", portrait, "BOTTOMRIGHT", -8, 8)
         end
         -- The game's close button on the window itself. The frame's border
         -- and title bar are drawn very high up, which hid the template's
@@ -563,15 +563,33 @@ function addon:CreateWindow()
         helpButton:SetPoint("RIGHT", gameClose, "LEFT", -8, 0)
         -- The game's red "?" from the menu bar (its Help button), so it
         -- reads as the game's own (user, 2026-10-31: the plain "?" was hard
-        -- to see). A gold "?" if a patch renames the art.
-        local HELP_ART = "UI-HUD-MicroMenu-Help"
-        if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(HELP_ART .. "-Up") then
+        -- to see). Copied from that button, since a guessed art name was
+        -- wrong; a gold "?" if it isn't there.
+        local function CopyArt(from, set, blend)
+            if not from then return false end
+            local atlas = from:GetAtlas()
+            if atlas then
+                set(helpButton, atlas, blend)
+            else
+                local file = from:GetTexture()
+                if not file then return false end
+                local setTexture = set == helpButton.SetNormalAtlas and helpButton.SetNormalTexture
+                    or set == helpButton.SetPushedAtlas and helpButton.SetPushedTexture
+                    or helpButton.SetHighlightTexture
+                setTexture(helpButton, file, blend)
+            end
+            return true
+        end
+        local source = _G.HelpMicroButton
+        if source and CopyArt(source:GetNormalTexture(), helpButton.SetNormalAtlas) then
             helpButton.label:Hide()
             helpButton.hover:SetAlpha(0)
-            helpButton:SetNormalAtlas(HELP_ART .. "-Up")
-            if C_Texture.GetAtlasInfo(HELP_ART .. "-Down") then helpButton:SetPushedAtlas(HELP_ART .. "-Down") end
-            if C_Texture.GetAtlasInfo(HELP_ART .. "-Mouseover") then
-                helpButton:SetHighlightAtlas(HELP_ART .. "-Mouseover", "ADD")
+            CopyArt(source:GetPushedTexture(), helpButton.SetPushedAtlas)
+            CopyArt(source:GetHighlightTexture(), helpButton.SetHighlightAtlas, "ADD")
+            -- Texture files come with the part of the file to show
+            for _, pair in ipairs({ { source:GetNormalTexture(), helpButton:GetNormalTexture() },
+                                    { source:GetPushedTexture(), helpButton:GetPushedTexture() } }) do
+                if pair[1] and pair[2] and not pair[1]:GetAtlas() then pair[2]:SetTexCoord(pair[1]:GetTexCoord()) end
             end
         else
             helpButton:SetSize(22, 22)
