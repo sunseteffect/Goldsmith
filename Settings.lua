@@ -921,7 +921,7 @@ local HELP = {
     buyOver = {
         "Buy without asking",
         "How much more than the plan Buy next pays without a second click. Up to 2% more: buys when the extra is under 2% of the item's cost or under 2% of the queue's profit.",
-        "Over that, the panel says how much more and what the queue earns then, and waits for a second click. It always asks when the queue would lose gold.",
+        "Over that, the panel says how much more and what the queue earns then, and waits for a second click. It always asks when the price would take a queue that makes money below zero.",
         "Always ask: a second click for anything over the plan. Under the plan always buys at once.",
     },
     buyFor = {
