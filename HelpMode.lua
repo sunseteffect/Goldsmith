@@ -323,6 +323,14 @@ local function GetOutline(i)
     outline:SetFrameStrata("FULLSCREEN_DIALOG")
     outline:SetBackdrop({ bgFile = texture, edgeFile = texture, edgeSize = EDGE })
     outline:RegisterForClicks("AnyUp")
+    -- World of Warcraft theme: the game's "i" on each part, as its own
+    -- help screens have
+    if addon.theme.game then
+        local info = outline:CreateTexture(nil, "OVERLAY")
+        info:SetTexture("Interface\\Common\\help-i")
+        info:SetSize(26, 26)
+        info:SetPoint("CENTER", outline, "TOPLEFT", 6, -6)
+    end
     outline:SetScript("OnClick", function(self) if self.entry then Select(self.entry) end end)
     outline:SetScript("OnEnter", function(self)
         StyleOutline(self, true)
@@ -450,6 +458,23 @@ local function CreateDims()
         t:SetAllPoints()
         t:SetColorTexture(0, 0, 0, DIM_ALPHA)
         dims[i] = f
+    end
+    -- World of Warcraft theme: stand-ins drawn as the game's "i" help
+    -- button and close button, matching the window's
+    if addon.theme.game then
+        local ok, info = pcall(CreateFrame, "Button", nil, UIParent, "MainHelpPlateButton")
+        local okClose, close = pcall(CreateFrame, "Button", nil, UIParent, "UIPanelCloseButton")
+        if ok and info and okClose and close then
+            for _, proxy in ipairs({ info, close }) do
+                proxy:SetFrameStrata("FULLSCREEN_DIALOG")
+                proxy:SetFrameLevel(BOX_LEVEL - 10)
+                proxy:Hide()
+            end
+            info:SetScript("OnClick", function() addon:ExitHelpMode() end)
+            close:SetScript("OnClick", function() if addon.window then addon.window:Hide() end end)
+            helpProxy, closeProxy = info, close
+            return
+        end
     end
     helpProxy = Proxy("?", "Stop help (Esc)", function() addon:ExitHelpMode() end)
     helpProxy.label:SetTextColor(Gold(1))

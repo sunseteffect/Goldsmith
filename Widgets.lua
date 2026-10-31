@@ -495,7 +495,37 @@ end
 
 -- A button that opens a menu, for filters. build(root) fills the menu
 -- (MenuUtil's description API); the label shows the current choice.
+-- The World of Warcraft theme uses the game's own dropdown (dark box,
+-- gold arrow), its menu opening under it as the game's do.
+local function GameDropdown(parent, width, build)
+    local ok, button = pcall(CreateFrame, "DropdownButton", nil, parent, "WowStyle1DropdownTemplate")
+    if not ok or not button then return nil end
+    button:SetWidth(width or 100)
+    button.gameArt = true
+    button.SetBackdrop, button.SetBackdropColor, button.SetBackdropBorderColor = NoBackdrop, NoBackdrop, NoBackdrop
+    -- Goldsmith sets the text itself (SetLabel), so the template's own
+    -- text, which follows the menu's radio choice, stays hidden
+    if button.Text then button.Text:Hide() end
+    button.label = UI.Text(button, "body", "text", "LEFT")
+    button.label:SetPoint("LEFT", 9, 0)
+    button.label:SetPoint("RIGHT", -26, 0)
+    button.arrow = UI.Text(button, "small", "muted", "RIGHT")
+    button.arrow:Hide()
+    button:SetMotionScriptsWhileDisabled(true)
+    button:SetupMenu(function(_, root) build(root) end)
+    -- The button's hover would sit on top of the menu
+    button:HookScript("OnMouseDown", function() GameTooltip:Hide() end)
+    function button:SetLabel(value)
+        local changed = self.label:GetText() ~= value
+        self.label:SetText(value)
+        if changed then UI.RedrawTooltip(self) end
+    end
+    return button
+end
+
 function UI.Dropdown(parent, width, build)
+    local game = addon.theme.game and GameDropdown(parent, width, build)
+    if game then return game end
     local button = UI.Button(parent, "", width, 24, function(self)
         if not (MenuUtil and MenuUtil.CreateContextMenu) then return end
         -- The button's hover would sit on top of the menu
@@ -993,8 +1023,37 @@ function UI.Toggle(parent, onToggle)
     return toggle
 end
 
+-- The game's checkbox (World of Warcraft theme). Like Goldsmith's own, a
+-- click only asks: onToggle decides and calls SetChecked.
+local function GameCheckbox(parent, text, onToggle)
+    local ok, check = pcall(CreateFrame, "CheckButton", nil, parent, "UICheckButtonTemplate")
+    if not ok or not check then return nil end
+    check:SetSize(24, 24)
+    if check.Text then check.Text:SetText("") end
+    check.label = UI.Text(check, "small", "text")
+    check.label:SetPoint("LEFT", check, "RIGHT", 2, 0)
+    check.label:SetText(text)
+    -- The label clicks too, as it does on Goldsmith's own
+    check:SetHitRectInsets(0, -(check.label:GetStringWidth() + 6), 0, 0)
+    local SetChecked = check.SetChecked
+    function check:SetChecked(checked)
+        self.checked = checked and true or false
+        SetChecked(self, self.checked)
+    end
+    check:SetScript("OnClick", function(self)
+        -- The game flips the box on click: put it back until onToggle says
+        local want = not self.checked
+        SetChecked(self, self.checked)
+        onToggle(want)
+    end)
+    check:SetChecked(false)
+    return check
+end
+
 -- A checkbox with a label. box:SetChecked(checked); onToggle(newState).
 function UI.Checkbox(parent, text, onToggle)
+    local game = addon.theme.game and GameCheckbox(parent, text, onToggle)
+    if game then return game end
     local check = CreateFrame("Button", nil, parent)
     check:SetHeight(24)
     check.box = UI.Panel(check, "raised")
@@ -1052,9 +1111,34 @@ function UI.NumberBox(parent, width, onChange)
     return box
 end
 
+-- The game's search box (World of Warcraft theme): magnifier, grey hint,
+-- its own clear button. Goldsmith's handlers are added to the template's.
+local function GameSearchBox(parent, width, hint, onChange)
+    local ok, box = pcall(CreateFrame, "EditBox", nil, parent, "SearchBoxTemplate")
+    if not ok or not box then return nil end
+    -- The template's left edge art sits a few pixels outside the box
+    box:SetSize(width - 6, 20)
+    box:SetAutoFocus(false)
+    box:SetMaxLetters(60)
+    if box.Instructions then box.Instructions:SetText(hint) end
+    box:HookScript("OnTextChanged", function(self, userInput)
+        if userInput then onChange(self:GetText()) end
+    end)
+    box:HookScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    box:HookScript("OnEscapePressed", function(self)
+        self:SetText("")
+        self:ClearFocus()
+        onChange("")
+    end)
+    if box.clearButton then box.clearButton:HookScript("OnClick", function() onChange("") end) end
+    return box
+end
+
 -- A search box with a hint shown while it's empty. onChange(text) runs as
 -- it's typed; Escape clears it.
 function UI.SearchBox(parent, width, hint, onChange)
+    local game = addon.theme.game and GameSearchBox(parent, width, hint, onChange)
+    if game then return game end
     local box = CreateFrame("EditBox", nil, parent, "BackdropTemplate")
     box:SetSize(width, 24)
     UI.Style(box, "panelRaised", "borderStrong")
@@ -1097,6 +1181,81 @@ function UI.SearchBox(parent, width, hint, onChange)
     end)
     Update()
     return box
+end
+
+-- A vertical scroll bar that works like a Slider (SetMinMaxValues,
+-- SetValue, GetValue, OnValueChanged, OnMouseWheel). bar:SetVisibleFraction(f)
+-- sizes the thumb to the share of the content in view; thumbHeight fixes
+-- it instead (Goldsmith's look only). In the World of Warcraft theme it's
+-- the game's thin scroll bar with arrows (MinimalScrollBar), driven
+-- through the same calls.
+local function GameScrollBar(parent)
+    local ok, bar = pcall(CreateFrame, "EventFrame", nil, parent, "MinimalScrollBar")
+    if not ok or not bar then return nil end
+    if not (bar.SetScrollPercentage and bar.RegisterCallback and BaseScrollBoxEvents) then
+        bar:Hide()
+        return nil
+    end
+    local SetScript = bar.SetScript
+    local low, high, value, onChange = 0, 0, 0, nil
+    local pushing = false
+    local function Push()
+        pushing = true
+        bar:SetScrollPercentage(high > low and (value - low) / (high - low) or 0)
+        pushing = false
+    end
+    -- The bar's own arrows, thumb and track move it
+    bar:RegisterCallback(BaseScrollBoxEvents.OnScroll, function(_, percent)
+        if pushing then return end
+        local new = low + (high - low) * (percent or 0)
+        if new ~= value then
+            value = new
+            if onChange then onChange(bar, value) end
+        end
+    end, bar)
+    bar.SetWidth = NoBackdrop -- keeps the game's width
+    function bar:SetScript(event, handler)
+        if event == "OnValueChanged" then onChange = handler else SetScript(self, event, handler) end
+    end
+    function bar:SetMinMaxValues(a, b)
+        low, high = a, b
+        -- An arrow click moves a tenth of the way
+        if bar.SetPanExtentPercentage then bar:SetPanExtentPercentage(0.1) end
+        Push()
+    end
+    function bar:GetMinMaxValues() return low, high end
+    function bar:SetValue(v)
+        v = math.max(low, math.min(high, v))
+        local changed = v ~= value
+        value = v
+        Push()
+        if changed and onChange then onChange(bar, value) end
+    end
+    function bar:GetValue() return value end
+    function bar:SetVisibleFraction(f)
+        if bar.SetVisibleExtentPercentage then bar:SetVisibleExtentPercentage(math.max(0, math.min(1, f))) end
+    end
+    function bar:SetValueStep() end
+    function bar:SetObeyStepOnDrag() end
+    function bar:SetOrientation() end
+    return bar
+end
+
+function UI.ScrollBar(parent, width, thumbHeight)
+    local game = addon.theme.game and GameScrollBar(parent)
+    if game then return game end
+    local bar = CreateFrame("Slider", nil, parent, "BackdropTemplate")
+    bar:SetOrientation("VERTICAL")
+    bar:SetWidth(width)
+    UI.Style(bar, "panelRaised")
+    local thumb = bar:CreateTexture(nil, "OVERLAY")
+    thumb:SetColorTexture(addon:Color("borderStrong"))
+    thumb:SetSize(width, thumbHeight or 30)
+    bar:SetThumbTexture(thumb)
+    function bar:SetVisibleFraction(f)
+        if not thumbHeight then thumb:SetHeight(math.max((bar:GetHeight() or 0) * f, 20)) end
+    end
+    return bar
 end
 
 -- A scrolling list with a header row.
@@ -1144,16 +1303,9 @@ function UI.List(parent, opts)
     empty:SetWordWrap(true)
     empty:SetText(opts.empty or "")
 
-    local scrollbar = CreateFrame("Slider", nil, list, "BackdropTemplate")
-    scrollbar:SetOrientation("VERTICAL")
-    scrollbar:SetWidth(SCROLLBAR_WIDTH)
+    local scrollbar = UI.ScrollBar(list, SCROLLBAR_WIDTH)
     scrollbar:SetPoint("TOPRIGHT", body, "TOPRIGHT", SCROLLBAR_WIDTH + 4, 0)
     scrollbar:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", SCROLLBAR_WIDTH + 4, 0)
-    UI.Style(scrollbar, "panelRaised")
-    local thumb = scrollbar:CreateTexture(nil, "OVERLAY")
-    thumb:SetColorTexture(addon:Color("borderStrong"))
-    thumb:SetSize(SCROLLBAR_WIDTH, 30)
-    scrollbar:SetThumbTexture(thumb)
     scrollbar:SetValueStep(1)
     scrollbar:SetObeyStepOnDrag(true)
     scrollbar:EnableMouseWheel(true)
@@ -1298,7 +1450,7 @@ function UI.List(parent, opts)
         empty:SetShown(#list.items == 0)
         scrollbar:SetShown(maxOffset > 0)
         if maxOffset > 0 then
-            thumb:SetHeight(math.max(body:GetHeight() * visible / #list.items, 20))
+            scrollbar:SetVisibleFraction(visible / #list.items)
             scrollbar:SetMinMaxValues(0, maxOffset)
             scrollbar:SetValue(list.offset)
         end

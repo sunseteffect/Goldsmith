@@ -605,6 +605,17 @@ function addon:CreateWindow()
         -- under the title bar
         helpButton:SetParent(frame)
         helpButton:SetFrameLevel(gameArt.topLevel + 5)
+        -- The game's own help button, the "i" beside the portrait as on the
+        -- Adventure Guide, with its yellow hover (user, 2026-10-31). The
+        -- red "?" above stays only if the game's button can't be made.
+        local ok, info = pcall(CreateFrame, "Button", nil, frame, "MainHelpPlateButton")
+        if ok and info then
+            info:SetPoint("TOPLEFT", frame, "TOPLEFT", 39, 20)
+            info:SetFrameLevel(gameArt.topLevel + 6)
+            info:SetScript("OnClick", function() addon:ToggleHelpMode() end)
+            helpButton:Hide()
+            helpButton = info
+        end
         UI.SetTooltip(gameClose, function(tooltip)
             local key = addon:BindingKeyText("GOLDSMITH_TOGGLE")
             tooltip:AddLine(key and ("Close (Esc or " .. key .. ")") or "Close (Esc)", 1, 1, 1)
@@ -851,7 +862,7 @@ function addon:CreateWindow()
         tabs = tabBar.buttons,
         tabArea = tabArea,
         filterChip = filterChip,
-        close = closeButton,
+        close = gameClose or closeButton,
         help = helpButton,
     }
     local function GetScreen(key)
