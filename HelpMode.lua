@@ -473,6 +473,9 @@ local function CreateDims()
                 proxy:Hide()
             end
             info:SetScript("OnClick", function() addon:ExitHelpMode() end)
+            -- Its yellow hover was drawn under the dark layer and looked
+            -- washed out (user, 2026-10-31): up on the tooltip layer
+            if HelpPlateTooltip then HelpPlateTooltip:SetFrameStrata("TOOLTIP") end
             close:SetScript("OnClick", function() if addon.window then addon.window:Hide() end end)
             helpProxy, closeProxy = info, close
             return
