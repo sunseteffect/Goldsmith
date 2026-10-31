@@ -213,7 +213,7 @@ function addon:CreateWindow()
     -- World of Warcraft theme: the game's own window behind everything (its
     -- frame, title bar and portrait, with the logo in the portrait)
     local game = addon.theme.game
-    local gameArt
+    local gameArt, gameClose
     if game then
         frame:ClearBackdrop()
         gameArt = CreateFrame("Frame", nil, frame, "PortraitFrameTemplate")
@@ -221,8 +221,27 @@ function addon:CreateWindow()
         gameArt:SetFrameLevel(frame:GetFrameLevel())
         gameArt:SetTitle("Goldsmith")
         gameArt:SetPortraitToAsset("Interface\\AddOns\\Goldsmith\\Media\\Logo")
-        gameArt.CloseButton:SetScript("OnClick", function() frame:Hide() end)
-        gameArt.CloseButton:SetFrameLevel(frame:GetFrameLevel() + 20)
+        -- The logo has a see-through background: a dark disc behind it
+        -- fills the portrait like the game's (user, 2026-10-31)
+        local portrait = gameArt.PortraitContainer and gameArt.PortraitContainer.portrait
+        if portrait then
+            local holder = portrait:GetParent()
+            local fill = holder:CreateTexture(nil, "ARTWORK")
+            fill:SetAllPoints(portrait)
+            fill:SetColorTexture(0.09, 0.07, 0.05)
+            local mask = holder:CreateMaskTexture()
+            mask:SetAllPoints(portrait)
+            mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+            fill:AddMaskTexture(mask)
+            local layer, sublevel = portrait:GetDrawLayer()
+            fill:SetDrawLayer(layer, math.max(-8, (sublevel or 0) - 1))
+        end
+        -- The template's own close button didn't show (user, 2026-10-31):
+        -- the game's close button on the window itself, above everything
+        if gameArt.CloseButton then gameArt.CloseButton:Hide() end
+        gameClose = CreateFrame("Button", nil, frame, "UIPanelCloseButtonDefaultAnchors")
+        gameClose:SetScript("OnClick", function() frame:Hide() end)
+        gameClose:SetFrameLevel(frame:GetFrameLevel() + 30)
     end
     -- Whether Goldsmith is in front of the game's windows. Drawing order
     -- can't be read reliably (a lowered Goldsmith can share a frame level
@@ -527,12 +546,26 @@ function addon:CreateWindow()
         tooltip:AddLine("What's this?", 1, 1, 1)
         tooltip:AddLine("Click, then click any part of the window to see what it's for.", 0.8, 0.8, 0.8, true)
     end, "ANCHOR_BOTTOM")
+    -- World of Warcraft theme: in the title bar next to the game's close
+    -- button, which gets the close hover
+    if game then
+        helpButton:ClearAllPoints()
+        helpButton:SetSize(22, 22)
+        helpButton:SetPoint("RIGHT", gameClose, "LEFT", 0, 0)
+        helpButton:SetFrameLevel(frame:GetFrameLevel() + 30)
+        UI.SetTooltip(gameClose, function(tooltip)
+            local key = addon:BindingKeyText("GOLDSMITH_TOGGLE")
+            tooltip:AddLine(key and ("Close (Esc or " .. key .. ")") or "Close (Esc)", 1, 1, 1)
+        end, "ANCHOR_BOTTOM")
+    end
 
     -- Between the filters and the help button, on two lines when it
     -- doesn't fit
     local priceText = UI.Text(header, "small", "muted", "RIGHT")
     priceText:SetPoint("LEFT", expansionButton, "RIGHT", 12, 0)
     priceText:SetPoint("RIGHT", helpButton, "LEFT", -10, 0)
+    -- The help button moved up to the title bar
+    if game then priceText:SetPoint("RIGHT", header, "RIGHT", -12, -10) end
     priceText:SetWordWrap(true)
     priceText:SetMaxLines(2)
     -- Without Auctionator: a hover on where prices come from, and how to
