@@ -559,8 +559,25 @@ function addon:CreateWindow()
     -- button, which gets the close hover
     if game then
         helpButton:ClearAllPoints()
-        helpButton:SetSize(22, 22)
-        helpButton:SetPoint("RIGHT", gameClose, "LEFT", 0, 0)
+        helpButton:SetSize(18, 24)
+        helpButton:SetPoint("RIGHT", gameClose, "LEFT", -8, 0)
+        -- The game's red "?" from the menu bar (its Help button), so it
+        -- reads as the game's own (user, 2026-10-31: the plain "?" was hard
+        -- to see). A gold "?" if a patch renames the art.
+        local HELP_ART = "UI-HUD-MicroMenu-Help"
+        if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(HELP_ART .. "-Up") then
+            helpButton.label:Hide()
+            helpButton.hover:SetAlpha(0)
+            helpButton:SetNormalAtlas(HELP_ART .. "-Up")
+            if C_Texture.GetAtlasInfo(HELP_ART .. "-Down") then helpButton:SetPushedAtlas(HELP_ART .. "-Down") end
+            if C_Texture.GetAtlasInfo(HELP_ART .. "-Mouseover") then
+                helpButton:SetHighlightAtlas(HELP_ART .. "-Mouseover", "ADD")
+            end
+        else
+            helpButton:SetSize(22, 22)
+            helpButton.label:SetTextColor(addon:Color("gold"))
+            helpButton:HookScript("OnLeave", function(self) self.label:SetTextColor(addon:Color("gold")) end)
+        end
         -- Its own parent above the frame art: the header (its parent) sits
         -- under the title bar
         helpButton:SetParent(frame)
