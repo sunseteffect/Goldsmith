@@ -283,6 +283,10 @@ function addon:CreateWindow()
     local function IsInside(f, ancestor)
         while f do
             if f == ancestor then return true end
+            -- The game's protected windows (the in-game Shop) can't be
+            -- looked into: a Lua error on every click there (user,
+            -- 2026-10-31). They're never Goldsmith.
+            if f.IsForbidden and f:IsForbidden() then return false end
             f = f.GetParent and f:GetParent()
         end
         return false
