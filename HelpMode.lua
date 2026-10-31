@@ -563,6 +563,7 @@ function addon:EnterHelpMode()
         if _G[name] then _G[name]:Hide() end
     end
     if not dims[1] then CreateDims() end
+    if HelpPlateTooltip then HelpPlateTooltip:Hide() end
     active = true
     selected = nil
     Update()
@@ -585,6 +586,9 @@ function addon:ExitHelpMode()
     if closeProxy then closeProxy:Hide() end
     if box then box:Hide() end
     GameTooltip:Hide()
+    -- The game's "i" hover: the stand-in under the mouse is gone without a
+    -- mouse-leave, which left it stuck half-faded (user, 2026-10-31)
+    if HelpPlateTooltip then HelpPlateTooltip:Hide() end
 end
 
 function addon:ToggleHelpMode()
