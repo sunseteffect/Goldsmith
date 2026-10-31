@@ -416,8 +416,10 @@ end
 local function ShowBox(entry)
     if not box then CreateBox() end
     box.title:SetText(entry and entry.title or "What's this?")
-    box.text:SetText(entry and entry.text or INTRO)
-    box.note:SetText("Click another outlined part, or ? to stop.")
+    -- The World of Warcraft theme's help button is the game's "i"
+    local stop = addon.theme.game and "i" or "?"
+    box.text:SetText(entry and entry.text or (INTRO:gsub("or %? to stop", "or " .. stop .. " to stop")))
+    box.note:SetText("Click another outlined part, or " .. stop .. " to stop.")
     box.note:SetShown(entry ~= nil)
     -- Sized first: where it goes depends on its height
     FitBox()
