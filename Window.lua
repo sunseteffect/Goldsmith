@@ -220,28 +220,37 @@ function addon:CreateWindow()
         gameArt:SetAllPoints()
         gameArt:SetFrameLevel(frame:GetFrameLevel())
         gameArt:SetTitle("Goldsmith")
-        gameArt:SetPortraitToAsset("Interface\\AddOns\\Goldsmith\\Media\\Logo")
-        -- The logo has a see-through background: a dark disc behind it
-        -- fills the portrait like the game's (user, 2026-10-31)
+        -- The portrait: a dark disc, like the game's, with the logo a little
+        -- smaller inside it so none of it is cut off by the ring (user,
+        -- 2026-10-31: see-through, then too big)
         local portrait = gameArt.PortraitContainer and gameArt.PortraitContainer.portrait
         if portrait then
             local holder = portrait:GetParent()
-            local fill = holder:CreateTexture(nil, "ARTWORK")
+            local layer, sublevel = portrait:GetDrawLayer()
+            portrait:Hide()
+            local fill = holder:CreateTexture(nil, layer, nil, sublevel or 0)
             fill:SetAllPoints(portrait)
             fill:SetColorTexture(0.09, 0.07, 0.05)
             local mask = holder:CreateMaskTexture()
             mask:SetAllPoints(portrait)
             mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
             fill:AddMaskTexture(mask)
-            local layer, sublevel = portrait:GetDrawLayer()
-            fill:SetDrawLayer(layer, math.max(-8, (sublevel or 0) - 1))
+            local logoMark = holder:CreateTexture(nil, layer, nil, math.min(7, (sublevel or 0) + 1))
+            logoMark:SetTexture("Interface\\AddOns\\Goldsmith\\Media\\Logo")
+            logoMark:SetPoint("TOPLEFT", portrait, "TOPLEFT", 10, -10)
+            logoMark:SetPoint("BOTTOMRIGHT", portrait, "BOTTOMRIGHT", -10, 10)
         end
-        -- The template's own close button didn't show (user, 2026-10-31):
-        -- the game's close button on the window itself, above everything
+        -- The game's close button on the window itself. The frame's border
+        -- and title bar are drawn very high up, which hid the template's
+        -- own button and the help button (user, 2026-10-31): both go above
+        -- the highest part of the frame art.
         if gameArt.CloseButton then gameArt.CloseButton:Hide() end
+        local top = gameArt:GetFrameLevel()
+        for _, child in ipairs({ gameArt:GetChildren() }) do top = math.max(top, child:GetFrameLevel()) end
+        gameArt.topLevel = top
         gameClose = CreateFrame("Button", nil, frame, "UIPanelCloseButtonDefaultAnchors")
         gameClose:SetScript("OnClick", function() frame:Hide() end)
-        gameClose:SetFrameLevel(frame:GetFrameLevel() + 30)
+        gameClose:SetFrameLevel(top + 5)
     end
     -- Whether Goldsmith is in front of the game's windows. Drawing order
     -- can't be read reliably (a lowered Goldsmith can share a frame level
@@ -552,7 +561,10 @@ function addon:CreateWindow()
         helpButton:ClearAllPoints()
         helpButton:SetSize(22, 22)
         helpButton:SetPoint("RIGHT", gameClose, "LEFT", 0, 0)
-        helpButton:SetFrameLevel(frame:GetFrameLevel() + 30)
+        -- Its own parent above the frame art: the header (its parent) sits
+        -- under the title bar
+        helpButton:SetParent(frame)
+        helpButton:SetFrameLevel(gameArt.topLevel + 5)
         UI.SetTooltip(gameClose, function(tooltip)
             local key = addon:BindingKeyText("GOLDSMITH_TOGGLE")
             tooltip:AddLine(key and ("Close (Esc or " .. key .. ")") or "Close (Esc)", 1, 1, 1)
