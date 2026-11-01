@@ -330,6 +330,7 @@ local function GetOutline(i)
         info:SetTexture("Interface\\Common\\help-i")
         info:SetSize(26, 26)
         info:SetPoint("CENTER", outline, "TOPLEFT", 6, -6)
+        outline.info = info
     end
     outline:SetScript("OnClick", function(self) if self.entry then Select(self.entry) end end)
     outline:SetScript("OnEnter", function(self)
@@ -549,6 +550,18 @@ local function Update()
         outline:ClearAllPoints()
         outline:SetPoint("TOPLEFT", e.first, "TOPLEFT", -3, 3)
         outline:SetPoint("BOTTOMRIGHT", e.last or e.first, "BOTTOMRIGHT", 3, -3)
+        -- Its "i" to the right corner when the left one is under the
+        -- window's own "i" (the professions filter, user, 2026-10-31)
+        if outline.info then
+            local corner = "TOPLEFT"
+            local l, _, _, t = Edges(e.first)
+            local hl, hb, hr, ht = Edges(help)
+            if l and hl and l - 3 + 19 > hl and l - 3 - 7 < hr and t + 3 + 7 > hb and t + 3 - 19 < ht then
+                corner = "TOPRIGHT"
+            end
+            outline.info:ClearAllPoints()
+            outline.info:SetPoint("CENTER", outline, corner, corner == "TOPLEFT" and 6 or -6, -6)
+        end
         local strong = SameEntry(e, selected) or outline:IsMouseOver()
         StyleOutline(outline, strong)
         outline:Show()
