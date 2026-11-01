@@ -13,27 +13,69 @@ addon.UI = UI
 -- Collections window's tiles: a black outline round a thin grey line, and
 -- a soft shadow under the top edge (user, 2026-10-31: the tooltip edge
 -- looked harder than those). Made once; UI.Style restyles a box often.
+-- Rounded corners (user, 2026-10-31) from Media\CornerLine and
+-- CornerShadow (Tools\MakeCorners.lua makes them), RADIUS matching; the
+-- straight lines run between them. The box's border color goes to the
+-- line, so SetBackdropBorderColor is taken over.
 local BEVEL_SHADE = 8
+local BEVEL_RADIUS = 5
+local CORNER_LINE = "Interface\\AddOns\\Goldsmith\\Media\\CornerLine"
+local CORNER_SHADOW = "Interface\\AddOns\\Goldsmith\\Media\\CornerShadow"
+-- Corner, x and y outward, texture flips
+local BEVEL_CORNERS = {
+    { "TOPLEFT", -1, 1, 0, 1, 0, 1 }, { "TOPRIGHT", 1, 1, 1, 0, 0, 1 },
+    { "BOTTOMLEFT", -1, -1, 0, 1, 1, 0 }, { "BOTTOMRIGHT", 1, -1, 1, 0, 1, 0 },
+}
 local function GameBevel(frame)
     if frame.gameBevel then return end
-    frame.gameBevel = true
-    local sides = {
-        { "TOPLEFT", -1, 1, "TOPRIGHT", 1, 1 }, { "BOTTOMLEFT", -1, -1, "BOTTOMRIGHT", 1, -1 },
-        { "TOPLEFT", -1, 1, "BOTTOMLEFT", -1, -1 }, { "TOPRIGHT", 1, 1, "BOTTOMRIGHT", 1, -1 },
-    }
-    for i, s in ipairs(sides) do
+    frame.gameBevel = {}
+    local tinted = frame.gameBevel
+    local R = BEVEL_RADIUS
+    -- out = 0: the line on the box's edge; out = 1: the black outline
+    -- a pixel outside it
+    local function Side(out, horizontal, edge)
         local line = frame:CreateTexture(nil, "BORDER")
-        line:SetColorTexture(0, 0, 0, 0.9)
-        line:SetPoint(s[1], frame, s[1], s[2], s[3])
-        line:SetPoint(s[4], frame, s[4], s[5], s[6])
-        if i <= 2 then line:SetHeight(1) else line:SetWidth(1) end
+        line:SetColorTexture(1, 1, 1)
+        if horizontal then
+            local y = edge == "TOP" and out or -out
+            line:SetPoint(edge .. "LEFT", frame, edge .. "LEFT", R, y)
+            line:SetPoint(edge .. "RIGHT", frame, edge .. "RIGHT", -R, y)
+            line:SetHeight(1)
+        else
+            local x = edge == "LEFT" and -out or out
+            line:SetPoint("TOP" .. edge, frame, "TOP" .. edge, x, -R)
+            line:SetPoint("BOTTOM" .. edge, frame, "BOTTOM" .. edge, x, R)
+            line:SetWidth(1)
+        end
+        return line
+    end
+    for _, s in ipairs({ { true, "TOP" }, { true, "BOTTOM" }, { false, "LEFT" }, { false, "RIGHT" } }) do
+        tinted[#tinted + 1] = Side(0, s[1], s[2])
+        Side(1, s[1], s[2]):SetVertexColor(0, 0, 0, 0.9)
+    end
+    for _, c in ipairs(BEVEL_CORNERS) do
+        for _, file in ipairs({ CORNER_LINE, CORNER_SHADOW }) do
+            local corner = frame:CreateTexture(nil, "BORDER")
+            corner:SetTexture(file)
+            corner:SetTexCoord(c[4], c[5], c[6], c[7])
+            corner:SetSize(8, 8)
+            corner:SetPoint(c[1], frame, c[1], c[2], c[3])
+            if file == CORNER_LINE then tinted[#tinted + 1] = corner else corner:SetVertexColor(0, 0, 0, 0.9) end
+        end
     end
     local shade = frame:CreateTexture(nil, "BORDER")
     shade:SetTexture(addon.theme.texture)
     shade:SetGradient("VERTICAL", CreateColor(0, 0, 0, 0), CreateColor(0, 0, 0, 0.45))
-    shade:SetPoint("TOPLEFT", 1, -1)
-    shade:SetPoint("TOPRIGHT", -1, -1)
+    shade:SetPoint("TOPLEFT", 2, -1)
+    shade:SetPoint("TOPRIGHT", -2, -1)
     shade:SetHeight(BEVEL_SHADE)
+    function frame:SetBackdropBorderColor(r, g, b, a)
+        self.gameBorderColor = { r, g, b, a or 1 }
+        for _, t in ipairs(tinted) do t:SetVertexColor(r, g, b, a or 1) end
+    end
+    function frame:GetBackdropBorderColor()
+        return unpack(self.gameBorderColor or { 1, 1, 1, 1 })
+    end
 end
 
 -- Flat background and 1px border in theme colors
@@ -48,7 +90,8 @@ function UI.Style(frame, bg, border)
     local texture = theme.texture
     -- Panels out in the world (floating, dialog) keep the tooltip edge
     if theme.game and border and bg ~= "floating" and bg ~= "dialog" then
-        frame:SetBackdrop({ bgFile = texture, edgeFile = texture, edgeSize = 1 })
+        -- The fill stops inside the line, so its corners stay in the curve
+        frame:SetBackdrop({ bgFile = texture, insets = { left = 1, right = 1, top = 1, bottom = 1 } })
         GameBevel(frame)
     elseif theme.edge and border then
         local i = theme.inset
