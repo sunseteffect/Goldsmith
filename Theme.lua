@@ -184,7 +184,7 @@ addon.themes.horde = Faction({
 addon.theme = addon.themes.clean
 
 -- The look is picked once, when Goldsmith loads, before the window is made
--- (Core.lua, Initialize; Settings > Display > Look): every frame takes its
+-- (Core.lua, Initialize; Settings > Display > Theme): every frame takes its
 -- colors when it's made, so a change shows after a reload. Match my
 -- faction: the character's (a Pandaren yet to choose gets the game's).
 function addon:PickTheme()

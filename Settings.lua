@@ -954,7 +954,7 @@ local HELP = {
         "Alt is the only choice here: Shift and Ctrl already do things in Goldsmith (shift-click an item, Ctrl to explain a hover). For any other key, pick Key binding only and set it in Options > Keybindings > Goldsmith: Hold to see through. The game can't bind Alt, Shift or Ctrl alone there.",
     },
     theme = {
-        "Look",
+        "Theme",
         "Goldsmith: Goldsmith's own dark look. World of Warcraft: the game's window frame, red buttons and tabs, so Goldsmith looks like part of the game.",
         "Alliance and Horde: the game's look in your faction's colors, with its crest. Match my faction: Alliance or Horde by the character you're on.",
         "Changes after a reload.",
@@ -1452,7 +1452,7 @@ function addon:CreateSettingsPanel(parent)
         OnAccept = function() ReloadUI() end,
         timeout = 0, whileDead = true, hideOnEscape = true,
     }
-    rows.theme = ChoiceRow(content, panel, "theme", "Look", "Goldsmith's own look, the game's, or your faction's.",
+    rows.theme = ChoiceRow(content, panel, "theme", "Theme", "Goldsmith's own, the game's, or your faction's.",
         function() StaticPopup_Show("GOLDSMITH_RELOAD_THEME") end)
     rows.tooltips = ChoiceRow(content, panel, "tooltips", "Item tooltips", "Goldsmith's lines in the game's item tooltips.")
     rows.craftCost = ToggleRow(content, panel, "craftCost", "Cost in the profession window", "Your materials and Profit under a recipe's materials.",
