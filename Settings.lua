@@ -1221,7 +1221,7 @@ local function ScrollArea(panel)
         f:SetScript("OnMouseWheel", Wheel)
     end
 
-    local area = { scroll = scroll, content = content }
+    local area = { scroll = scroll, content = content, bar = bar }
     function area:SetContentHeight(height, keepPlace)
         content:SetHeight(math.max(height, 1))
         local overflow = math.max(height - (scroll:GetHeight() or 0), 0)
@@ -1252,6 +1252,42 @@ function addon:CreateSettingsPanel(parent)
     local close = UI.IconButton(panel, 26, "X", "Close", function() panel:Hide() end, { hoverColor = "loss" })
     close:SetPoint("TOPRIGHT", -8, -8)
 
+    -- World of Warcraft theme: built as the game's Options window: its
+    -- frame with the title along the top, the categories and the page each
+    -- in a sunken panel, the game's close button (user, 2026-10-31). The
+    -- frame's art is put at the bottom, under everything made after it.
+    local art, base, top = nil, panel:GetFrameLevel(), 0
+    if addon.theme.game then
+        local ok, made = pcall(CreateFrame, "Frame", nil, panel, "DefaultPanelTemplate")
+        if ok and made then
+            art = made
+            art:SetAllPoints()
+            art:SetFrameLevel(base)
+            for _, child in ipairs({ art:GetChildren() }) do child:SetFrameLevel(base) end
+            if art.SetTitle then
+                art:SetTitle("Settings")
+            elseif art.TitleContainer and art.TitleContainer.TitleText then
+                art.TitleContainer.TitleText:SetText("Settings")
+            end
+            panel:ClearBackdrop()
+            top = 22
+            local ok2, gameClose = pcall(CreateFrame, "Button", nil, panel, "UIPanelCloseButtonDefaultAnchors")
+            if ok2 and gameClose then
+                gameClose:SetScript("OnClick", function() panel:Hide() end)
+                gameClose:SetFrameLevel(base + 5)
+                close:Hide()
+            end
+        end
+    end
+    local function Sunken(left, right)
+        local ok, inset = pcall(CreateFrame, "Frame", nil, panel, "InsetFrameTemplate")
+        if not ok or not inset then return end
+        inset:SetPoint("TOPLEFT", left, "TOPLEFT", left == panel and 6 or 0, left == panel and -(top + 2) or 0)
+        inset:SetPoint("BOTTOMRIGHT", right, "BOTTOMRIGHT", right == panel and -6 or 0, right == panel and 6 or 0)
+        inset:SetFrameLevel(base + 1)
+        return inset
+    end
+
     -- The category list
     local nav = CreateFrame("Frame", nil, panel, "BackdropTemplate")
     nav:SetPoint("TOPLEFT", 1, -1)
@@ -1263,6 +1299,16 @@ function addon:CreateSettingsPanel(parent)
     edge:SetWidth(1)
     edge:SetPoint("TOPLEFT", nav, "TOPRIGHT", 0, 0)
     edge:SetPoint("BOTTOMLEFT", nav, "BOTTOMRIGHT", 0, 0)
+    local navTop = 0 -- the brand above the search, or not
+    if art then
+        nav:ClearAllPoints()
+        nav:SetPoint("TOPLEFT", 8, -(top + 4))
+        nav:SetPoint("BOTTOMLEFT", 8, 8)
+        nav:SetFrameLevel(base + 2)
+        edge:Hide()
+        Sunken(nav, nav)
+        navTop = 44
+    end
 
     local logo = nav:CreateTexture(nil, "ARTWORK")
     logo:SetTexture("Interface\\AddOns\\Goldsmith\\Media\\Logo")
@@ -1274,25 +1320,33 @@ function addon:CreateSettingsPanel(parent)
     local brandNote = UI.Text(nav, "label", "muted")
     brandNote:SetPoint("TOPLEFT", brand, "BOTTOMLEFT", 0, -2)
     brandNote:SetText("SETTINGS")
+    -- The window's title says it in the game's look
+    if art then logo:Hide(); brand:Hide(); brandNote:Hide() end
 
     local search = UI.SearchBox(nav, NAV_WIDTH - 24, "Search settings", function(text)
         query = text or ""
         Layout()
     end)
-    search:SetPoint("TOPLEFT", 12, -56)
+    search:SetPoint("TOPLEFT", 12, -56 + navTop)
 
     local navButtons = {}
     local function MarkNav()
         local under = PAGE_BY_KEY[current].nav or current
         for key, b in pairs(navButtons) do
             local on = query == "" and key == under
-            b.bg:SetColorTexture(addon:Color(on and "highlight" or "hover"))
+            -- The game's look: the soft glow of its category lists, brighter
+            -- on the open page
+            if art then
+                b.bg:SetAlpha(on and 0.9 or 0.5)
+            else
+                b.bg:SetColorTexture(addon:Color(on and "highlight" or "hover"))
+            end
             b.bg:SetShown(on or b:IsMouseOver())
-            b.bar:SetShown(on)
+            b.bar:SetShown(on and not art)
             b.label:SetTextColor(addon:Color(on and "gold" or "text"))
         end
     end
-    local y = -92
+    local y = -92 + navTop
     for _, page in ipairs(PAGES) do
         if page.group then
             y = y - 8
@@ -1306,6 +1360,10 @@ function addon:CreateSettingsPanel(parent)
             b:SetPoint("TOPLEFT", 8, y)
             b.bg = b:CreateTexture(nil, "BACKGROUND")
             b.bg:SetAllPoints()
+            if art then
+                b.bg:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+                b.bg:SetBlendMode("ADD")
+            end
             b.bar = b:CreateTexture(nil, "ARTWORK")
             b.bar:SetPoint("TOPLEFT")
             b.bar:SetPoint("BOTTOMLEFT")
@@ -1328,6 +1386,21 @@ function addon:CreateSettingsPanel(parent)
     local area = ScrollArea(panel)
     area.scroll:SetPoint("TOPLEFT", NAV_WIDTH + 1 + PAD, -PAD)
     area.scroll:SetPoint("BOTTOMRIGHT", -(PAD + SCROLL_BAR + 10), PAD)
+    if art then
+        -- Narrower by the frame's edges; the page keeps its width and the
+        -- bar moves in
+        area.scroll:ClearAllPoints()
+        area.scroll:SetPoint("TOPLEFT", NAV_WIDTH + 7 + PAD, -(top + 4 + PAD))
+        area.scroll:SetPoint("BOTTOMRIGHT", -(PAD + SCROLL_BAR + 4), PAD + 6)
+        local inset = Sunken(nav, panel)
+        if inset then
+            inset:ClearAllPoints()
+            inset:SetPoint("TOPLEFT", nav, "TOPRIGHT", 6, 0)
+            inset:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -8, 8)
+        end
+        area.scroll:SetFrameLevel(base + 2)
+        area.bar:SetFrameLevel(base + 3)
+    end
     local content = area.content
 
     local pageTitle = UI.Text(content, "title")
