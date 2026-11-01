@@ -101,8 +101,9 @@ addon.themes = {
             floating    = Hex("0b0b0d", 0.95),
             panelRaised = Hex("000000", 0.5),
             highlight   = Hex("2a2208", 0.6),
-            border      = Hex("8c8c8c"),
-            borderStrong = Hex("a6a6a6"),
+            -- The thin grey line of the Collections tiles
+            border      = Hex("5e5e5e"),
+            borderStrong = Hex("7a7a7a"),
             borderGold  = Hex("ffd100"),
             hover       = Hex("ffffff", 0.08),
 

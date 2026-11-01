@@ -9,6 +9,33 @@ local addon = _G.Goldsmith or {}
 local UI = {}
 addon.UI = UI
 
+-- World of Warcraft theme: a box inside the window edged like the
+-- Collections window's tiles: a black outline round a thin grey line, and
+-- a soft shadow under the top edge (user, 2026-10-31: the tooltip edge
+-- looked harder than those). Made once; UI.Style restyles a box often.
+local BEVEL_SHADE = 8
+local function GameBevel(frame)
+    if frame.gameBevel then return end
+    frame.gameBevel = true
+    local sides = {
+        { "TOPLEFT", -1, 1, "TOPRIGHT", 1, 1 }, { "BOTTOMLEFT", -1, -1, "BOTTOMRIGHT", 1, -1 },
+        { "TOPLEFT", -1, 1, "BOTTOMLEFT", -1, -1 }, { "TOPRIGHT", 1, 1, "BOTTOMRIGHT", 1, -1 },
+    }
+    for i, s in ipairs(sides) do
+        local line = frame:CreateTexture(nil, "BORDER")
+        line:SetColorTexture(0, 0, 0, 0.9)
+        line:SetPoint(s[1], frame, s[1], s[2], s[3])
+        line:SetPoint(s[4], frame, s[4], s[5], s[6])
+        if i <= 2 then line:SetHeight(1) else line:SetWidth(1) end
+    end
+    local shade = frame:CreateTexture(nil, "BORDER")
+    shade:SetTexture(addon.theme.texture)
+    shade:SetGradient("VERTICAL", CreateColor(0, 0, 0, 0), CreateColor(0, 0, 0, 0.45))
+    shade:SetPoint("TOPLEFT", 1, -1)
+    shade:SetPoint("TOPRIGHT", -1, -1)
+    shade:SetHeight(BEVEL_SHADE)
+end
+
 -- Flat background and 1px border in theme colors
 function UI.Style(frame, bg, border)
     -- A button drawn with the game's art (World of Warcraft theme) keeps it
@@ -19,7 +46,11 @@ function UI.Style(frame, bg, border)
     end
     local theme = addon.theme
     local texture = theme.texture
-    if theme.edge and border then
+    -- Panels out in the world (floating, dialog) keep the tooltip edge
+    if theme.game and border and bg ~= "floating" and bg ~= "dialog" then
+        frame:SetBackdrop({ bgFile = texture, edgeFile = texture, edgeSize = 1 })
+        GameBevel(frame)
+    elseif theme.edge and border then
         local i = theme.inset
         frame:SetBackdrop({ bgFile = texture, edgeFile = theme.edge, edgeSize = theme.edgeSize,
             insets = { left = i, right = i, top = i, bottom = i } })
