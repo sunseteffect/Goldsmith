@@ -526,6 +526,11 @@ function UI.Button(parent, text, width, height, onClick)
         -- game's art alone
         button.gameArt = true
         button.SetBackdrop, button.SetBackdropColor, button.SetBackdropBorderColor = NoBackdrop, NoBackdrop, NoBackdrop
+        -- Alliance: the red buttons in royal blue
+        local tint = addon.theme.buttonTint
+        if tint then
+            addon:TintFrameArt(button, { tint[1], tint[2], tint[3], desaturate = true })
+        end
     else
         UI.Style(button, "panelRaised", "borderStrong")
     end

@@ -165,13 +165,27 @@ local function Faction(colors, extra)
     for k, v in pairs(extra) do theme[k] = v end
     return theme
 end
+--
+-- Round 2 (user, 2026-10-31: "MORE alliance themed", needn't stay looking
+-- like Blizzard): frameLayout swaps the window's frame for the faction's
+-- ornate one from the BfA mission table (with our own ring round the
+-- portrait, Media\Ring); buttonTint recolors the red buttons (Alliance
+-- royal blue); tabs take the frame's tint; insetWash is the faction's
+-- color washed down from the top of the screens' panel; the crest is
+-- bigger and stronger (emblemSize, emblemAlpha); chart bars in its color.
 addon.themes.alliance = Faction({
     panel       = Hex("000a1a", 0.4),
     floating    = Hex("060d1c", 0.95),
     highlight   = Hex("0b1f45", 0.65),
     band        = Hex("4a90e2", 0.12),
     bandLine    = Hex("4a90e2", 0.45),
-}, { faction = "Alliance", frameTint = { 0.62, 0.76, 1 }, emblem = "Interface\\Timer\\Alliance-Logo" })
+    bar         = Hex("3d7be0"),
+}, {
+    faction = "Alliance", frameTint = { 0.62, 0.76, 1 }, emblem = "Interface\\Timer\\Alliance-Logo",
+    frameLayout = "BFAMissionAlliance", ringColor = { 1, 0.82, 0.3 },
+    buttonTint = { 0.35, 0.55, 1 }, insetWash = { 0.12, 0.3, 0.75, 0.45 },
+    emblemSize = 400, emblemAlpha = 0.14,
+})
 addon.themes.horde = Faction({
     panel       = Hex("1a0402", 0.4),
     floating    = Hex("140504", 0.95),
@@ -179,7 +193,13 @@ addon.themes.horde = Faction({
     borderGold  = Hex("d23a22"),
     band        = Hex("d23a22", 0.12),
     bandLine    = Hex("d23a22", 0.45),
-}, { faction = "Horde", frameTint = { 1, 0.62, 0.55 }, emblem = "Interface\\Timer\\Horde-Logo" })
+    bar         = Hex("c0392b"),
+}, {
+    faction = "Horde", frameTint = { 1, 0.62, 0.55 }, emblem = "Interface\\Timer\\Horde-Logo",
+    frameLayout = "BFAMissionHorde", ringColor = { 0.75, 0.55, 0.4 },
+    insetWash = { 0.6, 0.1, 0.05, 0.45 },
+    emblemSize = 400, emblemAlpha = 0.14,
+})
 
 addon.theme = addon.themes.clean
 
@@ -196,14 +216,27 @@ function addon:PickTheme()
     addon.theme = addon.themes[choice] or addon.themes.clean
 end
 
--- The game's frame art (a NineSlice) in the faction's tint, if the look
--- has one
-function addon:TintFrameArt(nineSlice)
-    local tint = addon.theme.frameTint
+-- The game's frame art (a NineSlice, a tab) in the faction's tint, if the
+-- look has one. Textures only: a tab's name keeps its color.
+function addon:TintFrameArt(nineSlice, tint)
+    tint = tint or addon.theme.frameTint
     if not (tint and nineSlice) then return end
     for _, region in ipairs({ nineSlice:GetRegions() }) do
-        if region.SetVertexColor then region:SetVertexColor(tint[1], tint[2], tint[3]) end
+        if region:GetObjectType() == "Texture" then
+            if tint.desaturate then region:SetDesaturated(true) end
+            region:SetVertexColor(tint[1], tint[2], tint[3])
+        end
     end
+end
+
+-- The faction's own frame instead of the game's plain one (frameLayout).
+-- True when it took; the plain frame stays (tinted) if the game hasn't got
+-- the layout.
+function addon:ApplyFactionFrame(nineSlice)
+    local layout = addon.theme.frameLayout
+    if not (layout and nineSlice and NineSliceUtil and NineSliceUtil.ApplyLayoutByName) then return false end
+    local ok = pcall(NineSliceUtil.ApplyLayoutByName, nineSlice, layout)
+    return ok
 end
 
 -- r, g, b, a of a theme color

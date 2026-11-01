@@ -220,7 +220,8 @@ function addon:CreateWindow()
         gameArt:SetAllPoints()
         gameArt:SetFrameLevel(frame:GetFrameLevel())
         gameArt:SetTitle("Goldsmith")
-        addon:TintFrameArt(gameArt.NineSlice)
+        local factionFrame = addon:ApplyFactionFrame(gameArt.NineSlice)
+        if not factionFrame then addon:TintFrameArt(gameArt.NineSlice) end
         -- The portrait: a dark disc, like the game's, with the logo a little
         -- smaller inside it so none of it is cut off by the ring (user,
         -- 2026-10-31: see-through, then too big)
@@ -250,6 +251,23 @@ function addon:CreateWindow()
         local top = gameArt:GetFrameLevel()
         for _, child in ipairs({ gameArt:GetChildren() }) do top = math.max(top, child:GetFrameLevel()) end
         gameArt.topLevel = top
+        -- A faction frame has no portrait ring: the portrait above it, in
+        -- a ring of the faction's metal
+        if factionFrame and portrait then
+            local container = portrait:GetParent()
+            container:SetFrameLevel(top + 1)
+            local ringFrame = CreateFrame("Frame", nil, container)
+            ringFrame:SetFrameLevel(top + 2)
+            ringFrame:SetAllPoints(portrait)
+            local ring = ringFrame:CreateTexture(nil, "OVERLAY")
+            ring:SetTexture("Interface\\AddOns\\Goldsmith\\Media\\Ring")
+            local size = (portrait:GetWidth() or 60) * 64 / 52
+            ring:SetSize(size, size)
+            ring:SetPoint("CENTER", portrait, "CENTER")
+            local c = addon.theme.ringColor or { 1, 0.82, 0.3 }
+            ring:SetVertexColor(c[1], c[2], c[3])
+            gameArt.topLevel = top + 2
+        end
         gameClose = CreateFrame("Button", nil, frame, "UIPanelCloseButtonDefaultAnchors")
         gameClose:SetScript("OnClick", function() frame:Hide() end)
         gameClose:SetFrameLevel(top + 5)
@@ -712,6 +730,7 @@ function addon:CreateWindow()
             local button = CreateFrame("Button", "GoldsmithWindowTab" .. i, frame, "PanelTabButtonTemplate")
             button:SetID(i)
             button:SetText(tab.label)
+            addon:TintFrameArt(button)
             PanelTemplates_TabResize(button, 0)
             if i == 1 then
                 button:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 12, 2)
@@ -820,10 +839,22 @@ function addon:CreateWindow()
             mark:SetDesaturated(true)
             mark:SetAlpha(0.06)
             -- Alliance and Horde: the faction's crest, in its colors
-            if addon.theme.emblem then
-                mark:SetTexture(addon.theme.emblem)
+            local theme = addon.theme
+            if theme.emblem then
+                mark:SetTexture(theme.emblem)
                 mark:SetDesaturated(false)
-                mark:SetAlpha(0.08)
+                mark:SetAlpha(theme.emblemAlpha or 0.08)
+                if theme.emblemSize then mark:SetSize(theme.emblemSize, theme.emblemSize) end
+            end
+            -- The faction's color washed down from the top
+            if theme.insetWash then
+                local w = theme.insetWash
+                local wash = inset:CreateTexture(nil, "BORDER")
+                wash:SetTexture("Interface\\Buttons\\WHITE8x8")
+                wash:SetGradient("VERTICAL", CreateColor(w[1], w[2], w[3], 0), CreateColor(w[1], w[2], w[3], w[4]))
+                wash:SetPoint("TOPLEFT", 3, -3)
+                wash:SetPoint("TOPRIGHT", -3, -3)
+                wash:SetPoint("BOTTOM", inset, "CENTER")
             end
             -- The achievement window's carved corner, turned for each side.
             -- Over the screens, so the boxes' edges run behind it (user,

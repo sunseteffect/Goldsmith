@@ -45,4 +45,37 @@ end
 
 Write("Media\\CornerLine.tga", RADIUS - 1, RADIUS)
 Write("Media\\CornerShadow.tga", RADIUS, RADIUS + 1)
-print("Corners written")
+
+-- Media\Ring.tga: a white ring for the portrait of a faction frame that has
+-- no ring of its own (Window.lua), with a dark edge each side so it reads
+-- on any background. 64 texels, the ring 52 to 60 across.
+local RING = 64
+local function RingTexel(i, j)
+    local line, edge = 0, 0
+    for a = 0, SUB - 1 do
+        for b = 0, SUB - 1 do
+            local x = i + (a + 0.5) / SUB - RING / 2
+            local y = j + (b + 0.5) / SUB - RING / 2
+            local d = math.sqrt(x * x + y * y)
+            if d >= 26.5 and d <= 30 then line = line + 1
+            elseif d >= 25.5 and d <= 31 then edge = edge + 1 end
+        end
+    end
+    local n = SUB * SUB
+    local alpha = (line + edge) / n
+    -- Bright in the middle of the ring, dark at its edges
+    local bright = (line + edge) > 0 and line / (line + edge) or 0
+    local v = math.floor(bright * 255 + 0.5)
+    return v, math.floor(alpha * 255 + 0.5)
+end
+local out = { string.char(0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, RING, 0, RING, 0, 32, 0x28) }
+for j = 0, RING - 1 do
+    for i = 0, RING - 1 do
+        local v, alpha = RingTexel(i, j)
+        out[#out + 1] = string.char(v, v, v, alpha)
+    end
+end
+local f = assert(io.open("Media\\Ring.tga", "wb"))
+f:write(table.concat(out))
+f:close()
+print("Corners and ring written")
