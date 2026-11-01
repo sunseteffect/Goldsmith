@@ -193,7 +193,8 @@ addon.themes.horde = Faction({
     borderGold  = Hex("d23a22"),
     band        = Hex("d23a22", 0.12),
     bandLine    = Hex("d23a22", 0.45),
-    bar         = Hex("c0392b"),
+    -- Bronze, not red: red is a loss (user, 2026-11-01)
+    bar         = Hex("b8862f"),
 }, {
     faction = "Horde", frameTint = { 1, 0.62, 0.55 }, emblem = "Interface\\Timer\\Horde-Logo",
     frameLayout = "BFAMissionHorde", ringColor = { 0.75, 0.55, 0.4 },
