@@ -557,9 +557,9 @@ local function Update()
             local l, _, _, t = Edges(e.first)
             local hl, hb, hr, ht = Edges(help)
             if l and hl and l - 3 + 19 > hl and l - 3 - 7 < hr and t + 3 + 7 > hb and t + 3 - 19 < ht then
-                -- The button and icon art have empty edges: 12 closer
+                -- The button and icon art have empty edges: 24 closer
                 -- (user, 2026-10-31)
-                x = hr + 3 - (l - 3)
+                x = hr - 9 - (l - 3)
             end
             outline.info:ClearAllPoints()
             outline.info:SetPoint("CENTER", outline, "TOPLEFT", x, -6)
