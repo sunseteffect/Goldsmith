@@ -1422,7 +1422,54 @@ local LIST_PAD = 10
 local LIST_GAP = 8
 local SCROLLBAR_WIDTH = 6
 
+-- World of Warcraft theme: lists as the Auction House's. Each header is
+-- the game's column tab (the Who list's art, which the AH's copies), the
+-- sorted one with the game's arrow; rows have no stripes and glow softly
+-- when hovered (user, 2026-10-31).
+local COLUMN_TABS = "Interface\\FriendsFrame\\WhoFrame-ColumnTabs"
+local SORT_ARROW = "Interface\\Buttons\\UI-SortArrow"
+local ROW_GLOW = "Interface\\QuestFrame\\UI-QuestTitleHighlight"
+
+local function HeaderColor(sorted)
+    if addon.theme.game then return sorted and "gold" or "text" end
+    return sorted and "gold" or "muted"
+end
+
+-- The tab's art reaches half a gap past the column each side, so the
+-- tabs meet as the AH's do
+local function GameColumnTab(cell, sortable)
+    local half = LIST_GAP / 2
+    local pieces = {
+        { 0, 0.078125, 5 }, { 0.078125, 0.90625 }, { 0.90625, 0.96875, 4 },
+    }
+    local left, middle, right
+    for i, p in ipairs(pieces) do
+        local t = cell:CreateTexture(nil, "BACKGROUND")
+        t:SetTexture(COLUMN_TABS)
+        t:SetTexCoord(p[1], p[2], 0, 0.75)
+        t:SetHeight(LIST_HEADER_HEIGHT)
+        if p[3] then t:SetWidth(p[3]) end
+        if i == 1 then left = t elseif i == 2 then middle = t else right = t end
+    end
+    left:SetPoint("TOPLEFT", cell, "TOPLEFT", -half, 0)
+    right:SetPoint("TOPRIGHT", cell, "TOPRIGHT", half, 0)
+    middle:SetPoint("TOPLEFT", left, "TOPRIGHT")
+    middle:SetPoint("TOPRIGHT", right, "TOPLEFT")
+    if sortable then
+        local glow = cell:CreateTexture(nil, "HIGHLIGHT")
+        glow:SetTexture("Interface\\PaperDollInfoFrame\\UI-Character-Tab-Highlight")
+        glow:SetBlendMode("ADD")
+        glow:SetPoint("TOPLEFT", left, "TOPLEFT", 0, 2)
+        glow:SetPoint("BOTTOMRIGHT", right, "BOTTOMRIGHT", 0, -6)
+    end
+    cell.arrow = cell:CreateTexture(nil, "OVERLAY")
+    cell.arrow:SetTexture(SORT_ARROW)
+    cell.arrow:SetSize(9, 8)
+    cell.arrow:Hide()
+end
+
 function UI.List(parent, opts)
+    local game = addon.theme.game
     local list = CreateFrame("Frame", nil, parent)
     list.rowHeight = opts.rowHeight or 24
     list.columns, list.items, list.offset = {}, {}, 0
@@ -1436,6 +1483,8 @@ function UI.List(parent, opts)
     headerLine:SetPoint("TOPLEFT", header, "BOTTOMLEFT")
     headerLine:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT")
     headerLine:SetHeight(1)
+    -- The column tabs are the line in the game's look
+    if game then headerLine:Hide() end
 
     local body = CreateFrame("Frame", nil, list)
     body:SetPoint("TOPLEFT", header, "BOTTOMLEFT", 0, -3)
@@ -1498,13 +1547,14 @@ function UI.List(parent, opts)
     local function HeaderCell(col)
         local cell = CreateFrame("Button", nil, header)
         cell:SetHeight(LIST_HEADER_HEIGHT)
-        cell.text = UI.Text(cell, "label", "muted")
+        cell.text = UI.Text(cell, game and "small" or "label", "muted")
         cell.text:SetAllPoints()
+        if game then GameColumnTab(cell, opts.onSort) end
         if opts.onSort then
             cell:SetScript("OnClick", function() opts.onSort(col.key) end)
-            cell:SetScript("OnEnter", function(self) self.text:SetTextColor(addon:Color("text")) end)
+            cell:SetScript("OnEnter", function(self) self.text:SetTextColor(addon:Color(game and "gold" or "text")) end)
             cell:SetScript("OnLeave", function(self)
-                self.text:SetTextColor(addon:Color(self.sorted and "gold" or "muted"))
+                self.text:SetTextColor(addon:Color(HeaderColor(self.sorted)))
             end)
         end
         return cell
@@ -1521,14 +1571,22 @@ function UI.List(parent, opts)
         row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         row:EnableMouseWheel(true)
         row:SetScript("OnMouseWheel", function(_, delta) Scroll(nil, delta) end)
-        if i % 2 == 0 then
+        -- The game's lists have no stripes
+        if i % 2 == 0 and not game then
             local zebra = row:CreateTexture(nil, "BACKGROUND")
             zebra:SetAllPoints()
             zebra:SetColorTexture(1, 1, 1, 0.025)
         end
         local hover = row:CreateTexture(nil, "HIGHLIGHT")
         hover:SetAllPoints()
-        hover:SetColorTexture(addon:Color("hover"))
+        if game then
+            -- The soft glow under a hovered line in the game's lists
+            hover:SetTexture(ROW_GLOW)
+            hover:SetBlendMode("ADD")
+            hover:SetAlpha(0.6)
+        else
+            hover:SetColorTexture(addon:Color("hover"))
+        end
         row.cells = {}
         row:SetScript("OnClick", function(self, button)
             if self.data and opts.onClick then opts.onClick(self.data, button) end
@@ -1556,14 +1614,29 @@ function UI.List(parent, opts)
         PlaceCells(header, list.headerCells, layout, HeaderCell)
         for _, col in ipairs(list.columns) do
             local cell = list.headerCells[col.key]
-            local label = col.label:upper()
+            local label = game and col.label or col.label:upper()
             cell.sorted = list.sortKey == col.key
-            if cell.sorted then
+            if cell.sorted and not game then
                 local arrow = list.sortDescending and "v" or "^"
                 label = (col.justify == "RIGHT") and (arrow .. " " .. label) or (label .. " " .. arrow)
             end
             cell.text:SetText(label)
-            cell.text:SetTextColor(addon:Color(cell.sorted and "gold" or "muted"))
+            cell.text:SetTextColor(addon:Color(HeaderColor(cell.sorted)))
+            if cell.arrow then
+                -- The game's sort arrow beside the name, pointing down for
+                -- highest first
+                cell.arrow:SetShown(cell.sorted)
+                cell.arrow:SetTexCoord(0, 0.5625, list.sortDescending and 0 or 1, list.sortDescending and 1 or 0)
+                cell.arrow:ClearAllPoints()
+                local w = math.min(cell.text:GetStringWidth(), cell:GetWidth())
+                if col.justify == "RIGHT" then
+                    cell.arrow:SetPoint("RIGHT", cell, "RIGHT", -w - 3, 0)
+                elseif col.justify == "CENTER" then
+                    cell.arrow:SetPoint("LEFT", cell, "CENTER", w / 2 + 3, 0)
+                else
+                    cell.arrow:SetPoint("LEFT", cell, "LEFT", w + 3, 0)
+                end
+            end
         end
 
         for i = 1, visible do
