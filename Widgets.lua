@@ -1418,6 +1418,8 @@ end
 --                              list:SetSort(key, descending) marks one
 --   empty                      text shown when there are no items
 local LIST_HEADER_HEIGHT = 24
+-- The AH's column tabs are lower, with smaller names (user, 2026-10-31)
+local GAME_HEADER_HEIGHT = 19
 local LIST_PAD = 10
 local LIST_GAP = 8
 local SCROLLBAR_WIDTH = 6
@@ -1447,7 +1449,7 @@ local function GameColumnTab(cell, sortable)
         local t = cell:CreateTexture(nil, "BACKGROUND")
         t:SetTexture(COLUMN_TABS)
         t:SetTexCoord(p[1], p[2], 0, 0.75)
-        t:SetHeight(LIST_HEADER_HEIGHT)
+        t:SetHeight(GAME_HEADER_HEIGHT)
         if p[3] then t:SetWidth(p[3]) end
         if i == 1 then left = t elseif i == 2 then middle = t else right = t end
     end
@@ -1470,6 +1472,7 @@ end
 
 function UI.List(parent, opts)
     local game = addon.theme.game
+    local headerHeight = game and GAME_HEADER_HEIGHT or LIST_HEADER_HEIGHT
     local list = CreateFrame("Frame", nil, parent)
     list.rowHeight = opts.rowHeight or 24
     list.columns, list.items, list.offset = {}, {}, 0
@@ -1478,7 +1481,7 @@ function UI.List(parent, opts)
     local header = CreateFrame("Frame", nil, list)
     header:SetPoint("TOPLEFT")
     header:SetPoint("TOPRIGHT", -(SCROLLBAR_WIDTH + 4), 0)
-    header:SetHeight(LIST_HEADER_HEIGHT)
+    header:SetHeight(headerHeight)
     local headerLine = UI.Line(list, "border")
     headerLine:SetPoint("TOPLEFT", header, "BOTTOMLEFT")
     headerLine:SetPoint("TOPRIGHT", header, "BOTTOMRIGHT")
@@ -1546,8 +1549,8 @@ function UI.List(parent, opts)
 
     local function HeaderCell(col)
         local cell = CreateFrame("Button", nil, header)
-        cell:SetHeight(LIST_HEADER_HEIGHT)
-        cell.text = UI.Text(cell, game and "small" or "label", "muted")
+        cell:SetHeight(headerHeight)
+        cell.text = UI.Text(cell, "label", "muted")
         cell.text:SetAllPoints()
         if game then GameColumnTab(cell, opts.onSort) end
         if opts.onSort then
