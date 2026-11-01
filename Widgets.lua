@@ -41,36 +41,26 @@ local PANEL_STYLES = {
     raised = { "panelRaised", "borderStrong" },
 }
 
--- World of Warcraft theme: the gold corners of the game's ornate dialog
--- border on the screens' boxes, as its own windows have (user,
--- 2026-10-31). The border file is 8 pieces side by side; 5 to 8 are the
--- corners.
+-- World of Warcraft theme: the screens' boxes framed with the game's ornate
+-- gold dialog border, all the way round (user, 2026-10-31: gold corners on
+-- a plain line were too simple, wanted more ornate)
 local GOLD_BORDER = "Interface\\DialogFrame\\UI-DialogBox-Gold-Border"
-local CORNER_SIZE = 16
-local CORNERS = {
-    { "TOPLEFT", 4 }, { "TOPRIGHT", 5 }, { "BOTTOMLEFT", 6 }, { "BOTTOMRIGHT", 7 },
-}
-local function AddCorners(frame)
-    for _, c in ipairs(CORNERS) do
-        local corner = frame:CreateTexture(nil, "OVERLAY")
-        corner:SetTexture(GOLD_BORDER)
-        corner:SetTexCoord(c[2] / 8, (c[2] + 1) / 8, 0, 1)
-        corner:SetSize(CORNER_SIZE, CORNER_SIZE)
-        corner:SetPoint(c[1], frame, c[1], 0, 0)
-    end
+local GOLD_EDGE = 16
+local function OrnateBorder(frame)
+    local r, g, b, a = frame:GetBackdropColor()
+    frame:SetBackdrop({ bgFile = addon.theme.texture, edgeFile = GOLD_BORDER, edgeSize = GOLD_EDGE,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 } })
+    frame:SetBackdropColor(r, g, b, a)
 end
 
--- plain: no corners in the World of Warcraft look, for boxes in a long run
+-- plain: no ornate border in the World of Warcraft look, for boxes in a long run
 -- (Settings' rows)
 function UI.Panel(parent, style, plain)
     local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     local s = PANEL_STYLES[style or "panel"]
     UI.Style(frame, s[1], s[2])
     if addon.theme.game and not plain and (style == nil or style == "panel" or style == "highlight") then
-        AddCorners(frame)
-        -- Grey lines between gold corners looked unfinished (user,
-        -- 2026-10-31): bronze, so the corners run into them
-        if style ~= "highlight" then frame:SetBackdropBorderColor(addon:Color("borderOrnate")) end
+        OrnateBorder(frame)
     end
     return frame
 end
@@ -282,7 +272,7 @@ function UI.TooltipTable(tooltip, title, columns, rows)
 end
 
 -- What an item does, as the game's own tooltip says it: its green lines
--- ("Use: Drink to increase your primary stat…", "Equip: …"). Kept per
+-- ("Use: Drink to increase your primary statâ€¦", "Equip: â€¦"). Kept per
 -- item once read. Returns a list of lines, or nil (none, or the game
 -- hasn't loaded the item yet: it's asked for, so the next hover has it).
 local descriptions = {}

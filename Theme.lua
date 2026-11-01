@@ -104,8 +104,6 @@ addon.themes = {
             border      = Hex("8c8c8c"),
             borderStrong = Hex("a6a6a6"),
             borderGold  = Hex("ffd100"),
-            -- Boxes with the gold corners (Widgets.lua, UI.Panel)
-            borderOrnate = Hex("9c7a3c"),
             hover       = Hex("ffffff", 0.08),
 
             text        = Hex("ffffff"),
