@@ -41,10 +41,34 @@ local PANEL_STYLES = {
     raised = { "panelRaised", "borderStrong" },
 }
 
-function UI.Panel(parent, style)
+-- World of Warcraft theme: the gold corners of the game's ornate dialog
+-- border on the screens' boxes, as its own windows have (user,
+-- 2026-10-31). The border file is 8 pieces side by side; 5 to 8 are the
+-- corners.
+local GOLD_BORDER = "Interface\\DialogFrame\\UI-DialogBox-Gold-Border"
+local CORNER_SIZE = 16
+local CORNERS = {
+    { "TOPLEFT", 4 }, { "TOPRIGHT", 5 }, { "BOTTOMLEFT", 6 }, { "BOTTOMRIGHT", 7 },
+}
+local function AddCorners(frame)
+    for _, c in ipairs(CORNERS) do
+        local corner = frame:CreateTexture(nil, "OVERLAY")
+        corner:SetTexture(GOLD_BORDER)
+        corner:SetTexCoord(c[2] / 8, (c[2] + 1) / 8, 0, 1)
+        corner:SetSize(CORNER_SIZE, CORNER_SIZE)
+        corner:SetPoint(c[1], frame, c[1], 0, 0)
+    end
+end
+
+-- plain: no corners in the World of Warcraft look, for boxes in a long run
+-- (Settings' rows)
+function UI.Panel(parent, style, plain)
     local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     local s = PANEL_STYLES[style or "panel"]
     UI.Style(frame, s[1], s[2])
+    if addon.theme.game and not plain and (style == nil or style == "panel" or style == "highlight") then
+        AddCorners(frame)
+    end
     return frame
 end
 
@@ -648,6 +672,8 @@ end
 -- tooltip = function(tooltip) } }. Drawn to fit the chart's size and
 -- redrawn when it changes. Values below zero go below a zero line.
 
+local STATUS_BAR = "Interface\\TargetingFrame\\UI-StatusBar"
+
 local function ValueRange(points)
     local maxV, minV = 0, 0
     for _, p in ipairs(points) do
@@ -728,7 +754,13 @@ function UI.BarChart(parent)
             end
             bar:SetSize(barWidth, math.max(height, 2))
             local color = p.color or (p.value > 0 and "bar" or p.value < 0 and "loss" or "barEmpty")
-            bar:SetColorTexture(addon:Color(color))
+            if addon.theme.game then
+                -- The game's health bar sheen, tinted
+                bar:SetTexture(STATUS_BAR)
+                bar:SetVertexColor(addon:Color(color))
+            else
+                bar:SetColorTexture(addon:Color(color))
+            end
             bar:Show()
 
             local hover = HoverColumn(chart, i)
@@ -947,6 +979,37 @@ function UI.Sparkline(parent)
     return spark
 end
 
+-- World of Warcraft theme: switches and toggles drawn as the game's
+-- options slider, its knob at one end, the groove gold when on (user,
+-- 2026-10-31: keep toggles, in the game's look; the game itself only has
+-- checkboxes)
+local SLIDER_TRACK = {
+    bgFile = "Interface\\Buttons\\UI-SliderBar-Background",
+    edgeFile = "Interface\\Buttons\\UI-SliderBar-Border",
+    tile = true, tileSize = 8, edgeSize = 8,
+    insets = { left = 3, right = 3, top = 6, bottom = 6 },
+}
+local SLIDER_KNOB = "Interface\\Buttons\\UI-SliderBar-Button-Horizontal"
+
+local function GameSwitchArt(track, knob)
+    track:SetBackdrop(SLIDER_TRACK)
+    track.gameArt = true -- UI.Style leaves it
+    track.fill = track:CreateTexture(nil, "ARTWORK")
+    track.fill:SetPoint("TOPLEFT", 3, -6)
+    track.fill:SetPoint("BOTTOMRIGHT", -3, 6)
+    local r, g, b = addon:Color("gold")
+    track.fill:SetColorTexture(r, g, b, 0.7)
+    knob:SetTexture(SLIDER_KNOB)
+    knob:SetSize(32, 32)
+end
+
+local function GameSwitchState(track, knob, on)
+    track.fill:SetShown(on)
+    knob:SetDesaturated(not on)
+    knob:ClearAllPoints()
+    knob:SetPoint("CENTER", track, on and "RIGHT" or "LEFT", on and -6 or 6, 0)
+end
+
 -- An on/off switch with a label, for view options that are remembered
 -- (e.g. Crafts' Concentration). switch:SetOn(on) shows the state;
 -- onToggle(newState) runs when it's clicked.
@@ -961,16 +1024,25 @@ function UI.Switch(parent, text, onToggle)
     switch.label = UI.Text(switch, "small", "text")
     switch.label:SetPoint("LEFT", switch.track, "RIGHT", 8, 0)
     switch.label:SetText(text)
-    switch:SetWidth(8 + 28 + 8 + switch.label:GetStringWidth() + 12)
+    local game = addon.theme.game
+    if game then
+        switch.track:SetSize(36, 17)
+        GameSwitchArt(switch.track, switch.knob)
+    end
+    switch:SetWidth(8 + switch.track:GetWidth() + 8 + switch.label:GetStringWidth() + 12)
 
     function switch:SetOn(on)
         switch.on = on and true or false
         UI.Style(switch, on and "highlight" or "panelRaised", on and "borderGold" or "borderStrong")
+        switch.label:SetTextColor(addon:Color(on and "gold" or "text"))
+        if game then
+            GameSwitchState(switch.track, switch.knob, switch.on)
+            return
+        end
         UI.Style(switch.track, on and "gold" or "barEmpty")
         switch.knob:SetColorTexture(addon:Color("window"))
         switch.knob:ClearAllPoints()
         switch.knob:SetPoint(on and "RIGHT" or "LEFT", switch.track, on and "RIGHT" or "LEFT", on and -2 or 2, 0)
-        switch.label:SetTextColor(addon:Color(on and "gold" or "text"))
     end
     switch:SetScript("OnClick", function() onToggle(not switch.on) end)
     switch:HookScript("OnEnter", function(self) self:SetBackdropBorderColor(addon:Color("gold")) end)
@@ -996,15 +1068,24 @@ function UI.Toggle(parent, onToggle)
     toggle.state = UI.Text(toggle, "small", "muted", "RIGHT")
     toggle.state:SetPoint("RIGHT", toggle.track, "LEFT", -8, 0)
     toggle.usable = true
+    local game = addon.theme.game
+    if game then
+        toggle.track:SetHeight(17)
+        GameSwitchArt(toggle.track, toggle.knob)
+    end
 
     function toggle:SetOn(on)
         self.on = on and true or false
+        self.state:SetText(self.on and "On" or "Off")
+        self.state:SetTextColor(addon:Color(self.on and "gold" or "muted"))
+        if game then
+            GameSwitchState(self.track, self.knob, self.on)
+            return
+        end
         UI.Style(self.track, self.on and "gold" or "barEmpty", self.on and "gold" or "borderStrong")
         self.knob:SetColorTexture(addon:Color(self.on and "window" or "muted"))
         self.knob:ClearAllPoints()
         self.knob:SetPoint(self.on and "RIGHT" or "LEFT", self.on and -3 or 3, 0)
-        self.state:SetText(self.on and "On" or "Off")
-        self.state:SetTextColor(addon:Color(self.on and "gold" or "muted"))
     end
     function toggle:SetUsable(usable)
         self.usable = usable and true or false

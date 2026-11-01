@@ -1072,7 +1072,7 @@ StaticPopupDialogs["GOLDSMITH_RESET_SETTINGS"] = {
 -- A setting row: a box with the name and a short description on the
 -- left and the control on the right. Hovering it explains it in full.
 local function Row(parent, key, title, description)
-    local row = UI.Panel(parent, "panel")
+    local row = UI.Panel(parent, "panel", true)
     row:SetSize(PAGE_WIDTH, ROW_HEIGHT)
     row:EnableMouse(true)
     row.key, row.titleText = key, title
