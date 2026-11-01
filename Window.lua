@@ -17,6 +17,8 @@ local UI = addon.UI
 -- The click legend along the bottom edge (see ClickLegend); the window is
 -- that much taller than before it, so screens keep their size
 local LEGEND_HEIGHT = 18
+-- A faction frame's border is about this much thicker than the game's plain one
+local FACTION_FRAME_PAD = 16
 local WIDTH, HEIGHT = 900, 710 + LEGEND_HEIGHT
 -- Height left for a tab's content (header, tabs, legend and padding taken off)
 addon.CONTENT_HEIGHT = HEIGHT - 114 - LEGEND_HEIGHT
@@ -214,6 +216,10 @@ function addon:CreateWindow()
     -- frame, title bar and portrait, with the logo in the portrait)
     local game = addon.theme.game
     local gameArt, gameClose
+    -- How far the frame art reaches outside the window: a faction frame's
+    -- border is thick, so it goes round the window rather than over its
+    -- edges (user, 2026-10-31: the screens ran under it)
+    local framePad = 0
     if game then
         frame:ClearBackdrop()
         gameArt = CreateFrame("Frame", nil, frame, "PortraitFrameTemplate")
@@ -221,7 +227,16 @@ function addon:CreateWindow()
         gameArt:SetFrameLevel(frame:GetFrameLevel())
         gameArt:SetTitle("Goldsmith")
         local factionFrame = addon:ApplyFactionFrame(gameArt.NineSlice)
-        if not factionFrame then addon:TintFrameArt(gameArt.NineSlice) end
+        if factionFrame then
+            framePad = FACTION_FRAME_PAD
+            gameArt:ClearAllPoints()
+            gameArt:SetPoint("TOPLEFT", frame, "TOPLEFT", -framePad, framePad)
+            gameArt:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", framePad, -framePad)
+            -- The border covers the title bar; the portrait says it
+            if gameArt.TitleContainer then gameArt.TitleContainer:Hide() end
+        else
+            addon:TintFrameArt(gameArt.NineSlice)
+        end
         -- The portrait: a dark disc, like the game's, with the logo a little
         -- smaller inside it so none of it is cut off by the ring (user,
         -- 2026-10-31: see-through, then too big)
@@ -271,6 +286,12 @@ function addon:CreateWindow()
         gameClose = CreateFrame("Button", nil, frame, "UIPanelCloseButtonDefaultAnchors")
         gameClose:SetScript("OnClick", function() frame:Hide() end)
         gameClose:SetFrameLevel(top + 5)
+        -- In the frame art's corner, wherever that is
+        local point, _, relative, x, y = gameClose:GetPoint(1)
+        if point then
+            gameClose:ClearAllPoints()
+            gameClose:SetPoint(point, gameArt, relative, x, y)
+        end
     end
     -- Whether Goldsmith is in front of the game's windows. Drawing order
     -- can't be read reliably (a lowered Goldsmith can share a frame level
@@ -629,7 +650,7 @@ function addon:CreateWindow()
         -- red "?" above stays only if the game's button can't be made.
         local ok, info = pcall(CreateFrame, "Button", nil, frame, "MainHelpPlateButton")
         if ok and info then
-            info:SetPoint("TOPLEFT", frame, "TOPLEFT", 39, 20)
+            info:SetPoint("TOPLEFT", frame, "TOPLEFT", 39 - framePad, 20 + framePad)
             info:SetFrameLevel(gameArt.topLevel + 6)
             info:SetScript("OnClick", function() addon:ToggleHelpMode() end)
             -- The game's yellow hover box (see-through, the game's wording)
@@ -733,7 +754,7 @@ function addon:CreateWindow()
             addon:TintFrameArt(button)
             PanelTemplates_TabResize(button, 0)
             if i == 1 then
-                button:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 12, 2)
+                button:SetPoint("TOPLEFT", frame, "BOTTOMLEFT", 12, 2 - framePad)
             else
                 button:SetPoint("TOPLEFT", frame.Tabs[i - 1], "TOPRIGHT", 3, 0)
             end
