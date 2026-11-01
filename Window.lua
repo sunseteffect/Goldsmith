@@ -801,6 +801,34 @@ function addon:CreateWindow()
     local content = CreateFrame("Frame", nil, frame)
     content:SetPoint("TOPLEFT", tabArea, "BOTTOMLEFT", 20, -16)
     content:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -20, 16 + LEGEND_HEIGHT)
+    -- World of Warcraft theme: the screens sit in one sunken panel, with
+    -- the Goldsmith mark faint behind them and filigree in its lower
+    -- corners, as the game's Professions and Collections windows are built
+    -- (user, 2026-10-31: boxed borders alone read as a web page)
+    if game then
+        local ok, inset = pcall(CreateFrame, "Frame", nil, frame, "InsetFrameTemplate")
+        if ok and inset then
+            inset:SetPoint("TOPLEFT", content, "TOPLEFT", -10, 10)
+            inset:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 10, -8)
+            inset:SetFrameLevel(gameArt.topLevel + 1)
+            content:SetFrameLevel(gameArt.topLevel + 3)
+            local mark = inset:CreateTexture(nil, "ARTWORK")
+            mark:SetTexture("Interface\\AddOns\\Goldsmith\\Media\\Logo")
+            mark:SetSize(320, 320)
+            mark:SetPoint("CENTER")
+            mark:SetDesaturated(true)
+            mark:SetAlpha(0.06)
+            -- The achievement window's carved corner, turned for each side
+            local CORNER = "Interface\\AchievementFrame\\UI-Achievement-WoodBorder-Corner"
+            for _, c in ipairs({ { "BOTTOMLEFT", 0, 1, 1, 0 }, { "BOTTOMRIGHT", 1, 0, 1, 0 } }) do
+                local corner = inset:CreateTexture(nil, "OVERLAY")
+                corner:SetTexture(CORNER)
+                corner:SetTexCoord(c[2], c[3], c[4], c[5])
+                corner:SetSize(64, 64)
+                corner:SetPoint(c[1], inset, c[1], 0, 0)
+            end
+        end
+    end
 
     -- What clicks do on the screen showing (view.legend), along the bottom
     -- edge in the same place on every tab

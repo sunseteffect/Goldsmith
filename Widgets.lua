@@ -41,27 +41,10 @@ local PANEL_STYLES = {
     raised = { "panelRaised", "borderStrong" },
 }
 
--- World of Warcraft theme: the screens' boxes framed with the game's ornate
--- gold dialog border, all the way round (user, 2026-10-31: gold corners on
--- a plain line were too simple, wanted more ornate)
-local GOLD_BORDER = "Interface\\DialogFrame\\UI-DialogBox-Gold-Border"
-local GOLD_EDGE = 16
-local function OrnateBorder(frame)
-    local r, g, b, a = frame:GetBackdropColor()
-    frame:SetBackdrop({ bgFile = addon.theme.texture, edgeFile = GOLD_BORDER, edgeSize = GOLD_EDGE,
-        insets = { left = 4, right = 4, top = 4, bottom = 4 } })
-    frame:SetBackdropColor(r, g, b, a)
-end
-
--- plain: no ornate border in the World of Warcraft look, for boxes in a long run
--- (Settings' rows)
-function UI.Panel(parent, style, plain)
+function UI.Panel(parent, style)
     local frame = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     local s = PANEL_STYLES[style or "panel"]
     UI.Style(frame, s[1], s[2])
-    if addon.theme.game and not plain and (style == nil or style == "panel" or style == "highlight") then
-        OrnateBorder(frame)
-    end
     return frame
 end
 
