@@ -68,6 +68,9 @@ function UI.Panel(parent, style, plain)
     UI.Style(frame, s[1], s[2])
     if addon.theme.game and not plain and (style == nil or style == "panel" or style == "highlight") then
         AddCorners(frame)
+        -- Grey lines between gold corners looked unfinished (user,
+        -- 2026-10-31): bronze, so the corners run into them
+        if style ~= "highlight" then frame:SetBackdropBorderColor(addon:Color("borderOrnate")) end
     end
     return frame
 end
@@ -755,8 +758,11 @@ function UI.BarChart(parent)
             bar:SetSize(barWidth, math.max(height, 2))
             local color = p.color or (p.value > 0 and "bar" or p.value < 0 and "loss" or "barEmpty")
             if addon.theme.game then
-                -- The game's health bar sheen, tinted
+                -- The game's health bar sheen, tinted. Its shading runs
+                -- across a sideways bar: stretched up an upright one it
+                -- showed as stripes (user, 2026-10-31), so turned
                 bar:SetTexture(STATUS_BAR)
+                bar:SetTexCoord(0, 0, 1, 0, 0, 1, 1, 1)
                 bar:SetVertexColor(addon:Color(color))
             else
                 bar:SetColorTexture(addon:Color(color))
