@@ -1031,10 +1031,21 @@ local function GameCheckbox(parent, text, onToggle)
     check:SetSize(24, 24)
     if check.Text then check.Text:SetText("") end
     check.label = UI.Text(check, "small", "text")
-    check.label:SetPoint("LEFT", check, "RIGHT", 2, 0)
+    check.label:SetPoint("LEFT", check, "LEFT", 26, 0)
     check.label:SetText(text)
-    -- The label clicks too, as it does on Goldsmith's own
-    check:SetHitRectInsets(0, -(check.label:GetStringWidth() + 6), 0, 0)
+    -- As wide as box and label, as Goldsmith's own is, so the label clicks
+    -- too: anchored by its right edge the label hung outside the panel
+    -- (user, 2026-10-31). The game's art stays a box on the left.
+    for _, get in ipairs({ "GetNormalTexture", "GetPushedTexture", "GetHighlightTexture",
+                           "GetCheckedTexture", "GetDisabledCheckedTexture" }) do
+        local art = check[get] and check[get](check)
+        if art then
+            art:ClearAllPoints()
+            art:SetPoint("LEFT", check, "LEFT", 0, 0)
+            art:SetSize(24, 24)
+        end
+    end
+    check:SetWidth(26 + check.label:GetStringWidth() + 4)
     local SetChecked = check.SetChecked
     function check:SetChecked(checked)
         self.checked = checked and true or false
