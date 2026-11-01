@@ -777,6 +777,9 @@ local CHOICES = {
     theme = {
         { value = "clean", label = "Goldsmith" },
         { value = "game", label = "World of Warcraft" },
+        { value = "alliance", label = "Alliance" },
+        { value = "horde", label = "Horde" },
+        { value = "faction", label = "Match my faction" },
     },
 }
 for _, value in ipairs({ 0, 5, 10, 15, 20, 30, 50 }) do
@@ -953,6 +956,7 @@ local HELP = {
     theme = {
         "Look",
         "Goldsmith: Goldsmith's own dark look. World of Warcraft: the game's window frame, red buttons and tabs, so Goldsmith looks like part of the game.",
+        "Alliance and Horde: the game's look in your faction's colors, with its crest. Match my faction: Alliance or Horde by the character you're on.",
         "Changes after a reload.",
     },
     keybind = {
@@ -1264,6 +1268,7 @@ function addon:CreateSettingsPanel(parent)
             art:SetAllPoints()
             art:SetFrameLevel(base)
             for _, child in ipairs({ art:GetChildren() }) do child:SetFrameLevel(base) end
+            addon:TintFrameArt(art.NineSlice)
             if art.SetTitle then
                 art:SetTitle("Settings")
             elseif art.TitleContainer and art.TitleContainer.TitleText then
@@ -1447,7 +1452,7 @@ function addon:CreateSettingsPanel(parent)
         OnAccept = function() ReloadUI() end,
         timeout = 0, whileDead = true, hideOnEscape = true,
     }
-    rows.theme = ChoiceRow(content, panel, "theme", "Look", "Goldsmith's own look, or the game's.",
+    rows.theme = ChoiceRow(content, panel, "theme", "Look", "Goldsmith's own look, the game's, or your faction's.",
         function() StaticPopup_Show("GOLDSMITH_RELOAD_THEME") end)
     rows.tooltips = ChoiceRow(content, panel, "tooltips", "Item tooltips", "Goldsmith's lines in the game's item tooltips.")
     rows.craftCost = ToggleRow(content, panel, "craftCost", "Cost in the profession window", "Your materials and Profit under a recipe's materials.",

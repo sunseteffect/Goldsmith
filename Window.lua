@@ -220,6 +220,7 @@ function addon:CreateWindow()
         gameArt:SetAllPoints()
         gameArt:SetFrameLevel(frame:GetFrameLevel())
         gameArt:SetTitle("Goldsmith")
+        addon:TintFrameArt(gameArt.NineSlice)
         -- The portrait: a dark disc, like the game's, with the logo a little
         -- smaller inside it so none of it is cut off by the ring (user,
         -- 2026-10-31: see-through, then too big)
@@ -818,6 +819,12 @@ function addon:CreateWindow()
             mark:SetPoint("CENTER")
             mark:SetDesaturated(true)
             mark:SetAlpha(0.06)
+            -- Alliance and Horde: the faction's crest, in its colors
+            if addon.theme.emblem then
+                mark:SetTexture(addon.theme.emblem)
+                mark:SetDesaturated(false)
+                mark:SetAlpha(0.08)
+            end
             -- The achievement window's carved corner, turned for each side.
             -- Over the screens, so the boxes' edges run behind it (user,
             -- 2026-10-31); it doesn't take the mouse.

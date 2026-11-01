@@ -151,13 +151,59 @@ addon.themes = {
     },
 }
 
+-- Alliance and Horde (user, 2026-10-31): the World of Warcraft look in the
+-- faction's colors: the window's frame tinted (frameTint), its crest faint
+-- behind the screens (emblem; Window.lua), highlights, panels and the
+-- price band in its colors. Text keeps the game's gold, as the game's own
+-- faction windows do.
+local function Faction(colors, extra)
+    local theme = {}
+    for k, v in pairs(addon.themes.game) do theme[k] = v end
+    theme.colors = {}
+    for k, v in pairs(addon.themes.game.colors) do theme.colors[k] = v end
+    for k, v in pairs(colors) do theme.colors[k] = v end
+    for k, v in pairs(extra) do theme[k] = v end
+    return theme
+end
+addon.themes.alliance = Faction({
+    panel       = Hex("000a1a", 0.4),
+    floating    = Hex("060d1c", 0.95),
+    highlight   = Hex("0b1f45", 0.65),
+    band        = Hex("4a90e2", 0.12),
+    bandLine    = Hex("4a90e2", 0.45),
+}, { faction = "Alliance", frameTint = { 0.62, 0.76, 1 }, emblem = "Interface\\Timer\\Alliance-Logo" })
+addon.themes.horde = Faction({
+    panel       = Hex("1a0402", 0.4),
+    floating    = Hex("140504", 0.95),
+    highlight   = Hex("3d0c06", 0.65),
+    borderGold  = Hex("d23a22"),
+    band        = Hex("d23a22", 0.12),
+    bandLine    = Hex("d23a22", 0.45),
+}, { faction = "Horde", frameTint = { 1, 0.62, 0.55 }, emblem = "Interface\\Timer\\Horde-Logo" })
+
 addon.theme = addon.themes.clean
 
 -- The look is picked once, when Goldsmith loads, before the window is made
 -- (Core.lua, Initialize; Settings > Display > Look): every frame takes its
--- colors when it's made, so a change shows after a reload
+-- colors when it's made, so a change shows after a reload. Match my
+-- faction: the character's (a Pandaren yet to choose gets the game's).
 function addon:PickTheme()
-    addon.theme = addon.themes[addon:Setting("theme")] or addon.themes.clean
+    local choice = addon:Setting("theme")
+    if choice == "faction" then
+        local faction = UnitFactionGroup("player")
+        choice = faction == "Alliance" and "alliance" or faction == "Horde" and "horde" or "game"
+    end
+    addon.theme = addon.themes[choice] or addon.themes.clean
+end
+
+-- The game's frame art (a NineSlice) in the faction's tint, if the look
+-- has one
+function addon:TintFrameArt(nineSlice)
+    local tint = addon.theme.frameTint
+    if not (tint and nineSlice) then return end
+    for _, region in ipairs({ nineSlice:GetRegions() }) do
+        if region.SetVertexColor then region:SetVertexColor(tint[1], tint[2], tint[3]) end
+    end
 end
 
 -- r, g, b, a of a theme color
