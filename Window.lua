@@ -818,10 +818,16 @@ function addon:CreateWindow()
             mark:SetPoint("CENTER")
             mark:SetDesaturated(true)
             mark:SetAlpha(0.06)
-            -- The achievement window's carved corner, turned for each side
+            -- The achievement window's carved corner, turned for each side.
+            -- Over the screens, so the boxes' edges run behind it (user,
+            -- 2026-10-31); it doesn't take the mouse.
             local CORNER = "Interface\\AchievementFrame\\UI-Achievement-WoodBorder-Corner"
+            local carved = CreateFrame("Frame", nil, frame)
+            carved:SetAllPoints(inset)
+            carved:SetFrameLevel(content:GetFrameLevel() + 60)
+            carved:EnableMouse(false)
             for _, c in ipairs({ { "BOTTOMLEFT", 0, 1, 1, 0 }, { "BOTTOMRIGHT", 1, 0, 1, 0 } }) do
-                local corner = inset:CreateTexture(nil, "OVERLAY")
+                local corner = carved:CreateTexture(nil, "OVERLAY")
                 corner:SetTexture(CORNER)
                 corner:SetTexCoord(c[2], c[3], c[4], c[5])
                 corner:SetSize(64, 64)
