@@ -366,7 +366,7 @@ function addon:GetSellNow()
         -- Not gear or tools: one realm's listing that may never sell (an
         -- Apprentice Jeweler's Apron "above break-even" at 953g, 2026-10-27)
         local selling = posted[item.name] or ListedNow(item.itemID)
-        local price = not selling and not Wearable(item.itemID) and addon:GetAHPrice(item.itemID)
+        local price = not selling and not Wearable(item.itemID) and addon:GetSellNowPrice(item.itemID)
         local cost, source = HeldCost(item, materials)
         if price and cost and cost > 0 and (source == "crafted" or source == "paid") then
             local each = price * (1 - AH_CUT) - cost
@@ -392,7 +392,7 @@ function addon:PrintSellNow()
     print(string.format("Goldsmith: %d held %d+ days, %d kept for yourself", #stock.heldLong,
         addon:Setting("heldDays"), #addon:GetKeptItems()))
     for _, item in ipairs(stock.heldLong) do
-        local price = addon:GetAHPrice(item.itemID)
+        local price = addon:GetSellNowPrice(item.itemID)
         local cost, source = HeldCost(item, materials)
         local why
         if posted[item.name] or ListedNow(item.itemID) then why = "posted in the last day or on the AH now"
