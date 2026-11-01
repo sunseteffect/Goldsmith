@@ -473,9 +473,15 @@ local function CreateDims()
                 proxy:Hide()
             end
             info:SetScript("OnClick", function() addon:ExitHelpMode() end)
-            -- Its yellow hover was drawn under the dark layer and looked
-            -- washed out (user, 2026-10-31): up on the tooltip layer
-            if HelpPlateTooltip then HelpPlateTooltip:SetFrameStrata("TOOLTIP") end
+            -- The game's yellow hover box is see-through, so the help
+            -- outlines showed across it (user, 2026-10-31): Goldsmith's own
+            -- tooltip instead
+            info:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine("Stop help (Esc)", 1, 1, 1)
+                GameTooltip:Show()
+            end)
+            info:SetScript("OnLeave", function() GameTooltip:Hide() end)
             close:SetScript("OnClick", function() if addon.window then addon.window:Hide() end end)
             helpProxy, closeProxy = info, close
             return

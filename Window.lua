@@ -613,6 +613,14 @@ function addon:CreateWindow()
             info:SetPoint("TOPLEFT", frame, "TOPLEFT", 39, 20)
             info:SetFrameLevel(gameArt.topLevel + 6)
             info:SetScript("OnClick", function() addon:ToggleHelpMode() end)
+            -- The game's yellow hover box (see-through, the game's wording)
+            -- looked off (user, 2026-10-31): the same tooltip as the "?"
+            info:SetScript("OnEnter", nil)
+            info:SetScript("OnLeave", nil)
+            UI.SetTooltip(info, function(tooltip)
+                tooltip:AddLine("What's this?", 1, 1, 1)
+                tooltip:AddLine("Click, then click any part of the window to see what it's for.", 0.8, 0.8, 0.8, true)
+            end, "ANCHOR_RIGHT")
             helpButton:Hide()
             helpButton = info
         end
