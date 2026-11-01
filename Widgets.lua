@@ -1424,8 +1424,8 @@ local SCROLLBAR_WIDTH = 6
 
 -- World of Warcraft theme: lists as the Auction House's. Each header is
 -- the game's column tab (the Who list's art, which the AH's copies), the
--- sorted one with the game's arrow; rows have no stripes and glow softly
--- when hovered (user, 2026-10-31).
+-- sorted one with the game's arrow; rows glow softly when hovered (user,
+-- 2026-10-31).
 local COLUMN_TABS = "Interface\\FriendsFrame\\WhoFrame-ColumnTabs"
 local SORT_ARROW = "Interface\\Buttons\\UI-SortArrow"
 local ROW_GLOW = "Interface\\QuestFrame\\UI-QuestTitleHighlight"
@@ -1571,11 +1571,12 @@ function UI.List(parent, opts)
         row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         row:EnableMouseWheel(true)
         row:SetScript("OnMouseWheel", function(_, delta) Scroll(nil, delta) end)
-        -- The game's lists have no stripes
-        if i % 2 == 0 and not game then
+        -- Every other row a shade lighter, a little more on the game look's
+        -- darker panel (user, 2026-10-31: wanted them back there)
+        if i % 2 == 0 then
             local zebra = row:CreateTexture(nil, "BACKGROUND")
             zebra:SetAllPoints()
-            zebra:SetColorTexture(1, 1, 1, 0.025)
+            zebra:SetColorTexture(1, 1, 1, game and 0.04 or 0.025)
         end
         local hover = row:CreateTexture(nil, "HIGHLIGHT")
         hover:SetAllPoints()
