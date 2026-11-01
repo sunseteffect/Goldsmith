@@ -777,6 +777,29 @@ function addon:GetAHPrice(itemID, buying)
     return (addon:GetAHPriceInfo(itemID, buying))
 end
 
+-- What you could sell at right now, for Sell now: the AH price, but never
+-- above the lowest listing today's views of the AH saw (live, search, your
+-- scan, TSM, Auctionator). GetAHPrice can value a low listing at the usual
+-- price or TSM's market value, but you'd still post against it. Mark of
+-- the Magister, 5 listed at 200g and the rest at 324g, was valued at its
+-- usual 500g and raid-warned "sell now" at a 427.85g break-even (user,
+-- 2026-10-31).
+function addon:GetSellNowPrice(itemID)
+    local price = addon:GetAHPrice(itemID)
+    if not price then return nil end
+    -- pairs, not ipairs: any of these can be nil
+    local lows = { addon:GetSearchPrice(itemID), GetTSMValue("DBMinBuyout", itemID) }
+    local book = GetFreshOrderBook(itemID)
+    if book then lows.live = GetRobustBookPrice(book) end
+    local scanned, scanAge = addon:GetScanPrice(itemID)
+    if scanAge == 0 then lows.scan = scanned end
+    if GetAuctionatorAge(itemID) == 0 then lows.auctionator = addon:GetAuctionatorPrice(itemID) end
+    for _, low in pairs(lows) do
+        if low > 0 and low < price then price = low end
+    end
+    return price
+end
+
 -- What an item costs to get: the AH price, unless a vendor sells it for
 -- less (or it isn't on the AH), in which case the vendor price with source
 -- "Vendor". Same returns as GetAHPriceInfo.

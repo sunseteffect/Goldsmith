@@ -4,6 +4,9 @@
 -- "posted in the last day" for a whole day (user, 2026-10-30).
 local bench = dofile(BENCH_DIR .. "bench.lua")
 local db = bench.LoadSaved()
+-- Prices come from the GetAHPrice stand-in below, not what the saved
+-- scan, searches and listings saw (GetSellNowPrice goes by the lowest)
+db.ownScan, db.orderBooks, db.searchPrices = nil, {}, {}
 db.sellNowTold = nil
 local addon = bench.Login("Mysticmead", { db = db })
 
