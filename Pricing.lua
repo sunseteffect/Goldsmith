@@ -1410,12 +1410,19 @@ local function SaveRecipe(recipeID, quiet, attempt, profession, unlearned)
         -- The recipe's own profession first: the open window can be
         -- another one (an Enchanting recipe was saved as Jewelcrafting from
         -- a jewelcrafter's window, so no enchanter ever read its tiers)
-        local okL, _, _, _, parentName = pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe, recipeID)
+        local okL, _, skillLine, _, parentName = pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe, recipeID)
         if okL and type(parentName) == "string" and parentName ~= "" then
             profession = parentName
+        elseif okL and type(skillLine) == "string" and skillLine:match("(%S+)$") then
+            -- Learned with the window closed (bought from a vendor): the
+            -- game gave no profession, and the open one came back "", so
+            -- the queue said "Open " and never saw Alchemy as open (user,
+            -- 2026-11-02: Liquid Luster). "Midnight Alchemy" -> "Alchemy".
+            profession = skillLine:match("(%S+)$")
         else
             local profInfo = C_TradeSkillUI.GetBaseProfessionInfo()
-            profession = (profInfo and profInfo.professionName) or "Unassigned"
+            profession = profInfo and profInfo.professionName
+            if not profession or profession == "" then profession = "Unassigned" end
         end
     end
 
