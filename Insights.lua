@@ -2091,11 +2091,14 @@ end
 -- nil for crafts), profit, costSource (sales: see GetUnitCostBasis, or
 -- "today" for today's estimate), profitEstimated, cost (crafts: per item),
 -- partial, profession, character (key), entry (the ledger entry), lot
--- (crafts) }, and totals { gold in, gold out }.
+-- (a craft batch's first craft), lots, crafts, first (craft batches: every
+-- craft, how many, when the first was) }, and totals { gold in, gold out }.
 -- Kept until data changes (it reads the whole ledger, and the tab asks
 -- every time it's shown); callers may sort the rows but not change them.
 local historyCache = addon:NewCache()
 local History
+-- Crafts of one item this close together are one History row (seconds)
+local CRAFT_BATCH_GAP = 5 * 60
 
 function addon:GetHistory(filters)
     local store = historyCache:Get()
@@ -2180,19 +2183,47 @@ History = function(filters)
         end
     end
 
-    -- Crafts have no character, so they only show for all characters
+    -- Crafts have no character, so they only show for all characters.
+    -- One row a batch: crafts of the same item no more than CRAFT_BATCH_GAP
+    -- apart (20 crafts of Harandar Celebration in a minute were 20 rows,
+    -- user 2026-11-01). Each craft is still saved on its own.
     if not filters.character then
         for itemID, lots in pairs(GoldsmithDB.craftLots) do
+            local kept = {}
             for _, lot in ipairs(lots) do
                 local recipe = lot.name and addon:FindRecipeByOutput(lot.name)
                 local profession = recipe and recipe.profession or addon:GetProfessionForItemName(lot.name or "")
                 if lot.name and Keep("Craft", lot.time, lot.name, profession, nil, itemID) then
-                    table.insert(rows, {
-                        kind = "Craft", time = lot.time, item = lot.name, itemID = itemID, qty = lot.qty,
-                        cost = lot.unitCost, partial = lot.partial, profession = profession, lot = lot,
-                    })
+                    table.insert(kept, { lot = lot, profession = profession })
                 end
             end
+            table.sort(kept, function(a, b) return (a.lot.time or 0) < (b.lot.time or 0) end)
+            local batch, costed, costQty
+            local function Finish()
+                if batch then batch.cost = costQty > 0 and (costed / costQty) or 0 end
+            end
+            for _, k in ipairs(kept) do
+                local lot = k.lot
+                if not (batch and (lot.time or 0) - batch.time <= CRAFT_BATCH_GAP) then
+                    Finish()
+                    batch = {
+                        kind = "Craft", time = lot.time or 0, first = lot.time or 0, item = lot.name, itemID = itemID,
+                        qty = 0, crafts = 0, profession = k.profession, lot = lot, lots = {},
+                    }
+                    costed, costQty = 0, 0
+                    table.insert(rows, batch)
+                end
+                batch.time = lot.time or batch.time
+                batch.qty = batch.qty + (lot.qty or 0)
+                batch.crafts = batch.crafts + 1
+                table.insert(batch.lots, lot)
+                if lot.unitCost then
+                    costed = costed + lot.unitCost * (lot.qty or 0)
+                    costQty = costQty + (lot.qty or 0)
+                end
+                if lot.partial or not lot.unitCost then batch.partial = true end
+            end
+            Finish()
         end
         for _, lot in ipairs(GoldsmithDB.orderCrafts or {}) do
             local recipe = lot.name and addon:FindRecipeByOutput(lot.name)

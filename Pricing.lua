@@ -2103,6 +2103,7 @@ end
 -- for crafts saved before 2026-10-08), to check the estimate against what
 -- crafts really made.
 local CRAFT_LOT_LIMIT = 30
+addon.CRAFT_LOT_LIMIT = CRAFT_LOT_LIMIT
 local ORDER_CRAFT_LIMIT = 100
 -- Bumped whenever craftLots changes (see GetCraftLotsByName)
 local craftLotsVersion = 0
