@@ -856,6 +856,13 @@ end
 -- and the list planned again (user, 2026-10-19: Update queue didn't show
 -- until Buy next was clicked, the shown price kept the old list). A
 -- purchase already sent finishes first; its answer replans anyway.
+-- What's worked out from the queues here, for a queue change that keeps
+-- the other caches (Queue.lua's Changed)
+function addon.ShopQueueCachesChanged()
+    if needsCache then needsCache:Clear() end
+    if mailPlanCache then mailPlanCache:Clear() end
+end
+
 function addon.ShopQueueChanged()
     if not buying then
         Cancel()
