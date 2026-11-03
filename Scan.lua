@@ -71,6 +71,29 @@ local function Timed(key, started, into)
     if into then into[key] = math.max(into[key] or 0, math.floor(ms + 0.5)) end
 end
 
+-- Pages in a page scan: the middle of the last PAGES_KEEP that reached the
+-- end (GoldsmithDB.scanPagesSeen), so one odd count doesn't move the
+-- percent. A count under half the usual isn't kept (a scan cut short
+-- some other way). The old single count (scanPages) starts the list.
+local PAGES_KEEP = 5
+function addon:UsualScanPages()
+    local seen = GoldsmithDB.scanPagesSeen
+    if not seen and (GoldsmithDB.scanPages or 0) >= PAGES_MIN then seen = { GoldsmithDB.scanPages } end
+    if not seen or #seen == 0 then return nil end
+    local sorted = {}
+    for i, n in ipairs(seen) do sorted[i] = n end
+    table.sort(sorted)
+    return sorted[math.floor((#sorted + 1) / 2)]
+end
+function addon:RecordScanPages(pages)
+    local usual = addon:UsualScanPages()
+    if pages < PAGES_MIN or (usual and pages < usual * 0.5) then return end
+    local seen = GoldsmithDB.scanPagesSeen or (usual and { usual }) or {}
+    table.insert(seen, pages)
+    while #seen > PAGES_KEEP do table.remove(seen, 1) end
+    GoldsmithDB.scanPagesSeen, GoldsmithDB.scanPages = seen, nil
+end
+
 local StartPages -- below
 local sendingQuery = false -- the page scan's own browse search is being sent
 local function Finish(prices, auctions, method)
@@ -111,8 +134,10 @@ local function Finish(prices, auctions, method)
     }
     -- How many pages it took, for the next page scan's percent; only from
     -- a scan that's kept (a cut-short one remembered 6 and showed 99% from
-    -- page 6 of 69; user, 2026-10-31)
-    if method == "pages" and (run.pages or 0) >= PAGES_MIN then GoldsmithDB.scanPages = run.pages end
+    -- page 6 of 69; user, 2026-10-31) and reached the end: an AH mount's
+    -- owner walked off mid-scan, the pages stalled, and the next scan sat
+    -- at 99% (user, 2026-11-03)
+    if method == "pages" and not run.stalled then addon:RecordScanPages(run.pages or 0) end
     run = nil
     addon:Notify("info", "Goldsmith scan: %s items priced.", BreakUpLargeNumbers(items))
     -- Buy to vendor (below): Forever only for now; retail's 350,000
@@ -405,6 +430,8 @@ C_Timer.NewTicker(1, function()
             run.retried = true
             StartPages()
         else
+            -- Not the end of the listings: its page count isn't the usual
+            run.stalled = true
             FinishPages()
         end
     elseif run.phase == "waiting" then
@@ -456,8 +483,7 @@ local function ButtonLabel()
     elseif run.phase == "pages" then
         -- The game doesn't say how many pages there are, so the last page
         -- scan's count (a guess the first time); never 100% until done
-        local total = GoldsmithDB.scanPages
-        if not total or total < PAGES_MIN then total = PAGES_GUESS end
+        local total = addon:UsualScanPages() or PAGES_GUESS
         return string.format("Scanning %d%%", math.min(99, math.floor((run.pages or 0) / total * 100)))
     end
     return "Scanning..."
