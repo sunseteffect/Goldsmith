@@ -510,8 +510,31 @@ local function Update(force)
     ShowAllHidden(keep)
 end
 
+-- An error here would repeat with every check, five times a second while
+-- the list shows, and flood the error handler: a player's game froze for
+-- 30 s opening patron orders ("insecure scripts exceeded execution limit",
+-- CurseForge comment, 2026-11-03). The first error is reported once and
+-- the columns stay off until the next /reload.
+local broken = false
+local function SafeUpdate(force)
+    if broken then return end
+    local ok, err = pcall(Update, force)
+    if not ok then
+        broken = true
+        pcall(Off)
+        geterrorhandler()(err)
+    end
+end
+
+-- Every row the game sets up asks for this: one forced update a frame
+local pending = false
 local function UpdateSoon()
-    C_Timer.After(0, function() Update(true) end)
+    if pending then return end
+    pending = true
+    C_Timer.After(0, function()
+        pending = false
+        SafeUpdate(true)
+    end)
 end
 
 local hooked = false
@@ -528,13 +551,13 @@ local function Hook()
         box:RegisterCallback(ScrollBoxListMixin.Event.OnDataRangeChanged, UpdateSoon, addon)
     end
     box:HookScript("OnShow", UpdateSoon)
-    box:HookScript("OnHide", Off)
+    box:HookScript("OnHide", function() pcall(Off) end)
     local since = 0
     box:HookScript("OnUpdate", function(_, elapsed)
         since = since + elapsed
         if since < CHECK_EVERY then return end
         since = 0
-        Update(false)
+        SafeUpdate(false)
     end)
 end
 
