@@ -1937,9 +1937,9 @@ local function CreatePlanScreen(parent)
         return addon:WithCharacter(p.charKey, addon.ItemsForCrafts, addon, p.recipe, crafts)
     end
 
-    -- Crafts from this screen's Craft button finished or stopped
-    -- (CraftDone.lua): they come off the box, so the plan is for what's
-    -- left (3 crafts, 1 done: 2). All done: 0, and the plan says so
+    -- A craft of this recipe finished, from this screen's Craft button or
+    -- the queue's (CraftDone.lua): it comes off the box, so the plan is for
+    -- what's left (3 crafts, 1 done: 2). All done: 0, and the plan says so
     -- instead of offering to craft it all again.
     function screen:CraftsDone(recipeID, made, crafts)
         if not (screen.plan and screen.plan.recipe.recipeID == recipeID) or (crafts or 0) <= 0 then return end
@@ -2514,6 +2514,8 @@ local function CreatePlanScreen(parent)
         end
         -- A craft step shows that step's recipe
         local recipeID = state.recipeID or p.recipe.recipeID
+        -- Not while crafting: the box goes down with each craft
+        if addon:CraftBatchRunning() then return end
         local parts = { recipeID, tostring(state.concentrate), screen.qty:GetText() }
         for _, e in ipairs(state.reagents) do table.insert(parts, e.reagent.itemID .. "x" .. e.quantity) end
         local key = table.concat(parts, "|")
