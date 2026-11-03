@@ -990,7 +990,8 @@ end
 -- Stuck only on concentration: nothing to do about it but wait. Another
 -- stuck entry you can fix now (the mailbox, a vendor) comes first: the
 -- button said Light's Potential, Needs concentration, while Bouquet of
--- Herbs only needed its mail taken (user, 2026-10-24).
+-- Herbs only needed its mail taken (user, 2026-10-24). An order ready in
+-- the open profession's order window comes before all of those (below).
 local function WaitsOnConcentration(s)
     for _, b in ipairs(s.blockers or {}) do
         if b:find("concentration") then return true end
@@ -1008,12 +1009,18 @@ function addon:QueueNextRow(q)
         local s = row.state
         if s and s.enabled and not s.open and s.salvage then return row end
     end
-    local open, stuck, station, waiting
+    -- here: an order ready in the open profession's order window. It beats
+    -- opening another profession: at the Blacksmithing orders, a Jewelcrafting
+    -- order first in the queue said Open Jewelcrafting, just to come back
+    -- (user, 2026-11-03)
+    local open, stuck, station, waiting, here
     for _, row in ipairs(q.rows) do
         local s = row.state
         if s then
             if s.enabled and not s.open then return row end
-            if s.enabled then
+            if s.orderReady then
+                here = here or row
+            elseif s.enabled then
                 open = open or row
             elseif WaitsOnConcentration(s) then
                 waiting = waiting or row
@@ -1023,7 +1030,7 @@ function addon:QueueNextRow(q)
             end
         end
     end
-    return station or open or stuck or waiting
+    return here or station or open or stuck or waiting
 end
 
 -- Crafting in progress (a batch still casting)
