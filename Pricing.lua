@@ -449,7 +449,9 @@ end
 -- every vendor you open is recorded: price per unit for each item bought
 -- with gold (items costing currencies or tokens are skipped). Kept in
 -- GoldsmithDB.vendorPrices[itemID]. Includes any reputation discount you had.
+-- Returns whether a price is new or changed
 local function RecordVendorPrices()
+    local changed = false
     local count = GetMerchantNumItems and GetMerchantNumItems() or 0
     for i = 1, count do
         local itemID = GetMerchantItemID(i)
@@ -464,9 +466,12 @@ local function RecordVendorPrices()
             _, _, price, stackCount, _, _, _, hasExtendedCost = GetMerchantItemInfo(i)
         end
         if itemID and price and price > 0 and not hasExtendedCost then
-            GoldsmithDB.vendorPrices[itemID] = price / math.max(stackCount or 1, 1)
+            local unit = price / math.max(stackCount or 1, 1)
+            if GoldsmithDB.vendorPrices[itemID] ~= unit then changed = true end
+            GoldsmithDB.vendorPrices[itemID] = unit
         end
     end
+    return changed
 end
 
 -- Forever's vendor crafting materials, so plans know them before you've
@@ -4066,9 +4071,10 @@ function addon:InitializePricing()
     vendorFrame:RegisterEvent("MERCHANT_UPDATE")
     vendorFrame:SetScript("OnEvent", function()
         -- Item info can arrive just after the vendor opens
+        -- Only for a new or changed price: MERCHANT_UPDATE fires again with
+        -- each item bought or sold there (user, 2026-11-03: too much loading)
         C_Timer.After(0.5, function()
-            RecordVendorPrices()
-            if addon.Refresh then
+            if RecordVendorPrices() and addon.Refresh then
                 addon.Refresh()
             end
         end)

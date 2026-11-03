@@ -370,13 +370,11 @@ function addon:RefreshTierData(recipeID)
         end
     end
 
-    addon:DataChanged()
-    addon.char.tierData[recipeID] = {
-        qualities = qualities,
-        outputs = outputs,
-        scenarios = scenarios,
-        updated = time(),
-    }
+    local data = { qualities = qualities, outputs = outputs, scenarios = scenarios, updated = time() }
+    -- The same as last read (clicking a recipe again, opening the
+    -- profession): saved, but nothing worked out from it starts over
+    if not addon:SameData(addon.char.tierData[recipeID], data, { updated = true }) then addon:DataChanged() end
+    addon.char.tierData[recipeID] = data
 end
 
 -- Price of one tier's item. Materials and consumables have a separate item
