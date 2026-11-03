@@ -897,7 +897,7 @@ local function CreatePage(parent)
     page.earned:SetPoint("TOPLEFT", 16, -36)
     page.earned:SetPoint("RIGHT", -16, 0)
     page.activityRows = {}
-    for i = 1, ACTIVITY_ROWS do
+    local function AddActivityRow(i)
         local row = {}
         local top = -58 - (i - 1) * 21
         row.date = UI.Text(activity, "label", "dim")
@@ -910,6 +910,13 @@ local function CreatePage(parent)
         row.detail:SetPoint("RIGHT", row.gold, "LEFT", -6, 0)
         page.activityRows[i] = row
     end
+    -- As many rows as fit above the History link, so the panel fills
+    -- (user, 2026-11-03)
+    local function ActivityRowCount()
+        local fit = math.floor((activity:GetHeight() - 58 - 14 - 34) / 21) + 1
+        return math.max(ACTIVITY_ROWS, fit)
+    end
+    for i = 1, ACTIVITY_ROWS do AddActivityRow(i) end
     -- A link to this item's full history
     page.moreButton = CreateFrame("Button", nil, activity)
     page.moreButton:SetPoint("BOTTOMLEFT", 16, 10)
@@ -1220,8 +1227,10 @@ local function CreatePage(parent)
         else
             page.earned:SetText("Nothing sold yet.")
         end
+        local rowCount = ActivityRowCount()
+        for i = #page.activityRows + 1, rowCount do AddActivityRow(i) end
         for i, row in ipairs(page.activityRows) do
-            local a = d.activity[i]
+            local a = i <= rowCount and d.activity[i]
             if a then
                 row.date:SetText(date("%b %d", a.time))
                 local tier = a.tier and d.tierCount and (" " .. addon:TierIconText(a.tier, d.tierCount)) or ""
@@ -1246,8 +1255,8 @@ local function CreatePage(parent)
             page.activityRows[1].detail:SetTextColor(addon:Color("muted"))
             page.activityRows[1].detail:Show()
         end
-        page.more:SetText(#d.activity > ACTIVITY_ROWS
-            and string.format("and %d older: see all in History  >", #d.activity - ACTIVITY_ROWS)
+        page.more:SetText(#d.activity > rowCount
+            and string.format("and %d older: see all in History  >", #d.activity - rowCount)
             or "See all in History  >")
         page.moreButton:SetShown(#d.activity > 0)
     end
