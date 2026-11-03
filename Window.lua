@@ -910,6 +910,13 @@ function addon:CreateWindow()
         addon:DataChanged()
         -- Buy next at the AH plans from the same prices (Shop.lua)
         if addon.ShopDataChanged then addon.ShopDataChanged() end
+        addon.Redraw()
+    end
+    -- The same half-second redraw without emptying the caches: for a change
+    -- the cached results don't depend on (the queue: the to-dos and craft
+    -- lists only read it for their "queued" label; user, 2026-11-03:
+    -- queueing a to-do reloaded the whole Characters tab)
+    addon.Redraw = function()
         if frame:IsShown() and not refreshPending then
             refreshPending = true
             C_Timer.After(0.5, function()

@@ -60,7 +60,12 @@ local function Changed()
     -- craft added with the AH open didn't show until it was reopened)
     if addon.ShopQueueChanged then addon.ShopQueueChanged() end
     if addon.VendorQueueChanged then addon.VendorQueueChanged() end
-    if addon.Refresh then addon.Refresh() end
+    -- Only what's worked out from the queue starts over (Shop.lua's other
+    -- queues and mail plans); the queue itself is planned fresh each time.
+    -- Emptying every cache reloaded the Characters tab for each craft
+    -- queued from a to-do, though no to-do reads the queue (2026-11-03).
+    if addon.ShopQueueCachesChanged then addon.ShopQueueCachesChanged() end
+    if addon.Redraw then addon.Redraw() end
 end
 
 -- A queue entry changed in place (its choices, from the plan)
