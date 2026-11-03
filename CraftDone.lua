@@ -321,12 +321,15 @@ local function Finish()
     batch = nil
     if not b or b.done == 0 then return end
     ShowToast(b)
-    -- The planner takes what was made off its Make box (the queue counts
-    -- its own)
-    if b.fromPlan and addon.PlanCraftsDone then addon.PlanCraftsDone(b.recipeID, b.made, b.done) end
     local _, _, _, profit = Describe(b)
     addon:Notify("info", "%s: %d %s%s.", b.done >= b.crafts and "Craft complete" or "Crafting stopped",
         b.made, b.name, profit and (", " .. profit:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):lower()) or "")
+end
+
+-- Crafts are being followed (the plan doesn't set the game's window
+-- mid-craft)
+function addon:CraftBatchRunning()
+    return batch ~= nil
 end
 
 -- Still crafting (a cast underway or the game repeating the recipe)?
@@ -411,6 +414,11 @@ function addon:CraftBatchResult(recipeID, recipe, resultData, lot, used)
     else
         b.partial = true
     end
+    -- Each craft comes off the plan's box as it's made, from the plan's
+    -- Craft button or the queue's: crafting 8 of 60 from the queue panel
+    -- left the plan at 60, so the used materials read as missing ("Salvage
+    -- 15", more vendor items) (user, 2026-11-03)
+    if addon.PlanCraftsDone then addon.PlanCraftsDone(b.recipeID, made, 1) end
     if b.done >= b.crafts then
         Finish()
     else
