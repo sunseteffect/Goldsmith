@@ -667,6 +667,20 @@ function addon:BuildQueue(charKey)
                         if row.tierInfo then break end
                     end
                     if not row.tierInfo then row.p.tier = nil end
+                    -- Concentration when it reaches the quality for less and
+                    -- you have it now: Potion of Devoured Dreams (quality 2)
+                    -- was planned all gold at a 972g loss when silver with
+                    -- 240 concentration made +58g (user, 2026-11-03)
+                    local plain = row.tierInfo
+                    if mine and plain and not plain.concentrate then
+                        local want = { recipe = row.p.recipe, charKey = charKey, tier = row.p.tier, concentrate = true }
+                        local conc = addon:WithCharacter(charKey, addon.FindTierInfo, want)
+                        local have = addon:GetConcentration(row.recipe.profession)
+                        if conc and conc.concentrate and conc.cost and plain.cost and conc.cost < plain.cost
+                            and have and have >= (conc.concentration or math.huge) then
+                            row.tierInfo, row.p.concentrate = conc, true
+                        end
+                    end
                 else
                     row.tierInfo = addon:WithCharacter(charKey, addon.FindTierInfo, row.p)
                 end
