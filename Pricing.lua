@@ -4207,6 +4207,18 @@ function addon:InitializePricing()
             -- Just learned: looked at again, though seen unlearned earlier this session
             if event == "NEW_RECIPE_LEARNED" and resultData then
                 triedThisSession[resultData], statsReadThisSession[resultData] = nil, nil
+                -- Learned with the window closed (bought from a vendor): the
+                -- scan has no recipe list to find it in, so it stayed under
+                -- Not learned yet and couldn't be queued (user, 2026-11-03:
+                -- Amani Extract). Saved from the event; its stats are read
+                -- when the profession opens.
+                local id = resultData
+                if GoldsmithDB.unlearned[id] or GoldsmithDB.recipes[id] then
+                    addon:MarkRecipeKnown(id)
+                    if not GoldsmithDB.recipes[id] then SaveRecipe(id, true) end
+                    addon.recipesVersion = addon.recipesVersion + 1
+                    if addon.Refresh then C_Timer.After(1, addon.Refresh) end
+                end
             end
             QueueRecipeScan()
         end
