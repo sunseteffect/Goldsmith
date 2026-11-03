@@ -449,10 +449,22 @@ end
 -- every vendor you open is recorded: price per unit for each item bought
 -- with gold (items costing currencies or tokens are skipped). Kept in
 -- GoldsmithDB.vendorPrices[itemID]. Includes any reputation discount you had.
--- Returns whether a price is new or changed
+-- Returns whether a price is new or changed for something a recipe uses
+-- or makes: every price is saved, but a food or armor vendor's change
+-- nothing Goldsmith works out (user, 2026-11-03)
 local function RecordVendorPrices()
     local changed = false
     local count = GetMerchantNumItems and GetMerchantNumItems() or 0
+    local used
+    local function Used(itemID)
+        if not used then
+            used = addon:GetTrackedMaterials()
+            for _, recipe in pairs(GoldsmithDB.recipes) do
+                if recipe.outputItemID then used[recipe.outputItemID] = true end
+            end
+        end
+        return used[itemID] ~= nil
+    end
     for i = 1, count do
         local itemID = GetMerchantItemID(i)
         local price, stackCount, hasExtendedCost
@@ -467,7 +479,7 @@ local function RecordVendorPrices()
         end
         if itemID and price and price > 0 and not hasExtendedCost then
             local unit = price / math.max(stackCount or 1, 1)
-            if GoldsmithDB.vendorPrices[itemID] ~= unit then changed = true end
+            if GoldsmithDB.vendorPrices[itemID] ~= unit and Used(itemID) then changed = true end
             GoldsmithDB.vendorPrices[itemID] = unit
         end
     end
