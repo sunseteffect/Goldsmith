@@ -133,6 +133,22 @@ function addon:NewCache()
     return cache
 end
 
+-- Whether two saved values hold the same data (tables compared all the
+-- way down; keys in `ignore` skipped at every level). For "did this read
+-- change anything": a recount or reread that finds the same data keeps the
+-- caches, so the window doesn't load again for nothing (user, 2026-11-03).
+function addon:SameData(a, b, ignore)
+    if a == b then return true end
+    if type(a) ~= "table" or type(b) ~= "table" then return false end
+    for k, v in pairs(a) do
+        if not (ignore and ignore[k]) and not addon:SameData(v, b[k], ignore) then return false end
+    end
+    for k in pairs(b) do
+        if not (ignore and ignore[k]) and a[k] == nil then return false end
+    end
+    return true
+end
+
 -- Work spread over frames
 --
 -- Never a stutter: the user would rather see something load than have

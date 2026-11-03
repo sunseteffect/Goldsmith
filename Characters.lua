@@ -346,21 +346,28 @@ local function NewStockJob()
     return { i = 1, stock = {}, inBank = {}, warband = {}, warbandTotal = 0, onDone = {}, later = {} }
 end
 
+-- Returns whether anything counted differs from what was saved
 local function SaveStock(job)
     local c = addon.char
+    local S = function(a, b) return addon:SameData(a, b) end
+    local changed = not (S(c.stock, job.stock) and S(c.gearTiers, job.gearTiers) and S(c.stockBank, job.inBank)
+        and (not job.bankRead or S(c.boundBank, job.boundBank)))
     c.stock, c.gearTiers, c.stockTime, c.stockBank = job.stock, job.gearTiers, time(), job.inBank
     if job.bankRead then c.boundBank = job.boundBank end
     -- Left over from when bags and bank were kept separately
     c.bagStock, c.bankStock, c.bankTime = nil, nil, nil
     if job.warbandTotal > 0 or next(GoldsmithDB.warbandStock) == nil then
+        changed = changed or not (S(GoldsmithDB.warbandStock, job.warband)
+            and S(GoldsmithDB.warbandGearTiers, job.warbandTiers))
         GoldsmithDB.warbandStock = job.warband
         GoldsmithDB.warbandGearTiers = job.warbandTiers
     end
+    return changed
 end
 
--- Counts stock over a few frames, then calls onDone (if given). A count
--- asked for while one runs starts again once it's done, so the newest
--- bags are what's saved.
+-- Counts stock over a few frames, then calls onDone (if given) with
+-- whether anything changed. A count asked for while one runs starts again
+-- once it's done, so the newest bags are what's saved.
 local function SnapshotStock(onDone)
     -- Not while the tour shows its sample data (Tour.lua): it isn't yours
     if addon:UsingTourData() then return end
@@ -378,10 +385,12 @@ local function SnapshotStock(onDone)
         if not CountStock(job, STOCK_BUDGET_MS) then C_Timer.After(0, Step) return end
         stockJob = nil
         -- The tour may have started while this was counting
-        if not addon:UsingTourData() then SaveStock(job) end
-        for _, fn in ipairs(job.onDone) do fn() end
+        local changed = not addon:UsingTourData() and SaveStock(job) or false
+        for _, fn in ipairs(job.onDone) do fn(changed) end
         if job.again then
-            SnapshotStock(function() for _, fn in ipairs(job.later) do fn() end end)
+            SnapshotStock(function(again)
+                for _, fn in ipairs(job.later) do fn(changed or again) end
+            end)
         end
     end
     Step()
@@ -407,9 +416,9 @@ function addon:RecountStockSoon()
     if recountTimer then recountTimer:Cancel() end
     recountTimer = C_Timer.NewTimer(STOCK_RECOUNT_DELAY, function()
         recountTimer = nil
-        SnapshotStock(function()
-            addon:DataChanged()
-            if addon.Refresh then addon.Refresh() end
+        -- Saving the recipes refreshed already: again only for new counts
+        SnapshotStock(function(changed)
+            if changed and addon.Refresh then addon.Refresh() end
         end)
     end)
 end
@@ -613,8 +622,10 @@ end
 function addon:CountStockIfStale()
     if not stockStale then return end
     stockStale = false
-    SnapshotStock(function()
-        if addon.Refresh then addon.Refresh() end
+    -- Bags change in bursts while crafting or looting, and the same bags
+    -- recounted reloaded the window every 10 s (user, 2026-11-03)
+    SnapshotStock(function(changed)
+        if changed and addon.Refresh then addon.Refresh() end
         -- Something new in stock can be worth selling too, not only new
         -- prices: a Sunglass Vial taken out after the scan made the card
         -- but no chat line (user, 2026-10-29). Once a day per item anyway.
@@ -913,7 +924,17 @@ function addon:InitializeCharacters()
     for event in pairs(GOLDMAKING_CLOSE) do frame:RegisterEvent(event) end
     C_Timer.NewTicker(GOLDMAKING_TICK, FlushGoldTime)
 
-    local pending, stockPending = false, false
+    local pending, stockPending, entered = false, false, false
+    -- What a skill or currency event can change that the window shows:
+    -- skill and concentration (whole points) per profession
+    local function ProfessionPrint()
+        local c, prints = addon.char, {}
+        for name, p in pairs(c.professions or {}) do
+            local conc = c.concentration and c.concentration[name]
+            prints[name] = { p.skill, p.maxSkill, conc and math.floor(conc.current or 0), conc and conc.max }
+        end
+        return prints
+    end
     frame:SetScript("OnEvent", function(_, event)
         if event == "OWNED_AUCTIONS_UPDATED" then
             SnapshotAuctions()
@@ -955,14 +976,23 @@ function addon:InitializeCharacters()
                     if StockInUse() then addon:CountStockIfStale() end
                 end)
             end
-        elseif not pending then
+        elseif not pending or event == "PLAYER_ENTERING_WORLD" then
             -- Profession and currency data can arrive a moment after these
             -- events, and they can fire in bursts
             pending = true
+            entered = entered or event == "PLAYER_ENTERING_WORLD"
             C_Timer.After(2, function()
+                if not pending then return end
                 pending = false
+                local before = ProfessionPrint()
                 UpdateAll()
-                if addon.Refresh then addon.Refresh() end
+                -- Any currency fires this (crests, anything looted): only
+                -- new skill or concentration is worth a reload (user,
+                -- 2026-11-03: too much loading); logging in always is
+                if (entered or not addon:SameData(before, ProfessionPrint())) and addon.Refresh then
+                    addon.Refresh()
+                end
+                entered = false
             end)
         end
     end)
