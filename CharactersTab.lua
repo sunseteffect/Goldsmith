@@ -17,9 +17,12 @@ local COLUMNS = 3
 local ROWS = 2
 local TOP = 30
 local CARD_WIDTH = (WIDTH - (COLUMNS - 1) * GAP) / COLUMNS
-local CARD_HEIGHT = 232
+-- 3 more to-do lines than before (user, 2026-11-03: the rest were only in
+-- the hover); two rows still fit above the legend: 30 + 2 x 276 + 12 = 594
+-- of the 598 the content area has (8 lines end at 264, 12 to spare)
+local CARD_HEIGHT = 276
 local PROFESSION_LINES = 3
-local TODO_LINES = 5
+local TODO_LINES = 8
 local LINE_HEIGHT = 16
 local STALE_DAYS = 14
 
