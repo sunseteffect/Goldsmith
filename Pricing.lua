@@ -1406,17 +1406,24 @@ local function SaveRecipe(recipeID, quiet, attempt, profession, unlearned)
     local ok, schematic = pcall(C_TradeSkillUI.GetRecipeSchematic, recipeID, false)
     if not ok or not schematic or not IsCraftRecipe(schematic) then return end
 
-    if not profession then
-        -- The recipe's own profession first: the open window can be
-        -- another one (an Enchanting recipe was saved as Jewelcrafting from
-        -- a jewelcrafter's window, so no enchanter ever read its tiers)
-        local okL, _, _, _, parentName = pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe, recipeID)
-        if okL and type(parentName) == "string" and parentName ~= "" then
-            profession = parentName
-        else
-            local profInfo = C_TradeSkillUI.GetBaseProfessionInfo()
-            profession = (profInfo and profInfo.professionName) or "Unassigned"
-        end
+    -- The recipe's own profession first, over one passed in too: the open
+    -- window can be another one (an Enchanting recipe was saved as
+    -- Jewelcrafting from a jewelcrafter's window, so no enchanter ever read
+    -- its tiers). A pending enchant carried the window it was first seen
+    -- in, so 42 unlearned Midnight enchants were Alchemy (user, 2026-11-02).
+    local okL, _, skillLine, _, parentName = pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe, recipeID)
+    if okL and type(parentName) == "string" and parentName ~= "" then
+        profession = parentName
+    elseif okL and type(skillLine) == "string" and skillLine:match("(%S+)$") then
+        -- Learned with the window closed (bought from a vendor): the
+        -- game gave no profession, and the open one came back "", so
+        -- the queue said "Open " and never saw Alchemy as open (user,
+        -- 2026-11-02: Liquid Luster). "Midnight Alchemy" -> "Alchemy".
+        profession = skillLine:match("(%S+)$")
+    elseif not profession then
+        local profInfo = C_TradeSkillUI.GetBaseProfessionInfo()
+        profession = profInfo and profInfo.professionName
+        if not profession or profession == "" then profession = "Unassigned" end
     end
 
     local outputItemID = GetOutputItemID(recipeID, schematic)
@@ -2103,6 +2110,7 @@ end
 -- for crafts saved before 2026-10-08), to check the estimate against what
 -- crafts really made.
 local CRAFT_LOT_LIMIT = 30
+addon.CRAFT_LOT_LIMIT = CRAFT_LOT_LIMIT
 local ORDER_CRAFT_LIMIT = 100
 -- Bumped whenever craftLots changes (see GetCraftLotsByName)
 local craftLotsVersion = 0
@@ -4026,10 +4034,15 @@ function addon:InitializePricing()
         end
     end
 
-    -- Recipes not learned yet saved without a profession (see SaveRecipe)
+    -- Recipes not learned yet saved without a profession, or under the
+    -- window that was open (see SaveRecipe): their skill line says
+    local isCrafting = {}
+    for _, prof in ipairs(CRAFTING) do isCrafting[prof] = true end
     for _, recipe in pairs(GoldsmithDB.unlearned or {}) do
-        if (not recipe.profession or recipe.profession == "" or recipe.profession == "Unassigned") and recipe.skillLine then
-            recipe.profession = recipe.skillLine:match("(%S+)$") or recipe.profession
+        local own = recipe.skillLine and recipe.skillLine:match("(%S+)$")
+        local blank = not recipe.profession or recipe.profession == "" or recipe.profession == "Unassigned"
+        if own and own ~= recipe.profession and (blank or isCrafting[own]) then
+            recipe.profession = own
         end
     end
 

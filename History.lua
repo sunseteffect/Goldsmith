@@ -27,8 +27,6 @@ local KINDS = {
 }
 local KIND_COLORS = { Sale = "profit", Purchase = "loss", Deposit = "warning", Craft = "line", Order = "muted",
                       Gathered = "gold", Opened = "gold" }
-local KIND_LONG = { Sale = "Sale", Purchase = "Purchase", Deposit = "AH deposit", Craft = "Craft", Order = "Crafting order",
-                    Gathered = "Gathered", Opened = "Opened a box you crafted" }
 
 -- Where a sale's cost came from, for the hover
 local COST_LABELS = {
@@ -75,7 +73,8 @@ local function FillRow(r, row)
     c.when:SetTextColor(addon:Color("muted"))
     c.kind:SetText(row.kind)
     c.kind:SetTextColor(addon:Color(KIND_COLORS[row.kind]))
-    c.item:SetText(ItemText(row))
+    c.item:SetText(ItemText(row) .. (row.crafts and row.crafts > 1
+        and addon:Colorize(string.format("  %d crafts", row.crafts), "dim") or ""))
     c.qty:SetText(tostring(row.qty or ""))
     if row.gold then
         -- White is money in, red and a minus money out: the sign too, so
@@ -118,8 +117,6 @@ local function Tooltip(tooltip, row)
         local r, g, b = addon:Color(color or "text")
         tooltip:AddDoubleLine(left, right, 0.8, 0.8, 0.8, r, g, b)
     end
-    Line("Type", KIND_LONG[row.kind], KIND_COLORS[row.kind])
-    Line("Quantity", tostring(row.qty))
     if row.kind == "Gathered" or row.kind == "Opened" then
         local all = IsControlKeyDown()
         for i, item in ipairs(row.items) do
@@ -150,7 +147,6 @@ local function Tooltip(tooltip, row)
         else
             addon:Explain(tooltip, "Materials you got without buying: gathering, loot and opened bags (patron rewards, caches). They count at the AH price, since you could sell them instead.", 0.6, 0.6, 0.6, true)
         end
-        Line("When", row.time > 0 and date("%Y-%m-%d", row.time) or "?")
         tooltip:AddLine(" ")
         if row.itemID then addon:ClickHint(tooltip, "Click for the item's page") end
         addon:RightClickHint(tooltip, "Right-click for more")
@@ -176,10 +172,16 @@ local function Tooltip(tooltip, row)
         end
         addon:Explain(tooltip, "Crafted for an order: it went to the customer, so it isn't in your stock or your costs.", 0.6, 0.6, 0.6, true)
     elseif row.kind == "Craft" then
+        -- A batch: crafts of this item close together, one row
+        if row.crafts and row.crafts > 1 then
+            Line("Crafts", string.format("%d, %s to %s", row.crafts, date("%H:%M", row.first), date("%H:%M", row.time)))
+        end
         Line("Materials cost", Money(row.cost) .. (row.partial and "+" or "") .. " each")
+        if row.crafts and row.crafts > 1 then
+            Line("Total", Money(row.cost * row.qty) .. (row.partial and "+" or ""))
+        end
         addon:Explain(tooltip, "Crafts are kept for working out costs, so they can't be deleted here.", 0.6, 0.6, 0.6, true)
     else
-        Line("Total", Money(math.abs(row.gold)))
         if row.qty and row.qty > 0 then Line("Each", Money(math.abs(row.gold) / row.qty)) end
         if row.profit then
             Line(COST_LABELS[row.costSource] or "Cost you", Money(row.cost) .. (row.partial and "+" or ""))
@@ -196,8 +198,6 @@ local function Tooltip(tooltip, row)
         end
         if row.character then Line("Character", row.character) end
     end
-    if row.profession then Line("Profession", row.profession) end
-    Line("When", date("%Y-%m-%d %H:%M", row.time))
     tooltip:AddLine(" ")
     addon:ClickHint(tooltip, "Click for the item's page")
     addon:RightClickHint(tooltip, "Right-click for more")
@@ -257,8 +257,12 @@ local function Menu(row)
         if row.kind == "Craft" then
             -- Worded as what it does: "This was a crafting order" read like
             -- a statement about a row already marked Craft (user, 2026-10-14)
-            root:CreateButton("Move to Orders (it was made for a crafting order)",
-                function() addon:MarkCraftAsOrder(row.itemID, row.lot) end)
+            -- A batch moves as a whole
+            root:CreateButton((row.crafts or 1) > 1 and "Move to Orders (they were made for crafting orders)"
+                    or "Move to Orders (it was made for a crafting order)",
+                function()
+                    for _, lot in ipairs(row.lots or { row.lot }) do addon:MarkCraftAsOrder(row.itemID, lot) end
+                end)
         end
         if row.kind == "Sale" then
             root:CreateCheckbox("Got it for free (loot or reward)",
@@ -456,6 +460,14 @@ local function Refresh(view, state)
         if row.partial and row.profit then table.insert(notes, "* some material costs unknown") break end
     end
     if ui.historyCharacter then table.insert(notes, "crafts only show for All characters") end
+    -- Only the newest crafts of each item are kept (for costs), so 300 sold
+    -- against 61 crafted read as lost crafts (user, 2026-11-01)
+    for _, row in ipairs(rows) do
+        if row.kind == "Craft" then
+            table.insert(notes, string.format("crafts: your last %d of each item", addon.CRAFT_LOT_LIMIT))
+            break
+        end
+    end
     if view.item then table.insert(notes, "all dates and professions for this item") end
     view.footnote:SetText(table.concat(notes, "   "))
 end

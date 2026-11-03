@@ -3525,7 +3525,7 @@ local function CreateBudget(parent)
         local best = bar.target
         if not best then return end
         local first = best.plan[1]
-        addon:OpenCraftPlan(first.recipe, first.row, best.key, nil, nil, first.crafts)
+        addon:OpenCraftPlan(first.recipe, first.row, best.key, nil, nil, first.crafts, first.row.description)
     end)
     UI.SetTooltip(bar, function(tooltip)
         local conc = bar.conc

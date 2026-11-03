@@ -368,7 +368,7 @@ local function CooldownAction(prof)
             addon:ClickHint(tooltip, "Click to plan the first one. Your other characters' cooldowns are on the Characters tab.")
         end,
         onClick = function()
-            addon:OpenCraftPlan(first.recipe, first.row, first.charKey, nil, nil, first.crafts)
+            addon:OpenCraftPlan(first.recipe, first.row, first.charKey, nil, nil, first.crafts, first.row.description)
         end,
     }
 end

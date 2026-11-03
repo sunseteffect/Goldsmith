@@ -183,7 +183,10 @@ local function CreateTodoLine(card, i)
             -- plan notes the leftover one. All of them made it say "you
             -- asked for 5" (user, 2026-10-19)
             local first = item.leftoverOf or item
-            addon:OpenCraftPlan(first.recipe, first.row, card.key, nil, nil, first.crafts)
+            -- With the row's mix, not a saved pick needing more
+            -- concentration than you have (user, 2026-11-02: the row said
+            -- 186, the plan opened on 233 with 202)
+            addon:OpenCraftPlan(first.recipe, first.row, card.key, nil, nil, first.crafts, first.row.description)
         end
     end)
     UI.SetTooltip(line, function(tooltip)
