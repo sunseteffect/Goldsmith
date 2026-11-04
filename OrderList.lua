@@ -364,19 +364,55 @@ local function OrderKey(order)
     return order and ((order.orderID or 0) .. ":" .. order.spellID) or nil
 end
 
+-- A row that fails is left blank. The first failure a session is reported
+-- once, so /gsm report has it: a player's list showed 9 of 11 rows blank
+-- with nothing recorded (CurseForge, Atlasdair, 2026-11-03)
+local rowErrorReported = false
+
+-- How long the last full refresh took, for /gsm report (Report.lua): the
+-- same player froze 15-20 s on every visit to the Patron tab, with no
+-- other addons, while it takes about 1 ms an order here. { ms, rows,
+-- slowest = { spellID, preview, fill }, at = spellID while one is being
+-- worked out (still set if the game cut it off) }
+local timing
+
+local function Now() return debugprofilestop and debugprofilestop() or 0 end
+
 local function FillRow(row, order, force)
     local key = OrderKey(order)
     if not force and row.goldsmithKey == key then return end
     row.goldsmithKey = key
-    local ok = pcall(function()
+    local started, previewed = Now(), nil
+    if timing then timing.at = order and order.spellID end
+    -- With the stack where it failed, not where it's reported
+    local ok, err = xpcall(function()
         local p = order and addon:GetOrderListPreview(order)
+        previewed = Now()
         if not p then
             if row.goldsmithLine then row.goldsmithLine.preview = nil end
             return
         end
         Fill(row.goldsmithLine or CreateLine(row), p, order)
+    end, function(message)
+        return tostring(message) .. "\n" .. (debugstack and debugstack(2) or "")
     end)
-    if not ok and row.goldsmithLine then row.goldsmithLine.preview = nil end
+    if not ok then
+        if row.goldsmithLine then row.goldsmithLine.preview = nil end
+        if not rowErrorReported then
+            rowErrorReported = true
+            geterrorhandler()("Goldsmith order list, recipe " .. tostring(order and order.spellID) .. ": " .. tostring(err))
+        end
+    end
+    if timing then
+        local done = Now()
+        local total = done - started
+        timing.rows = timing.rows + 1
+        timing.at = nil
+        if not timing.slowest or total > timing.slowest.total then
+            timing.slowest = { spellID = order and order.spellID, total = total,
+                preview = (previewed or done) - started, failed = not ok }
+        end
+    end
 end
 
 local function HideLines()
@@ -479,7 +515,13 @@ local function Update(force)
             end
         end
     end
+    local started = Now()
+    if force then
+        timing = { rows = 0, started = started, time = time() }
+        addon.orderListTiming = timing
+    end
     HideNames(target, 4)
+    if force then timing.hide = Now() - started end
     local profitText = labels.profit:GetUnboundedStringWidth()
     for _, r in ipairs(rows) do
         FillRow(r.row, r.order, force)
@@ -508,6 +550,10 @@ local function Update(force)
     end
     -- Cells now in other columns (the game moves them) show again
     ShowAllHidden(keep)
+    if force then
+        timing.ms = Now() - started
+        timing = nil
+    end
 end
 
 -- An error here would repeat with every check, five times a second while
@@ -518,7 +564,12 @@ end
 local broken = false
 local function SafeUpdate(force)
     if broken then return end
+    -- The slowest check of any kind this session, for /gsm report: the
+    -- freeze might not be in the full refresh
+    local started = Now()
     local ok, err = pcall(Update, force)
+    local took = Now() - started
+    if took > (addon.orderListSlowestCheck or 0) then addon.orderListSlowestCheck = took end
     if not ok then
         broken = true
         pcall(Off)

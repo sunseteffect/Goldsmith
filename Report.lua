@@ -306,6 +306,25 @@ function addon:BuildBugReport()
         Count(GoldsmithDB.characters), included, Count(GoldsmithDB.recipes), #addon.ledger:getAll(),
         Count(GoldsmithDB.priceHistory), queued, memory)
 
+    -- How long the patron order columns took (OrderList.lua), when they ran
+    local t = addon.orderListTiming
+    if t then
+        local function Recipe(id)
+            local ok, info = pcall(C_TradeSkillUI.GetRecipeInfo, id or 0)
+            return (ok and type(info) == "table" and info.name) or ("recipe " .. tostring(id))
+        end
+        local line = string.format("Patron orders: last refresh %s, %d rows, hiding names %.0f ms, slowest check %.0f ms",
+            t.ms and string.format("%.0f ms", t.ms) or "didn't finish", t.rows or 0, t.hide or 0,
+            addon.orderListSlowestCheck or 0)
+        if t.at then line = line .. ", stopped at " .. Recipe(t.at) end
+        local s = t.slowest
+        if s then
+            line = line .. string.format("; slowest row %s %.0f ms (preview %.0f ms%s)", Recipe(s.spellID), s.total,
+                s.preview, s.failed and ", failed" or "")
+        end
+        Add("%s", line)
+    end
+
     -- Errors
     local errors = addon:GetErrors()
     if #errors == 0 then
