@@ -780,6 +780,8 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         ReloadUI()
     elseif cmd == "prep" and GoldsmithDB.devTools then
         addon:PrintPrepCheck()
+    elseif cmd == "fakechars" and GoldsmithDB.devTools then
+        addon:FakeCharacters(rest)
     elseif cmd == "perf" then
         addon:RunPerfCheck()
     elseif cmd == "report" or cmd == "bug" then
