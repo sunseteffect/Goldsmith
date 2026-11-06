@@ -551,7 +551,7 @@ local function DealsAction(prof)
     if #deals == 0 then
         return {
             title = "Cheap materials today",
-            detail = string.format("Appear after %d days of price history, saved each time Auctionator updates. History started %s.",
+            detail = string.format("Appear after %d days of price history, saved from your AH scans. History started %s.",
                 minDays, earliest and ShortDay(earliest) or "today"),
             muted = true,
         }
