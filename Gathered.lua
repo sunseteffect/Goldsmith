@@ -175,14 +175,32 @@ end
 -- A box's worth: the average of what came out of it at today's prices.
 -- Returns copper per box, times opened, and whether everything had a
 -- price; nil if none has been opened.
+--
+-- A box whose contents lead back to itself (one that held itself, or two
+-- that held each other) counts the copy inside at its AH price, if it has
+-- one, not by its contents again: priced inside
+-- itself, it went round until the stack ran out, 2 s a time, and a
+-- player's game froze 15-20 s on every visit to the Patron tab (Sunfire
+-- Silk Backpack, Atlasdair, 2026-11-04)
+local valuing = {}
+
 function addon:GetBoxValue(itemID)
     local box = itemID and GoldsmithDB.boxContents and GoldsmithDB.boxContents[itemID]
-    if not (box and box.opened > 0 and next(box.items)) then return nil end
-    local total, complete = 0, true
-    for id, qty in pairs(box.items) do
-        local price = addon:GetMarketPrice(id)
-        if price then total = total + price * qty else complete = false end
-    end
+    if not (box and box.opened > 0 and next(box.items)) or valuing[itemID] then return nil end
+    valuing[itemID] = true
+    -- A pcall puts it back on an error; nothing pauses inside one
+    addon.noYield = addon.noYield + 1
+    local ok, total, complete = pcall(function()
+        local sum, all = 0, true
+        for id, qty in pairs(box.items) do
+            local price = addon:GetMarketPrice(id)
+            if price then sum = sum + price * qty else all = false end
+        end
+        return sum, all
+    end)
+    addon.noYield = addon.noYield - 1
+    valuing[itemID] = nil
+    if not ok then error(total, 0) end
     return total / box.opened, box.opened, complete
 end
 

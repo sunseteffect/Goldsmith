@@ -314,23 +314,58 @@ end
 -- Deposits are worked out when an auction is posted and recorded once the AH
 -- confirms it was created. Posts are confirmed in order, so a queue matches them.
 local pendingPosts = {}
-local POST_TIMEOUT = 30
+-- A post the game didn't confirm in POST_TIMEOUT never went up: no auction,
+-- no deposit, and no message from the game (user, 2026-11-05: 5 of 9 Linen
+-- Bag posts). Says so, with the game's error if there was one, and keeps
+-- the details in GoldsmithDB.postFails to find out why. Forgets the post,
+-- so a sale can't match a price that was never listed.
+local POST_TIMEOUT = 5
+local POST_FAILS_KEPT = 20
+local function PostUnconfirmed(post)
+    for i, p in ipairs(pendingPosts) do
+        if p == post then
+            table.remove(pendingPosts, i)
+            local posts = GoldsmithDB.posts or {}
+            for j = #posts, 1, -1 do
+                if posts[j] == post.remembered then table.remove(posts, j) break end
+            end
+            GoldsmithDB.postFails = GoldsmithDB.postFails or {}
+            local fails = GoldsmithDB.postFails
+            table.insert(fails, { time = time(), name = post.name, quantity = post.quantity, deposit = post.deposit,
+                bid = post.bid, buyout = post.buyout, duration = post.duration, reason = post.reason })
+            while #fails > POST_FAILS_KEPT do table.remove(fails, 1) end
+            -- Items take whole silver in Forever; the window lets you type
+            -- copper and the game drops the post without a word (5 Linen
+            -- Bag posts failed with copper, all whole silver ones worked;
+            -- commodities take copper). User, 2026-11-06.
+            if post.item and ((post.buyout or 0) % 100 ~= 0 or (post.bid or 0) % 100 ~= 0) then
+                addon:Notify("loss", "%s didn't post: item prices can't have copper. Use whole silver.", post.name or "An item")
+            elseif post.reason then
+                addon:Notify("loss", "%s didn't post: %s", post.name or "An item", post.reason)
+            else
+                addon:Notify("loss", "%s didn't post. Check your Auctions tab.", post.name or "An item")
+            end
+            return
+        end
+    end
+end
 
-local function QueuePost(itemLocation, deposit, quantity)
+local function QueuePost(itemLocation, deposit, quantity, details)
     if not deposit or deposit <= 0 then return end
     if not C_Item.DoesItemExist(itemLocation) then return end
     -- The exact item and its Goldsmith Data sell level when posted, to check
     -- later how well levels predict what sells (GoldsmithData
     -- tools/score-levels.js)
     local itemID = C_Item.GetItemID(itemLocation)
-    table.insert(pendingPosts, {
-        name = C_Item.GetItemName(itemLocation),
-        itemID = itemID,
-        level = addon:GetSellLevel(itemID),
-        quantity = quantity,
-        deposit = deposit,
-        time = GetTime(),
-    })
+    local post = details or {}
+    post.name = C_Item.GetItemName(itemLocation)
+    post.itemID = itemID
+    post.level = addon:GetSellLevel(itemID)
+    post.quantity = quantity
+    post.deposit = deposit
+    post.time = GetTime()
+    table.insert(pendingPosts, post)
+    C_Timer.After(POST_TIMEOUT, function() PostUnconfirmed(post) end)
 end
 
 -- What you post, by exact item and price per unit (GoldsmithDB.posts), so a
@@ -344,10 +379,12 @@ local function RememberPost(itemLocation, quantity, unitPrice)
     if not C_Item.DoesItemExist(itemLocation) then return end
     GoldsmithDB.posts = GoldsmithDB.posts or {}
     local posts = GoldsmithDB.posts
-    table.insert(posts, { name = C_Item.GetItemName(itemLocation), itemID = C_Item.GetItemID(itemLocation),
-        unitPrice = unitPrice, left = quantity, time = time() })
+    local post = { name = C_Item.GetItemName(itemLocation), itemID = C_Item.GetItemID(itemLocation),
+        unitPrice = unitPrice, left = quantity, time = time() }
+    table.insert(posts, post)
     local cutoff = time() - POST_DAYS * 86400
     while posts[1] and (#posts > POSTS_KEPT or posts[1].time < cutoff) do table.remove(posts, 1) end
+    return post
 end
 
 -- The exact item a sale was most likely of: your post of that name, still
@@ -415,24 +452,29 @@ end
 local function OnPostCommodity(itemLocation, duration, quantity, unitPrice)
     if not C_Item.DoesItemExist(itemLocation) then return end
     local itemID = C_Item.GetItemID(itemLocation)
-    RememberPost(itemLocation, quantity, unitPrice)
-    QueuePost(itemLocation, C_AuctionHouse.CalculateCommodityDeposit(itemID, duration, quantity), quantity)
+    local remembered = RememberPost(itemLocation, quantity, unitPrice)
+    QueuePost(itemLocation, C_AuctionHouse.CalculateCommodityDeposit(itemID, duration, quantity), quantity,
+        { remembered = remembered, buyout = unitPrice, duration = duration })
     pcall(CheckPostPrice, itemLocation, quantity, unitPrice)
 end
 
 local function OnPostItem(itemLocation, duration, quantity, bid, buyout)
     local price = buyout or bid
-    RememberPost(itemLocation, quantity, price and quantity and quantity > 0 and price / quantity)
-    QueuePost(itemLocation, C_AuctionHouse.CalculateItemDeposit(itemLocation, duration, quantity), quantity)
+    local remembered = RememberPost(itemLocation, quantity, price and quantity and quantity > 0 and price / quantity)
+    QueuePost(itemLocation, C_AuctionHouse.CalculateItemDeposit(itemLocation, duration, quantity), quantity,
+        { remembered = remembered, item = true, bid = bid, buyout = buyout, duration = duration })
     if price and quantity and quantity > 0 then pcall(CheckPostPrice, itemLocation, quantity, price / quantity) end
 end
 
-local function RecordDeposit()
-    -- Drop posts that were never confirmed (e.g. the post failed)
-    while pendingPosts[1] and GetTime() - pendingPosts[1].time > POST_TIMEOUT do
-        table.remove(pendingPosts, 1)
-    end
+-- The game's red error while a post waits: why it didn't go up
+local postErrors = CreateFrame("Frame")
+postErrors:RegisterEvent("UI_ERROR_MESSAGE")
+postErrors:SetScript("OnEvent", function(_, _, _, message)
+    local post = pendingPosts[#pendingPosts]
+    if post then post.reason = message end
+end)
 
+local function RecordDeposit()
     local post = table.remove(pendingPosts, 1)
     if not post or not post.name then return end
 
@@ -557,12 +599,218 @@ local function SettleMoney()
     end)
 end
 
+-- AH items (anything that isn't a commodity: mostly gear, which stays worth
+-- buying in Forever, user 2026-11-05). The commodity hook above never saw
+-- them, so weapons bought for Buy to vendor left no record. PlaceBid names
+-- the auction, and the item's listings say what it is. Only buyouts count:
+-- a lower bid can be outbid and its gold comes back. Recorded when the game
+-- says it went through or when that exact gold leaves, whichever is first.
+local ITEM_BUY_TIMEOUT = 30
+local itemBuys = {}
+local searchedKey
+
+local function FindAuction(auctionID)
+    local api = C_AuctionHouse
+    if not searchedKey or not api.GetNumItemSearchResults then return nil end
+    local ok, count = pcall(api.GetNumItemSearchResults, searchedKey)
+    for i = 1, ok and count or 0 do
+        local okR, r = pcall(api.GetItemSearchResultInfo, searchedKey, i)
+        if okR and type(r) == "table" and r.auctionID == auctionID then return r end
+    end
+    return nil
+end
+
+local function OnPlaceBid(auctionID, bid)
+    local r = FindAuction(auctionID)
+    local itemID = r and r.itemKey and r.itemKey.itemID
+    if not itemID or type(bid) ~= "number" or bid <= 0 or not r.buyoutAmount or bid < r.buyoutAmount then return end
+    local now = GetTime()
+    for id, b in pairs(itemBuys) do
+        if now - b.time > ITEM_BUY_TIMEOUT then itemBuys[id] = nil end
+    end
+    -- The link's name, so "of the Bear" stays on it as it does on sale mail
+    local name = type(r.itemLink) == "string" and r.itemLink:match("%[(.-)%]")
+    if name then name = name:gsub("%s*|A.-|a", "") end
+    name = name or C_Item.GetItemNameByID(itemID)
+    if not name or name == "" then return end
+    itemBuys[auctionID] = { itemID = itemID, name = name, quantity = r.quantity or 1, spent = bid, time = now }
+    knownMoney = knownMoney or GetMoney()
+end
+
+local function RecordItemBuy(auctionID)
+    local b = itemBuys[auctionID]
+    if not b then return end
+    itemBuys[auctionID] = nil
+    local prof = addon:GetProfessionForItemName(b.name) or "Unassigned"
+    addon.ledger:addCost(prof, b.name, b.quantity, b.spent, "PURCHASE", b.itemID)
+    if b.quantity > 1 then
+        addon:Notify("money", "Bought %s x%d for %s", b.name, b.quantity, ChatGold(b.spent))
+    else
+        addon:Notify("money", "Bought %s for %s", b.name, ChatGold(b.spent))
+    end
+    if addon.Refresh then addon.Refresh() end
+end
+
+local function MatchItemBuy(drop)
+    for auctionID, b in pairs(itemBuys) do
+        if b.spent == drop then return RecordItemBuy(auctionID) end
+    end
+end
+
+-- Selling to a vendor something bought on the AH is a flip: a sale in the
+-- ledger marked vendor, so it counts in profit and titles (user,
+-- 2026-10-21). Everything else sold to a vendor (junk, loot) stays out.
+-- Any character on the realm can sell what another bought and mailed.
+local merchantOpen = false
+
+-- How many of count are bought and unsold, what they cost (oldest first)
+-- and their name in the ledger
+local function BoughtUnsold(itemID, count)
+    local index = addon.ledger:index()
+    local realm = GetRealmName()
+    -- "of the Bear" and "of the Eagle" share an item ID but not a name
+    local bought, names, name = {}, {}, nil
+    for _, e in ipairs(index.purchasesByID[itemID] or {}) do
+        if (not e.realm or e.realm == realm) and (e.quantity or 0) > 0 then
+            bought[#bought + 1] = e
+            names[e.item] = true
+            name = e.item
+        end
+    end
+    if not name then return 0, 0 end
+    local sold = 0
+    for itemName in pairs(names) do
+        for _, e in ipairs(index.sales[itemName] or {}) do
+            if not e.realm or e.realm == realm then sold = sold + (e.quantity or 0) end
+        end
+    end
+    local units, cost = 0, 0
+    for _, e in ipairs(bought) do
+        local left = e.quantity
+        local skip = math.min(sold, left)
+        sold, left = sold - skip, left - skip
+        local take = math.min(count - units, left)
+        if take > 0 then
+            units = units + take
+            cost = cost + take * (e.totalCopper or 0) / e.quantity
+        end
+    end
+    return units, math.floor(cost + 0.5), name
+end
+
+local function OnUseContainerItem(bag, slot)
+    if not merchantOpen then return end
+    local ok, info = pcall(C_Container.GetContainerItemInfo, bag, slot)
+    if not ok or type(info) ~= "table" or (canaccesstable and not canaccesstable(info)) then return end
+    local itemID = info.itemID
+    if not itemID or info.hasNoValue then return end
+    local sell = select(11, C_Item.GetItemInfo(itemID))
+    if not sell or sell <= 0 then return end
+    local units, cost, name = BoughtUnsold(itemID, info.stackCount or 1)
+    if units == 0 then return end
+    local total = sell * units
+    local prof = addon:GetProfessionForItemName(name) or "Unassigned"
+    addon.ledger:addRevenue(prof, name, units, total, cost, false, 0, "paid", itemID, { vendor = true })
+    local gain = total - cost
+    addon:Notify("money", "Flipped %s: %s", name,
+        addon:Colorize((gain < 0 and "-" or "") .. addon:FormatMoney(math.abs(gain)), gain < 0 and "loss" or "profit"))
+    if addon.Refresh then addon.Refresh() end
+end
+
+-- Sold by trade (user, 2026-11-06: "theres more trading going on these
+-- days"). What's in the window is read when someone accepts, as it's gone
+-- by the time the game says the trade completed, and recorded only then. A
+-- sale is items for gold: nothing back but gold, and not with your own
+-- characters. An enchant for a tip gives no item, so it isn't one. In
+-- profit and titles, not in AH sell speed, sale price or the AH cut.
+local TRADE_SLOTS = 6 -- slot 7 is "will not be traded"
+local tradeSeen
+
+local function ReadTrade()
+    local seen = { gold = (GetTargetTradeMoney() or 0) - (GetPlayerTradeMoney() or 0), items = {}, partner = UnitName("NPC") }
+    local byID = {}
+    for slot = 1, TRADE_SLOTS do
+        local name, _, count = GetTradePlayerItemInfo(slot)
+        local link = name and GetTradePlayerItemLink(slot)
+        local itemID = link and C_Item.GetItemInfoInstant(link)
+        if itemID then
+            local item = byID[itemID]
+            if not item then
+                item = { itemID = itemID, name = name, count = 0 }
+                byID[itemID] = item
+                table.insert(seen.items, item)
+            end
+            item.count = item.count + (count or 1)
+        end
+        if GetTradeTargetItemInfo(slot) then seen.gotItem = true end
+    end
+    return seen
+end
+
+local function IsOwnCharacter(name)
+    for _, c in pairs(GoldsmithDB.characters) do
+        if c.name == name then return true end
+    end
+    return false
+end
+
+-- Its part of a trade's gold: by what each item is worth
+local function TradeWeight(item)
+    local unit = addon:GetAHPrice(item.itemID) or select(11, C_Item.GetItemInfo(item.itemID)) or 1
+    return math.max(unit, 1) * item.count
+end
+
+local function RecordTrade(seen)
+    if seen.gold <= 0 or seen.gotItem or #seen.items == 0 or IsOwnCharacter(seen.partner) then return end
+    local total = 0
+    for _, item in ipairs(seen.items) do total = total + TradeWeight(item) end
+    local left = seen.gold
+    for i, item in ipairs(seen.items) do
+        local gold = i == #seen.items and left or math.floor(seen.gold * TradeWeight(item) / total + 0.5)
+        left = left - gold
+        local unitCost, partial, source = addon:GetUnitCostBasis(item.name, item.count, item.itemID)
+        local cost = unitCost and math.floor(unitCost * item.count + 0.5)
+        local prof = addon:GetProfessionForItemName(item.name) or "Unassigned"
+        addon.ledger:addRevenue(prof, item.name, item.count, gold, cost, partial, 0, cost and source, item.itemID,
+            { trade = seen.partner or "A player" })
+        addon:Notify("money", "Sold %s x%d to %s: %s", item.name, item.count, seen.partner or "a player",
+            addon:Colorize(addon:FormatMoney(gold), "profit"))
+    end
+    if addon.Refresh then addon.Refresh() end
+end
+
+local tradeEvents = CreateFrame("Frame")
+for _, event in ipairs({ "TRADE_SHOW", "TRADE_ACCEPT_UPDATE", "UI_INFO_MESSAGE" }) do
+    tradeEvents:RegisterEvent(event)
+end
+tradeEvents:SetScript("OnEvent", function(_, event, arg1, arg2)
+    if event == "TRADE_SHOW" then
+        tradeSeen = nil
+    elseif event == "TRADE_ACCEPT_UPDATE" then
+        -- Both accepted: it's done and the window may be emptying
+        if arg1 == 1 and arg2 == 1 then return end
+        local seen = ReadTrade()
+        if #seen.items > 0 or seen.gold ~= 0 or seen.gotItem then tradeSeen = seen end
+    elseif arg2 == ERR_TRADE_COMPLETE then
+        local seen = tradeSeen
+        tradeSeen = nil
+        if seen then RecordTrade(seen) end
+    elseif arg2 == ERR_TRADE_CANCELLED then
+        tradeSeen = nil
+    end
+end)
+
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("COMMODITY_PURCHASE_SUCCEEDED")
 frame:RegisterEvent("COMMODITY_PURCHASE_FAILED")
 frame:RegisterEvent("PLAYER_MONEY")
 frame:RegisterEvent("AUCTION_HOUSE_AUCTION_CREATED")
+frame:RegisterEvent("AUCTION_HOUSE_PURCHASE_COMPLETED")
+frame:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
+frame:RegisterEvent("ITEM_SEARCH_RESULTS_ADDED")
+frame:RegisterEvent("MERCHANT_SHOW")
+frame:RegisterEvent("MERCHANT_CLOSED")
 
 frame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
@@ -595,10 +843,25 @@ frame:SetScript("OnEvent", function(self, event, arg1)
                 OnMoneyIncreased(increase)
             end
         end
+        if next(itemBuys) and knownMoney and knownMoney > GetMoney() then
+            MatchItemBuy(knownMoney - GetMoney())
+        end
         knownMoney = GetMoney()
 
     elseif event == "AUCTION_HOUSE_AUCTION_CREATED" then
         RecordDeposit()
+
+    elseif event == "AUCTION_HOUSE_PURCHASE_COMPLETED" then
+        RecordItemBuy(arg1)
+
+    elseif event == "ITEM_SEARCH_RESULTS_UPDATED" or event == "ITEM_SEARCH_RESULTS_ADDED" then
+        searchedKey = arg1
+
+    elseif event == "MERCHANT_SHOW" then
+        merchantOpen = true
+
+    elseif event == "MERCHANT_CLOSED" then
+        merchantOpen = false
     end
 end)
 
@@ -681,6 +944,10 @@ function addon:Initialize()
     addon:ReassignProfessions()
 
     hooksecurefunc(C_AuctionHouse, "ConfirmCommoditiesPurchase", OnConfirmCommoditiesPurchase)
+    hooksecurefunc(C_AuctionHouse, "PlaceBid", OnPlaceBid)
+    if C_Container and C_Container.UseContainerItem then
+        hooksecurefunc(C_Container, "UseContainerItem", OnUseContainerItem)
+    end
     hooksecurefunc(C_AuctionHouse, "PostCommodity", OnPostCommodity)
     hooksecurefunc(C_AuctionHouse, "PostItem", OnPostItem)
     hooksecurefunc("BuyMerchantItem", OnBuyMerchantItem)
@@ -781,6 +1048,8 @@ SlashCmdList["GOLDSMITH"] = function(msg)
         ReloadUI()
     elseif cmd == "prep" and GoldsmithDB.devTools then
         addon:PrintPrepCheck()
+    elseif cmd == "fakechars" and GoldsmithDB.devTools then
+        addon:FakeCharacters(rest)
     elseif cmd == "perf" then
         addon:RunPerfCheck()
     elseif cmd == "report" or cmd == "bug" then

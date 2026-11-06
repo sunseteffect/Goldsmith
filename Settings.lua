@@ -35,6 +35,8 @@ local UI = addon.UI
 --   buyFor      - whose queues Buy next shops for: "me" (the character
 --                 you're on) or "all" (every character's, for buying on a
 --                 bank alt; Shop.lua; user, 2026-10-24)
+--   flipMin     - copper an item must make each to show in Buy to vendor
+--                 (Scan.lua, Forever only; user, 2026-11-05)
 --   auctionatorButton - Send to Auctionator on the queue and plans. Off by
 --                 default: Buy next does the shopping, with its price
 --                 warnings, and one way to shop is clearer (user,
@@ -99,6 +101,7 @@ end
 function addon:SetSetting(key, value)
     GoldsmithDB.settings = GoldsmithDB.settings or {}
     GoldsmithDB.settings[key] = value
+    if key == "flipMin" and addon.RefreshFlips then addon:RefreshFlips() end
     if addon.Refresh then addon.Refresh() end
 end
 
@@ -766,6 +769,7 @@ local CHOICES = {
     dealPercent = {},
     heldDays = {},
     buyOver = {},
+    flipMin = {},
     buyFor = {
         { value = "me", label = "This character's queue" },
         { value = "all", label = "Every character's queue" },
@@ -802,13 +806,15 @@ for _, value in ipairs({ 0, 5, 10, 15, 20, 30, 50 }) do
     table.insert(CHOICES.minROI, { value = value,
         label = value == 0 and "Any profit" or string.format("%d%%", value) })
 end
--- Forever's gold is scarce: silver amounts (in gold, as the setting is).
+-- Forever's gold is scarce: copper and silver amounts (in gold, as the
+-- setting is). 50s hid every craft at launch, when a batch of bags makes 3s
+-- (user, 2026-11-05).
 -- Built again by ApplyForeverSettings when /gsm forever turns Forever mode
 -- on in retail, which happens after this file loads.
 local function BuildMinLine(forever)
-    if forever then DEFAULTS.minLine = 0.5 end
+    if forever then DEFAULTS.minLine, DEFAULTS.flipMin = 0.005, 50 end
     CHOICES.minLine = {}
-    for _, value in ipairs(forever and { 0, 0.1, 0.25, 0.5, 1, 5 } or { 0, 5, 10, 25, 50, 100 }) do
+    for _, value in ipairs(forever and { 0, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5 } or { 0, 5, 10, 25, 50, 100 }) do
         table.insert(CHOICES.minLine, { value = value,
             label = value == 0 and "Any profit"
                 or forever and addon:FormatMoney(value * 10000) .. " a batch"
@@ -822,6 +828,10 @@ end
 for _, value in ipairs({ 0, 2, 5, 10 }) do
     table.insert(CHOICES.buyOver, { value = value,
         label = value == 0 and "Always ask" or string.format("Up to %d%% more", value) })
+end
+for _, c in ipairs({ { 0, "Any profit" }, { 10, "10c each" }, { 25, "25c each" }, { 50, "50c each" },
+                     { 100, "1s each" }, { 500, "5s each" } }) do
+    table.insert(CHOICES.flipMin, { value = c[1], label = c[2] })
 end
 for _, value in ipairs({ 3, 5, 7, 14, 21, 30 }) do
     table.insert(CHOICES.heldDays, { value = value, label = string.format("%d days", value) })
@@ -942,6 +952,11 @@ local HELP = {
         "Scans when you open the AH and the last scan is over an hour old. About a minute; you can keep using the AH.",
         "If Auctionator scans too, Goldsmith reads its scan instead. Needs Auction House scan on.",
     },
+    flipMin = {
+        "Buy to vendor minimum",
+        "An item must make at least this much each to show in Buy to vendor. Stacks count each item, not the stack.",
+        "Any profit lists everything under vendor price.",
+    },
     buyOver = {
         "Buy without asking",
         "How much more than the plan Buy next pays without a second click. Up to 2% more: buys when the extra is under 2% of the item's cost or under 2% of the queue's profit.",
@@ -1040,6 +1055,12 @@ local PAGES = {
     { key = "report", label = "Bug report", page = "report", hidden = true, nav = "support",
       intro = "It's selected: press Ctrl+C to copy it, then paste it into your comment (or GitHub issue) under what happened. Character and realm names are left out, and nothing about your gold or items is included." },
 }
+-- Buy to vendor is Forever only (Scan.lua)
+if addon.isForever then
+    for _, page in ipairs(PAGES) do
+        if page.key == "prices" then table.insert(page.rows, "flipMin") end
+    end
+end
 local PAGE_BY_KEY, PAGE_OF_ROW = {}, {}
 for _, page in ipairs(PAGES) do
     if page.key then PAGE_BY_KEY[page.key] = page end
@@ -1455,6 +1476,7 @@ function addon:CreateSettingsPanel(parent)
             or "Needs Auction House scan on.")
     end
 
+    rows.flipMin = ChoiceRow(content, panel, "flipMin", "Buy to vendor minimum", "What an item must make each to show in Buy to vendor.")
     rows.buyFor = ChoiceRow(content, panel, "buyFor", "Buy next for", "Whose queues Buy next shops for at the AH.")
     rows.buyOver = ChoiceRow(content, panel, "buyOver", "Buy without asking", "How much over the plan Buy next pays without a second click.")
     rows.auctionatorButton = ToggleRow(content, panel, "auctionatorButton", "Send to Auctionator button",

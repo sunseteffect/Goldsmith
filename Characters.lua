@@ -998,4 +998,55 @@ function addon:InitializeCharacters()
     end)
 end
 
+-- /gsm fakechars [count] (dev tools): copies of your characters until
+-- there are `count` (27 by default), all counted, to try data shaped like
+-- a player with many alts (Atlasdair froze 15-20 s on the Patron tab with
+-- 27 characters, 2026-11-03). Only for this session: /gsm fakechars off,
+-- or logging out or /reload, takes them away before the game saves.
+local function RemoveFakeCharacters()
+    local removed = 0
+    for key, c in pairs(GoldsmithDB and GoldsmithDB.characters or {}) do
+        if c.goldsmithFake then
+            GoldsmithDB.characters[key] = nil
+            removed = removed + 1
+        end
+    end
+    return removed
+end
+
+function addon:FakeCharacters(rest)
+    rest = rest and strtrim(rest) or ""
+    if rest == "off" then
+        print(string.format("Goldsmith: removed %d copied characters", RemoveFakeCharacters()))
+    else
+        local want = tonumber(rest) or 27
+        local real, count = {}, 0
+        for key, c in pairs(GoldsmithDB.characters) do
+            count = count + 1
+            if not c.goldsmithFake then table.insert(real, key) end
+        end
+        table.sort(real)
+        local made = 0
+        while count < want and #real > 0 do
+            local from = real[made % #real + 1]
+            local name, realm = from:match("^(.-)%-(.+)$")
+            local copy = CopyTable(GoldsmithDB.characters[from])
+            copy.goldsmithFake = true
+            made = made + 1
+            GoldsmithDB.characters[string.format("%sCopy%d-%s", name or from, made, realm or "Copy")] = copy
+            count = count + 1
+        end
+        print(string.format("Goldsmith: %d characters now (%d copied, all counted). /gsm fakechars off removes them.",
+            count, made))
+    end
+    addon:DataChanged()
+    if addon.Refresh then addon.Refresh() end
+end
+
+-- Made as the file loads, before the frames that save at logout (as the
+-- tour's): the copies never reach the saved file
+local fakeLogout = CreateFrame("Frame")
+fakeLogout:RegisterEvent("PLAYER_LOGOUT")
+fakeLogout:SetScript("OnEvent", RemoveFakeCharacters)
+
 _G.Goldsmith = addon

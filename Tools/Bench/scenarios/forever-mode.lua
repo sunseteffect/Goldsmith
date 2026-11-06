@@ -33,7 +33,7 @@ bench.Equal("12s 40c", addon:FormatMoney(1240), "12s 40c")
 bench.Equal("3g 25s", addon:FormatMoney(32500), "3g 25s")
 local title = addon:GoldsmithTitles()[2]
 bench.Equal("Journeyman at 10g", title[1], 10)
-bench.Check("minLine default in silver", addon:Setting("minLine") == 0.5 or GoldsmithDB.settings.minLine ~= nil)
+bench.Check("minLine default in silver", addon:Setting("minLine") == 0.005 or GoldsmithDB.settings.minLine ~= nil)
 bench.Equal("no-price text after a scan", addon:NoPriceText("x"),
     addon:GetOwnScanTime() and "None on the AH in your last scan." or "x")
 bench.Equal("Exclude text drops concentration",

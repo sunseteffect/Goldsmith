@@ -995,7 +995,7 @@ local function GetOwnSoldPerDay(itemName)
     local since = time() - OWN_SALES_DAYS * 86400
     local units = 0
     for _, e in ipairs(addon.ledger:getAll()) do
-        if e.type == "REVENUE" and e.item == itemName and e.timestamp >= since then
+        if e.type == "REVENUE" and not e.vendor and not e.trade and e.item == itemName and e.timestamp >= since then
             units = units + e.quantity
         end
     end
@@ -1016,7 +1016,7 @@ function addon:GetOwnSalePrice(itemName)
     local since = time() - OWN_SALES_DAYS * 86400
     local units, copper = 0, 0
     for _, e in ipairs(addon.ledger:getAll()) do
-        if e.type == "REVENUE" and e.item == itemName and e.timestamp >= since then
+        if e.type == "REVENUE" and not e.vendor and not e.trade and e.item == itemName and e.timestamp >= since then
             units = units + e.quantity
             copper = copper + e.totalCopper
         end
@@ -1411,6 +1411,54 @@ end
 -- few times rather than storing a recipe with materials missing.
 local MAX_RETRIES = 3
 
+-- A name a saved recipe's profession can have: one a character has, in
+-- the game's language, or the English one
+local ENGLISH_PROFESSIONS = { Alchemy = true, Blacksmithing = true, Enchanting = true, Engineering = true,
+    Inscription = true, Jewelcrafting = true, Leatherworking = true, Tailoring = true, Cooking = true }
+
+local function IsProfessionName(name)
+    if type(name) ~= "string" or name == "" then return false end
+    if ENGLISH_PROFESSIONS[name] then return true end
+    for _, c in pairs(GoldsmithDB.characters or {}) do
+        if c.professions and c.professions[name] then return true end
+    end
+    return false
+end
+addon.IsProfessionName = function(_, name) return IsProfessionName(name) end
+
+-- A recipe's own profession, in the game's language, or nil if the game
+-- doesn't say: its skill line's parent, else the skill line's last word
+-- when that's a profession ("Midnight Alchemy" -> "Alchemy"). The last
+-- word alone made every recipe "Midnight" on a German client, whose skill
+-- lines end with the expansion: the button said "Open Midnight" and
+-- crafting never started (Lokir, 2026-11-04).
+local function OwnProfession(recipeID)
+    local ok, _, line, parentID, parentName = pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe, recipeID)
+    if not ok then return nil end
+    if type(parentName) == "string" and parentName ~= "" then return parentName end
+    if parentID and C_TradeSkillUI.GetTradeSkillDisplayName then
+        local okN, name = pcall(C_TradeSkillUI.GetTradeSkillDisplayName, parentID)
+        if okN and type(name) == "string" and name ~= "" then return name end
+    end
+    local word = type(line) == "string" and line:match("(%S+)$")
+    if IsProfessionName(word) then return word end
+    return nil
+end
+
+-- A saved recipe (or one not learned yet) whose profession isn't one
+-- ("Midnight", above): its own, else `fallback` (the open window's).
+-- True if it changed.
+local function RepairProfession(recipeID, recipe, fallback)
+    if not recipe or IsProfessionName(recipe.profession) then return false end
+    local own = OwnProfession(recipeID) or (IsProfessionName(fallback) and fallback) or nil
+    if not own then return false end
+    if recipe.outputName and GoldsmithDB.products and GoldsmithDB.products[recipe.outputName] == recipe.profession then
+        GoldsmithDB.products[recipe.outputName] = own
+    end
+    recipe.profession = own
+    return true
+end
+
 -- profession is passed when saving outside the profession window (enchants
 -- matched to scrolls after an AH scan); otherwise it's the open profession.
 -- unlearned: a recipe nobody has learned yet, saved to
@@ -1428,15 +1476,12 @@ local function SaveRecipe(recipeID, quiet, attempt, profession, unlearned)
     -- Jewelcrafting from a jewelcrafter's window, so no enchanter ever read
     -- its tiers). A pending enchant carried the window it was first seen
     -- in, so 42 unlearned Midnight enchants were Alchemy (user, 2026-11-02).
-    local okL, _, skillLine, _, parentName = pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe, recipeID)
-    if okL and type(parentName) == "string" and parentName ~= "" then
-        profession = parentName
-    elseif okL and type(skillLine) == "string" and skillLine:match("(%S+)$") then
-        -- Learned with the window closed (bought from a vendor): the
-        -- game gave no profession, and the open one came back "", so
-        -- the queue said "Open " and never saw Alchemy as open (user,
-        -- 2026-11-02: Liquid Luster). "Midnight Alchemy" -> "Alchemy".
-        profession = skillLine:match("(%S+)$")
+    -- Learned with the window closed (bought from a vendor), the open one
+    -- came back "", so the queue said "Open " and never saw Alchemy as open
+    -- (user, 2026-11-02: Liquid Luster): OwnProfession has it then too.
+    local own = OwnProfession(recipeID)
+    if own then
+        profession = own
     elseif not profession then
         local profInfo = C_TradeSkillUI.GetBaseProfessionInfo()
         profession = profInfo and profInfo.professionName
@@ -1521,8 +1566,11 @@ local function SaveRecipe(recipeID, quiet, attempt, profession, unlearned)
         -- profession filter: take it from the skill line instead
         -- ("Midnight Cooking" -> "Cooking"; user, 2026-10-12)
         local line = okL and type(skillLine) == "string" and skillLine or (existing and existing.skillLine)
-        if (not profession or profession == "" or profession == "Unassigned") and line then
-            profession = line:match("(%S+)$") or profession
+        -- Only when that word is a profession (not "Midnight", see
+        -- OwnProfession)
+        local word = line and line:match("(%S+)$")
+        if (not profession or profession == "" or profession == "Unassigned") and IsProfessionName(word) then
+            profession = word
         end
         GoldsmithDB.unlearned[recipeID] = {
             recipeID = recipeID,
@@ -3739,6 +3787,8 @@ local function ScanLearnedRecipes()
     -- to learn), saved apart (see SaveRecipe) once a session each
     local toSave, toStats, toUnlearned = {}, {}, {}
     local current = addon:GetCurrentExpansion()
+    local okP, openInfo = pcall(C_TradeSkillUI.GetBaseProfessionInfo)
+    local openProfession = okP and type(openInfo) == "table" and openInfo.professionName or nil
     for _, id in ipairs(ids) do
         -- Seen unlearned earlier this session and learned since (from a
         -- trainer, where NEW_RECIPE_LEARNED doesn't always come): looked at
@@ -3771,6 +3821,11 @@ local function ScanLearnedRecipes()
                 -- Recipes saved before skill lines were kept (for the
                 -- expansion filter)
                 addon:RecordRecipeSkillLine(id)
+                -- Saved as "Midnight" (2.7.5 on a German client, see
+                -- OwnProfession): its own, else this window's
+                if RepairProfession(id, GoldsmithDB.recipes[id], openProfession) then
+                    addon.recipesVersion = addon.recipesVersion + 1
+                end
                 if learned then
                     table.insert(toStats, id)
                 end
@@ -4057,10 +4112,21 @@ function addon:InitializePricing()
     for _, prof in ipairs(CRAFTING) do isCrafting[prof] = true end
     for _, recipe in pairs(GoldsmithDB.unlearned or {}) do
         local own = recipe.skillLine and recipe.skillLine:match("(%S+)$")
+        if not IsProfessionName(own) then own = nil end
         local blank = not recipe.profession or recipe.profession == "" or recipe.profession == "Unassigned"
         if own and own ~= recipe.profession and (blank or isCrafting[own]) then
             recipe.profession = own
         end
+    end
+
+    -- Saved as "Midnight" by 2.7.5 on a German client (see OwnProfession):
+    -- put right now if the game can say, else when its window opens
+    -- (ScanLearnedRecipes)
+    for recipeID, recipe in pairs(GoldsmithDB.recipes) do
+        if RepairProfession(recipeID, recipe) then addon.recipesVersion = addon.recipesVersion + 1 end
+    end
+    for recipeID, recipe in pairs(GoldsmithDB.unlearned or {}) do
+        RepairProfession(recipeID, recipe)
     end
 
     -- Remove salvage recipes saved before they were filtered out
@@ -4207,6 +4273,18 @@ function addon:InitializePricing()
             -- Just learned: looked at again, though seen unlearned earlier this session
             if event == "NEW_RECIPE_LEARNED" and resultData then
                 triedThisSession[resultData], statsReadThisSession[resultData] = nil, nil
+                -- Learned with the window closed (bought from a vendor): the
+                -- scan has no recipe list to find it in, so it stayed under
+                -- Not learned yet and couldn't be queued (user, 2026-11-03:
+                -- Amani Extract). Saved from the event; its stats are read
+                -- when the profession opens.
+                local id = resultData
+                if GoldsmithDB.unlearned[id] or GoldsmithDB.recipes[id] then
+                    addon:MarkRecipeKnown(id)
+                    if not GoldsmithDB.recipes[id] then SaveRecipe(id, true) end
+                    addon.recipesVersion = addon.recipesVersion + 1
+                    if addon.Refresh then C_Timer.After(1, addon.Refresh) end
+                end
             end
             QueueRecipeScan()
         end

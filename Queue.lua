@@ -872,6 +872,7 @@ function addon:BlockedLabel(s)
         -- Bought and still in the mail: say where it is, short. "Needs
         -- Sienna Ink (20 in your mailbox)" ran off the button (user,
         -- 2026-10-24); the hover has the whole line.
+        if what and what:find("in the bank") then return "In the bank", "warning" end
         if what and what:find("in your mailbox") then return "In the mailbox", "warning" end
         if what and what:find("not mailed yet") then return "Not mailed yet", "warning" end
         if what and not what:find(",") then return "Needs " .. (what:gsub("^%d+ ", "")), "warning" end

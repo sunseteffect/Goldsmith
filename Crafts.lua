@@ -1329,6 +1329,14 @@ local function CheckMaterials(state, needs, crafts)
     local short, stuck, allowed = {}, false, crafts
     for itemID, per in pairs(needs) do
         local have = C_Item.GetItemCount(itemID, true, false, true, true) or 0
+        -- Forever crafts from your bags only: 6 Linen Cloth in the bank read
+        -- as "From stock" and Craft 3, and the craft wouldn't start (user,
+        -- 2026-11-05)
+        local banked = 0
+        if addon.isForever then
+            local bags = C_Item.GetItemCount(itemID) or 0
+            have, banked = bags, math.max(have - bags, 0)
+        end
         local possible = math.floor(have / per)
         if possible < crafts then
             -- Bought and still in the mailbox: say so, it's why it's
@@ -1338,7 +1346,8 @@ local function CheckMaterials(state, needs, crafts)
             local away, holder = 0, nil
             if addon.OnTheWayFor then away, holder = addon:OnTheWayFor(addon.charKey, itemID) end
             table.insert(short, string.format("%d %s%s", per * crafts - have, MaterialName(itemID),
-                mail > 0 and string.format(" (%d in your mailbox)", mail)
+                banked > 0 and string.format(" (%d in the bank)", banked)
+                or mail > 0 and string.format(" (%d in your mailbox)", mail)
                 or away > 0 and string.format(" (%d bought on %s, not mailed yet)", away, holder or "another character")
                 or ""))
         end
@@ -1358,6 +1367,8 @@ local function CheckMaterials(state, needs, crafts)
     end
     return allowed
 end
+
+addon.CheckMaterials = CheckMaterials -- for the bench
 
 -- Gold you hold standing in for silver you're short of (GetCraftReagents):
 -- say so, and if the game says it lifts the craft a tier, that too
