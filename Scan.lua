@@ -690,7 +690,7 @@ local function CheapestListing(e)
     for i = 1, ok and count or 0 do
         local okR, r = pcall(C_AuctionHouse.GetItemSearchResultInfo, key, i)
         if okR and type(r) == "table" and not r.containsOwnerItem and (r.buyoutAmount or 0) > 0 and r.auctionID then
-            local unit = r.buyoutAmount / (r.quantity or 1)
+            local unit = r.buyoutAmount / addon:AuctionQuantity(r, e.itemID)
             if not best or unit < best.unit then
                 best = { auctionID = r.auctionID, price = r.buyoutAmount, unit = unit }
             end
@@ -905,6 +905,7 @@ function addon:FindVendorFlips(method)
                 i = i + 1
                 if okI and itemID and type(buyout) == "number" and buyout > 0 and type(count) == "number" and count > 0 then
                     listings[itemID] = listings[itemID] or {}
+                    count = addon:AuctionQuantity({ quantity = count }, itemID)
                     table.insert(listings[itemID], { buyout / count, count })
                 end
                 if debugprofilestop() - started > 6 then break end

@@ -139,7 +139,8 @@ local function Accumulate(agg, e, estimateCost)
         agg.posts, agg.posted, agg.deposits = agg.posts + 1, agg.posted + qty, agg.deposits + gold
         prof.deposits, char.deposits = prof.deposits + gold, char.deposits + gold
         agg.days[day] = (agg.days[day] or 0) - gold
-    else
+    elseif not e.trade then
+        -- (Items got in a trade spent no gold)
         agg.purchases, agg.bought, agg.spent = agg.purchases + 1, agg.bought + qty, agg.spent + gold
         if not agg.bigPurchase or gold > agg.bigPurchase.gold then agg.bigPurchase = Record(e, { gold = gold }) end
     end

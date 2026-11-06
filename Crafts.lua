@@ -161,15 +161,70 @@ end
 local ROW_HEIGHT = 32
 local WHO_INDENT = 18
 
+-- Not learned yet: the skill a recipe needs. A trainer's number is exact.
+-- Vendor and drop recipes are at no trainer, so it's estimated: in Forever
+-- the level a recipe turns grey less 60 matched 27 of 45 trainer numbers and
+-- 34 within 10; 16 of the 18 misses were low (user, 2026-11-06). So "~" can show
+-- you can't yet, never that you can. Returns the text ("~120"), the number
+-- and whether it's exact, or nil.
+function addon:SkillNeeded(item)
+    local recipe = item.recipe
+    if not item.unlearned or not recipe then return nil end
+    local exact = GoldsmithDB.trainerSkill and GoldsmithDB.trainerSkill[recipe.outputItemID]
+    if exact then return tostring(exact), exact, true end
+    if addon.isForever and recipe.grayLevel then
+        local estimate = math.max(recipe.grayLevel - 60, 1)
+        return "~" .. estimate, estimate, false
+    end
+    return nil
+end
+
+-- After the recipe's name (user, 2026-11-06: the hover was too slow to find
+-- what can be learned): green if that character can learn it now, red if
+-- not yet, grey when only an estimate says they might.
+local function SkillOf(item)
+    local c = GoldsmithDB.characters[item.charKey]
+    local p = c and c.professions and c.professions[item.recipe.profession]
+    return p and p.skill or 0
+end
+
+function addon:SkillNeededLabel(item)
+    local text, needed, exact = addon:SkillNeeded(item)
+    if not text then return "" end
+    local color = SkillOf(item) < needed and "loss" or (exact and "profit" or "muted")
+    return addon:Colorize("  Needs " .. text, color)
+end
+
+-- Not learned yet was 400 Tailoring rows, most out of reach (user,
+-- 2026-11-06: "can't tell what i can learn that should learn"). In Forever:
+-- only what you have the skill for and that makes gold, with a cost known.
+-- A trainer's first: "~" ones may also need a pattern. A search finds the rest.
+function addon:KeepWorthLearning(items)
+    local kept, minROI = {}, addon:Setting("minROI")
+    for _, item in ipairs(items) do
+        local _, needed, exact = addon:SkillNeeded(item)
+        local info = item.info
+        -- No number yet (its profession hasn't been opened): not known to be
+        -- learnable, so it waits (Green Silk Armor at skill 80, 2026-11-06)
+        if needed and SkillOf(item) >= needed and info.profit and info.profit > 0 and not info.partial
+            and (not info.margin or info.margin >= minROI) then
+            item.pinned = exact or nil
+            table.insert(kept, item)
+        end
+    end
+    return kept
+end
+
 local function FillCraftRow(row, item)
     local info, cells = item.info, row.cells
     -- Which expansion it's from (by the recipe's expansion; salvage by
     -- what's salvaged), when the list can hold more than one: a search, or
     -- several expansions picked at the top
-    local expansionID = item.labelExpansion and (item.salvage and addon:GetItemExpansion(item.itemID)
+    local expansionID = item.labelExpansion and not addon.isForever and (item.salvage and addon:GetItemExpansion(item.itemID)
         or addon:GetRecipeExpansion(item.recipe))
     local label = expansionID
         and addon:Colorize("  " .. addon:GetExpansionName(expansionID), "expansion") or ""
+    label = addon:SkillNeededLabel(item) .. label
     -- A daily or out of charges, right after the name: profitable but not
     -- makeable yet (user, 2026-10-17; from what was saved, no game call)
     local cooldown = not item.salvage and item.recipe and addon.GetRecipeCooldown
@@ -444,6 +499,11 @@ local function CraftTooltip(tooltip, item)
         -- Not learned yet: what it'd make if learned today, and where
         Note(tooltip, string.format("Not learned yet. Costed with %s skill and stats as they are now, as if learned today.",
             item.charKey == addon.charKey and "your" or (CharName(item.charKey) .. "'s")), "warning")
+        local skillNeeded = addon:SkillNeeded(item)
+        if skillNeeded then
+            tooltip:AddLine(" ")
+            tooltip:AddLine("Needs " .. recipe.profession .. " " .. skillNeeded, 1, 1, 1)
+        end
         if recipe.source then
             tooltip:AddLine(" ")
             tooltip:AddLine(recipe.source, 1, 1, 1, true)
@@ -4018,6 +4078,7 @@ local function Refresh(v, state)
         item.pinned = searching and addon:IsExpansionShown(item.salvage and addon:GetItemExpansion(item.itemID)
             or addon:GetRecipeExpansion(item.recipe)) or nil
     end
+    if unlearnedMode and addon.isForever and not searching then items = addon:KeepWorthLearning(items) end
     if focus then
         local kept = {}
         for _, item in ipairs(items) do
@@ -4052,8 +4113,8 @@ local function Refresh(v, state)
     v.list:SetColumns(addon:AvailableColumns(concOn and CONC_COLUMNS or SIMPLE_COLUMNS))
     if unlearnedMode then
         v.list:SetEmptyText(searching and "No recipe you haven't learned matches."
-            or string.format("No %s recipes left to learn found yet. Open each profession's window on the character who has it, so Goldsmith can see which recipes you haven't learned.",
-                addon:GetExpansionName(addon:GetCurrentExpansion())))
+            or string.format("No %srecipes left to learn found yet. Open each profession's window on the character who has it, so Goldsmith can see which recipes you haven't learned.",
+                addon:CurrentExpansionPrefix()))
     elseif next(GoldsmithDB.recipes) == nil then
         v.list:SetEmptyText("No recipes yet. Open your professions so Goldsmith can load them.")
     elseif focus then
@@ -4086,7 +4147,8 @@ local function Refresh(v, state)
         end
         -- What clicks do is in the window's click legend (Legend below)
         v.footnote:SetText((unlearnedMode
-            and "Recipes you haven't learned, costed with your skill today." or "")
+            and (addon.isForever and "What you can learn now that makes gold. Search finds the rest."
+                or "Recipes you haven't learned, costed with your skill today.") or "")
             .. (partial and ((unlearnedMode and "   " or "") .. "+ some material costs unknown,  * profit is at most this") or ""))
     end
 end
@@ -4130,7 +4192,7 @@ local function Legend(v)
     elseif v.salvage.target then
         return { { "click", "an output: its page" }, { "hover", ": how it's worked out" } }
     elseif not v.focus and CraftsShow() == "unlearned" then
-        return { { "click", "a recipe: its item's page" }, { "hover", ": where to learn it" } }
+        return { { "click", "a recipe: its item's page" }, { "hover", addon.isForever and ": skill it needs" or ": where to learn it" } }
     end
     return {
         { "click", "a craft: plan it" },

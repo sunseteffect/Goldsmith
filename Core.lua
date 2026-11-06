@@ -620,6 +620,37 @@ local function FindAuction(auctionID)
     return nil
 end
 
+-- How many one auction sells. Forever's search rows can say more than the
+-- item stacks to, with the buyout for one: Red Leather Bag (stack 1) came
+-- back 8 at 18s, so it counted as 2s 25c each and Buy to vendor took it for
+-- under its 8s 75c vendor price (user, 2026-11-06). Never over a stack, and
+-- one when the stack isn't known: a price per item too high only skips a
+-- flip, too low loses gold.
+function addon:AuctionQuantity(r, itemID)
+    local ok, stack = pcall(C_Item.GetItemMaxStackSizeByID, itemID)
+    if not ok or type(stack) ~= "number" or stack < 1 then return 1 end
+    return math.min(r.quantity or 1, stack)
+end
+
+-- Purchases recorded before AuctionQuantity with more than the item stacks
+-- to (Forever, 2.8.0-beta): one each. An item the game hasn't loaded waits
+-- for the next login.
+function addon:RepairAuctionQuantities()
+    if not addon.isForever or GoldsmithDB.auctionQuantitiesRepaired then return end
+    local waiting = false
+    for _, e in ipairs(addon.ledger:getAll()) do
+        if e.kind == "PURCHASE" and e.itemID and (e.quantity or 0) > 1 then
+            local stack = C_Item.GetItemMaxStackSizeByID(e.itemID)
+            if type(stack) ~= "number" then
+                waiting = true
+            elseif stack == 1 then
+                e.quantity = 1
+            end
+        end
+    end
+    if not waiting then GoldsmithDB.auctionQuantitiesRepaired = true end
+end
+
 local function OnPlaceBid(auctionID, bid)
     local r = FindAuction(auctionID)
     local itemID = r and r.itemKey and r.itemKey.itemID
@@ -633,7 +664,7 @@ local function OnPlaceBid(auctionID, bid)
     if name then name = name:gsub("%s*|A.-|a", "") end
     name = name or C_Item.GetItemNameByID(itemID)
     if not name or name == "" then return end
-    itemBuys[auctionID] = { itemID = itemID, name = name, quantity = r.quantity or 1, spent = bid, time = now }
+    itemBuys[auctionID] = { itemID = itemID, name = name, quantity = addon:AuctionQuantity(r, itemID), spent = bid, time = now }
     knownMoney = knownMoney or GetMoney()
 end
 
@@ -720,29 +751,39 @@ end
 -- Sold by trade (user, 2026-11-06: "theres more trading going on these
 -- days"). What's in the window is read when someone accepts, as it's gone
 -- by the time the game says the trade completed, and recorded only then. A
--- sale is items for gold: nothing back but gold, and not with your own
+-- sale is items you give for gold, items or both, not with your own
 -- characters. An enchant for a tip gives no item, so it isn't one. In
 -- profit and titles, not in AH sell speed, sale price or the AH cut.
+-- Items you get count at today's AH price: as part of what the sale made,
+-- and as a purchase at that price with no gold spent, so crafts made from
+-- them carry a real cost (user, 2026-11-06: 3 bags for 18 linen and 90c).
+-- An item with no price stops the whole trade: a guess would be worse than
+-- no record.
 local TRADE_SLOTS = 6 -- slot 7 is "will not be traded"
 local tradeSeen
 
 local function ReadTrade()
-    local seen = { gold = (GetTargetTradeMoney() or 0) - (GetPlayerTradeMoney() or 0), items = {}, partner = UnitName("NPC") }
-    local byID = {}
+    local seen = { gold = (GetTargetTradeMoney() or 0) - (GetPlayerTradeMoney() or 0), items = {}, got = {},
+        partner = UnitName("NPC") }
+    local function Add(list, name, count, link)
+        local itemID = link and C_Item.GetItemInfoInstant(link)
+        if not itemID then
+            seen.unread = true
+            return
+        end
+        for _, item in ipairs(list) do
+            if item.itemID == itemID then
+                item.count = item.count + (count or 1)
+                return
+            end
+        end
+        table.insert(list, { itemID = itemID, name = name, count = count or 1 })
+    end
     for slot = 1, TRADE_SLOTS do
         local name, _, count = GetTradePlayerItemInfo(slot)
-        local link = name and GetTradePlayerItemLink(slot)
-        local itemID = link and C_Item.GetItemInfoInstant(link)
-        if itemID then
-            local item = byID[itemID]
-            if not item then
-                item = { itemID = itemID, name = name, count = 0 }
-                byID[itemID] = item
-                table.insert(seen.items, item)
-            end
-            item.count = item.count + (count or 1)
-        end
-        if GetTradeTargetItemInfo(slot) then seen.gotItem = true end
+        if name then Add(seen.items, name, count, GetTradePlayerItemLink(slot)) end
+        name, _, count = GetTradeTargetItemInfo(slot)
+        if name then Add(seen.got, name, count, GetTradeTargetItemLink(slot)) end
     end
     return seen
 end
@@ -754,27 +795,46 @@ local function IsOwnCharacter(name)
     return false
 end
 
--- Its part of a trade's gold: by what each item is worth
+-- What an item in a trade is worth now: the AH, else a vendor, else nil
+local function TradeWorth(item)
+    local unit = addon:GetAHPrice(item.itemID) or select(11, C_Item.GetItemInfo(item.itemID))
+    return unit and unit > 0 and math.floor(unit * item.count + 0.5) or nil
+end
+
+-- Its part of a trade's total: by what each item is worth
 local function TradeWeight(item)
-    local unit = addon:GetAHPrice(item.itemID) or select(11, C_Item.GetItemInfo(item.itemID)) or 1
-    return math.max(unit, 1) * item.count
+    return TradeWorth(item) or item.count
 end
 
 local function RecordTrade(seen)
-    if seen.gold <= 0 or seen.gotItem or #seen.items == 0 or IsOwnCharacter(seen.partner) then return end
+    if seen.unread or seen.gold < 0 or #seen.items == 0 or IsOwnCharacter(seen.partner) then return end
+    local made = seen.gold
+    for _, item in ipairs(seen.got) do
+        item.worth = TradeWorth(item)
+        if not item.worth then return end
+        made = made + item.worth
+    end
+    if made <= 0 then return end
+    local swap = #seen.got > 0
     local total = 0
     for _, item in ipairs(seen.items) do total = total + TradeWeight(item) end
-    local left = seen.gold
+    local left = made
     for i, item in ipairs(seen.items) do
-        local gold = i == #seen.items and left or math.floor(seen.gold * TradeWeight(item) / total + 0.5)
+        local gold = i == #seen.items and left or math.floor(made * TradeWeight(item) / total + 0.5)
         left = left - gold
         local unitCost, partial, source = addon:GetUnitCostBasis(item.name, item.count, item.itemID)
         local cost = unitCost and math.floor(unitCost * item.count + 0.5)
         local prof = addon:GetProfessionForItemName(item.name) or "Unassigned"
         addon.ledger:addRevenue(prof, item.name, item.count, gold, cost, partial, 0, cost and source, item.itemID,
-            { trade = seen.partner or "A player" })
+            { trade = seen.partner or "A player", swap = swap or nil })
         addon:Notify("money", "Sold %s x%d to %s: %s", item.name, item.count, seen.partner or "a player",
             addon:Colorize(addon:FormatMoney(gold), "profit"))
+    end
+    for _, item in ipairs(seen.got) do
+        local prof = addon:GetProfessionForItemName(item.name) or "Unassigned"
+        addon.ledger:addCost(prof, item.name, item.count, item.worth, "PURCHASE", item.itemID,
+            { trade = seen.partner or "A player" })
+        addon:Notify("money", "Got %s x%d in the trade, worth %s", item.name, item.count, addon:FormatMoney(item.worth))
     end
     if addon.Refresh then addon.Refresh() end
 end
@@ -790,7 +850,7 @@ tradeEvents:SetScript("OnEvent", function(_, event, arg1, arg2)
         -- Both accepted: it's done and the window may be emptying
         if arg1 == 1 and arg2 == 1 then return end
         local seen = ReadTrade()
-        if #seen.items > 0 or seen.gold ~= 0 or seen.gotItem then tradeSeen = seen end
+        if #seen.items > 0 or #seen.got > 0 or seen.gold ~= 0 then tradeSeen = seen end
     elseif arg2 == ERR_TRADE_COMPLETE then
         local seen = tradeSeen
         tradeSeen = nil
@@ -927,6 +987,8 @@ function addon:Initialize()
     addon:RepairEstimatedSales()
     -- Order rewards sold with no cost: what the order counted them at (once)
     addon:RepairRewardSales()
+    -- Forever auctions recorded at more than a stack (once)
+    addon:RepairAuctionQuantities()
     -- A one-off repair of the developer's own Missive lots, done and removed
     GoldsmithDB.harmoniousLotsRepaired = nil
     -- Keep history for (Settings); after login settles, like the other chores

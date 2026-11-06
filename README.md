@@ -30,6 +30,7 @@ Made for Forever:
 - **Buy to vendor:** items on the AH selling under vendor price, shown for 5 minutes after a scan. Click once to load one, again to buy it, only at the scan's price. Settings has a minimum profit.
 - **Vendor flips:** what you buy on the AH and sell to a vendor counts in your profit.
 - **Failed posts:** Forever drops an item auction with copper in its price. Goldsmith tells you, so use whole silver.
+- **Not learned yet:** only what you can learn now that makes gold. A green "Needs" comes from a trainer you've opened; "~" is an estimate, and that recipe may need a pattern. A search finds the rest.
 
 ## Using Auctionator?
 Not needed: Goldsmith scans the AH itself and Buy next does the shopping. If you have it, Goldsmith reads its scans. To shop with Auctionator's shopping lists instead, turn on Settings > Send to Auctionator button.
@@ -56,7 +57,7 @@ You can also set keys for opening Goldsmith and for Craft next in the game's Key
 ## Good to know
 - Goldsmith never crafts, buys or posts on its own. Every craft and every purchase is one press of a button or key.
 - Posting your crafts on the AH is up to you.
-- Items you sell to a player in the trade window count as sales, with no AH cut. Trades with your own characters, swaps and enchants for a tip don't.
+- Items you sell to a player in the trade window count as sales, with no AH cut. Items you get in the trade count at their AH price. Trades with your own characters and enchants for a tip don't count.
 - Characters on more than one realm group: material prices from your AH scan count everywhere in your region (one AH for the whole region), gear prices only on the realms they came from.
 
 ## Support and feedback

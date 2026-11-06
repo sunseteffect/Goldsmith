@@ -197,7 +197,11 @@ local function Tooltip(tooltip, row)
             tooltip:AddLine("No cost known, so this sale isn't in your profit. If it was loot or a reward, right-click and mark it as free.", 0.6, 0.6, 0.6, true)
         end
         if row.entry and row.entry.vendor then Line("Sold to", "A vendor") end
-        if row.entry and row.entry.trade then Line("Sold to", row.entry.trade .. " (trade)") end
+        if row.entry and row.entry.trade then
+            Line(row.entry.type == "REVENUE" and "Sold to" or "Got from", row.entry.trade .. " (trade)")
+            if row.entry.swap then tooltip:AddLine("Includes items you got, at their AH price.", 0.6, 0.6, 0.6, true) end
+            if row.entry.type ~= "REVENUE" then tooltip:AddLine("At its AH price. No gold spent.", 0.6, 0.6, 0.6, true) end
+        end
         if row.character then Line("Character", row.character) end
     end
     tooltip:AddLine(" ")

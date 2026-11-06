@@ -114,7 +114,7 @@ end
 
 -- "Midnight cooldowns"
 function addon:CooldownsLabel()
-    return (_G["EXPANSION_NAME" .. addon:GetCurrentExpansion()] or "Current") .. " cooldowns"
+    return addon.isForever and "Cooldowns" or (addon:GetExpansionName(addon:GetCurrentExpansion()) .. " cooldowns")
 end
 
 local function ProfessionOf(recipeID)
@@ -402,8 +402,8 @@ function addon:ListCooldowns()
                 end
             end
         end
-        Print("The open profession has %d learned %s recipe%s with a cooldown.", found,
-            _G["EXPANSION_NAME" .. addon:GetCurrentExpansion()] or "current", found == 1 and "" or "s")
+        Print("The open profession has %d learned %srecipe%s with a cooldown.", found,
+            addon:CurrentExpansionPrefix(), found == 1 and "" or "s")
         if found > 0 then ScanOpenProfession(true) end
     else
         Print("Open a profession to see what the game reports for its recipes.")

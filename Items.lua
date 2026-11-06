@@ -951,7 +951,7 @@ local function CreatePage(parent)
         if d.tier then table.insert(sub, string.format("Tier %d of %d", d.tier, d.tierCount or d.tier)) end
         if d.profession then table.insert(sub, d.profession) end
         local expansion = d.itemID and addon:GetItemExpansion(d.itemID)
-        if expansion then table.insert(sub, addon:GetExpansionName(expansion)) end
+        if expansion and not addon.isForever then table.insert(sub, addon:GetExpansionName(expansion)) end
         if d.recipe and d.charKey and d.charKey ~= addon.charKey then
             local c = GoldsmithDB.characters[d.charKey]
             table.insert(sub, "crafted on " .. (c and c.name or d.charKey))

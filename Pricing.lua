@@ -1230,6 +1230,13 @@ function addon:GetExpansionName(expansionID)
     return _G["EXPANSION_NAME" .. expansionID] or ("Expansion " .. expansionID)
 end
 
+-- The current expansion's name for a sentence ("Midnight "). Forever is one
+-- expansion, so nothing names it (user, 2026-11-06).
+function addon:CurrentExpansionPrefix()
+    if addon.isForever then return "" end
+    return addon:GetExpansionName(addon:GetCurrentExpansion()) .. " "
+end
+
 function addon:GetCurrentExpansion()
     return (GetServerExpansionLevel and GetServerExpansionLevel()) or GetExpansionLevel()
 end
@@ -1559,6 +1566,9 @@ local function SaveRecipe(recipeID, quiet, attempt, profession, unlearned)
         local existing = GoldsmithDB.unlearned[recipeID]
         local okL, _, skillLine = pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe, recipeID)
         local okS, source = pcall(C_TradeSkillUI.GetRecipeSourceText, recipeID)
+        -- The level it turns grey: Forever's skill estimate (SkillNeeded)
+        local okI, recipeInfo = pcall(C_TradeSkillUI.GetRecipeInfo, recipeID)
+        local grayLevel = okI and type(recipeInfo) == "table" and recipeInfo.maxTrivialLevel or nil
         local learners = existing and existing.learners or {}
         learners[pendingLearner or addon.charKey] = true
         -- The game gives no profession for some recipes you haven't
@@ -1584,6 +1594,7 @@ local function SaveRecipe(recipeID, quiet, attempt, profession, unlearned)
             reagents = reagents,
             skillLine = okL and type(skillLine) == "string" and skillLine or (existing and existing.skillLine),
             source = okS and type(source) == "string" and source ~= "" and source or (existing and existing.source),
+            grayLevel = grayLevel or (existing and existing.grayLevel),
             learners = learners,
         }
         addon:RefreshRecipeStats(recipeID)
@@ -3784,9 +3795,13 @@ local function ScanLearnedRecipes()
     -- Each recipe this character has learned is marked as known by it;
     -- stats are only read for those (they're this character's stats).
     -- Not learned yet: only the current expansion's (the ones worth going
-    -- to learn), saved apart (see SaveRecipe) once a session each
+    -- to learn), saved apart (see SaveRecipe) once a session each. Forever
+    -- is one expansion and its skill lines are plain ("Blacksmithing"), so
+    -- none matched and the list stayed empty (user, 2026-11-06): all of them
+    -- there. Not in the retail Forever test, which has retail's recipes.
     local toSave, toStats, toUnlearned = {}, {}, {}
     local current = addon:GetCurrentExpansion()
+    local allExpansions = addon.isForever and not addon.foreverTest
     local okP, openInfo = pcall(C_TradeSkillUI.GetBaseProfessionInfo)
     local openProfession = okP and type(openInfo) == "table" and openInfo.professionName or nil
     for _, id in ipairs(ids) do
@@ -3813,7 +3828,7 @@ local function ScanLearnedRecipes()
                 triedThisSession[id] = true
                 local okL, _, skillLine = pcall(C_TradeSkillUI.GetTradeSkillLineForRecipe, id)
                 if okL and type(skillLine) == "string"
-                    and addon:GetRecipeExpansion({ skillLine = skillLine }) == current then
+                    and (allExpansions or addon:GetRecipeExpansion({ skillLine = skillLine }) == current) then
                     table.insert(toUnlearned, id)
                 end
             elseif GoldsmithDB.recipes[id] then
@@ -4144,6 +4159,24 @@ function addon:InitializePricing()
     GoldsmithDB.pendingEnchants = GoldsmithDB.pendingEnchants or {}
     GoldsmithDB.unlearned = GoldsmithDB.unlearned or {}
     GoldsmithDB.vendorPrices = GoldsmithDB.vendorPrices or {}
+    -- Skill a recipe needs (item it makes -> rank), for Not learned yet's
+    -- hover: the game only says at a trainer, so read when one opens. Vendor
+    -- and drop recipes have no number (user, 2026-11-06).
+    if addon.isForever then
+        GoldsmithDB.trainerSkill = GoldsmithDB.trainerSkill or {}
+        local trainerFrame = CreateFrame("Frame")
+        trainerFrame:RegisterEvent("TRAINER_SHOW")
+        trainerFrame:RegisterEvent("TRAINER_UPDATE")
+        trainerFrame:SetScript("OnEvent", function()
+            if not IsTradeskillTrainer() then return end
+            for i = 1, GetNumTrainerServices() do
+                local link = GetTrainerServiceItemLink(i)
+                local itemID = link and tonumber(link:match("item:(%d+)"))
+                local _, rank = GetTrainerServiceSkillReq(i)
+                if itemID and rank and rank > 0 then GoldsmithDB.trainerSkill[itemID] = rank end
+            end
+        end)
+    end
     local vendorFrame = CreateFrame("Frame")
     vendorFrame:RegisterEvent("MERCHANT_SHOW")
     vendorFrame:RegisterEvent("MERCHANT_UPDATE")
