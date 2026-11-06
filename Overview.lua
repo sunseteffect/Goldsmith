@@ -132,7 +132,7 @@ local function FillSalesTile(tile, s)
     tile.tooltip = function(tooltip)
         tooltip:AddLine("Sales", 1, 1, 1)
         tooltip:AddLine("All your characters.", 0.6, 0.6, 0.6)
-        tooltip:AddDoubleLine("Spent on materials", Money(s.spent), 0.8, 0.8, 0.8, 1, 1, 1)
+        tooltip:AddDoubleLine("Spent on purchases", Money(s.spent), 0.8, 0.8, 0.8, 1, 1, 1)
         addon:Explain(tooltip, "Materials you still hold aren't a loss until they're used or sold.", 0.6, 0.6, 0.6, true)
     end
 end

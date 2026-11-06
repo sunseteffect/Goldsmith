@@ -65,7 +65,7 @@ end
 --
 -- agg = { sales, units, revenue, costed (sales with a cost), costedRevenue,
 -- cost, wins, ahCut, refunds, purchases, bought, spent, posts, posted,
--- deposits, first, byProf / byChar = { [key] = { sales, revenue,
+-- deposits, flips, flipProfit (AH buys sold to a vendor), trades, tradeProfit, first, byProf / byChar = { [key] = { sales, revenue,
 -- costedRevenue, cost, deposits } }, byItem = { [name] = { sales, units,
 -- revenue, profit } }, days = { [YYYY-MM-DD] = profit }, best, worst
 -- (sales by profit), biggest (by gold), priciest (by gold each),
@@ -73,7 +73,7 @@ end
 local function NewAgg()
     return { sales = 0, units = 0, revenue = 0, costed = 0, costedRevenue = 0, cost = 0, wins = 0,
              ahCut = 0, refunds = 0, purchases = 0, bought = 0, spent = 0, posts = 0, posted = 0,
-             deposits = 0, byProf = {}, byChar = {}, byItem = {}, days = {} }
+             deposits = 0, flips = 0, flipProfit = 0, trades = 0, tradeProfit = 0, byProf = {}, byChar = {}, byItem = {}, days = {} }
 end
 
 local function Group(map, key)
@@ -105,7 +105,9 @@ local function Accumulate(agg, e, estimateCost)
         char.sales, char.revenue = char.sales + 1, char.revenue + gold
         local refund = e.depositRefund or 0
         agg.refunds = agg.refunds + refund
-        agg.ahCut = agg.ahCut + math.max(gold - refund, 0) / (1 - AH_CUT) * AH_CUT
+        if not e.vendor and not e.trade then
+            agg.ahCut = agg.ahCut + math.max(gold - refund, 0) / (1 - AH_CUT) * AH_CUT
+        end
         local cost = e.costBasis
         if not cost and estimateCost then
             local unit = estimateCost(e.item)
@@ -122,6 +124,8 @@ local function Accumulate(agg, e, estimateCost)
         if not agg.priciest or each > agg.priciest.each then agg.priciest = Record(e, { each = each, gold = gold }) end
         if cost then
             local profit = gold - cost
+            if e.vendor then agg.flips, agg.flipProfit = (agg.flips or 0) + 1, (agg.flipProfit or 0) + profit end
+            if e.trade then agg.trades, agg.tradeProfit = (agg.trades or 0) + 1, (agg.tradeProfit or 0) + profit end
             agg.costed, agg.costedRevenue, agg.cost = agg.costed + 1, agg.costedRevenue + gold, agg.cost + cost
             prof.costedRevenue, prof.cost = prof.costedRevenue + gold, prof.cost + cost
             char.costedRevenue, char.cost = char.costedRevenue + gold, char.cost + cost
@@ -142,7 +146,7 @@ local function Accumulate(agg, e, estimateCost)
 end
 
 local SUMS = { "sales", "units", "revenue", "costed", "costedRevenue", "cost", "wins", "ahCut", "refunds",
-               "purchases", "bought", "spent", "posts", "posted", "deposits" }
+               "purchases", "bought", "spent", "posts", "posted", "deposits", "flips", "flipProfit", "trades", "tradeProfit" }
 local GROUP_SUMS = { "sales", "revenue", "costedRevenue", "cost", "deposits" }
 local ITEM_SUMS = { "sales", "units", "revenue", "profit" }
 
@@ -296,7 +300,7 @@ end
 local function BiggestHaul(entries)
     local byChar = {}
     for _, e in ipairs(entries) do
-        if e.type == "REVENUE" and e.character then
+        if e.type == "REVENUE" and e.character and not e.vendor and not e.trade then
             byChar[e.character] = byChar[e.character] or {}
             table.insert(byChar[e.character], e)
         end

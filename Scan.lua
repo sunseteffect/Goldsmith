@@ -23,6 +23,9 @@ local UI = addon.UI
 
 local FULL_COOLDOWN = 15 * 60   -- the server's limit on full scans
 local FULL_WAIT = 120           -- seconds for the full scan's data before paging instead
+-- Forever: its AH is small, and full scans sat out the whole wait before
+-- paging, 2 minutes where paging takes 23 s (user, 2026-11-05)
+local FULL_WAIT_FOREVER = 15
 local SETTLE = 2                -- seconds after the first data event before reading
 local PAGE_STALL = 20           -- seconds without a page before stopping
 local PAGES_GUESS = 70          -- pages in a page scan, until one has run (69 on retail)
@@ -422,7 +425,7 @@ end
 -- worked (user, 2026-10-30 and 31).
 C_Timer.NewTicker(1, function()
     if not run then return end
-    if run.phase == "waiting" and time() - run.started > FULL_WAIT then
+    if run.phase == "waiting" and time() - run.started > (addon.isForever and FULL_WAIT_FOREVER or FULL_WAIT) then
         if run.borrowed then run = nil else StartPages() end
         UpdatePanel()
     elseif run.phase == "pages" and GetTime() - run.lastPage > PAGE_STALL then
@@ -606,6 +609,12 @@ local FLIP_ROWS = 8
 local FLIP_ROW_HEIGHT = 18
 local flipList = {}
 local flipMethod
+local flipListings
+local ShowFlips
+-- How long a scan's list stays up: these listings go fast, and an old list
+-- is mostly gone items (user, 2026-11-05: "5min may even be too long")
+local FLIP_FRESH = 300
+local flipTime
 
 local function SellPrice(itemID)
     local sell = select(11, C_Item.GetItemInfo(itemID))
@@ -625,7 +634,147 @@ local function SearchItem(itemID)
     if bar.StartSearch then pcall(bar.StartSearch, bar) end
 end
 
-local function ShowFlips()
+-- Buying from the list (user, 2026-11-05): a purchase needs a click of its
+-- own, and the listings have to be loaded first, so one click loads them
+-- and the next buys. It buys only at the price the scan found. A different
+-- price still over the minimum warns and shows the new price, and the next
+-- click buys at that. Gone, or now under the minimum: warns and drops the
+-- row. Only items: commodities still open their search on the AH.
+-- flipBuy = { entry, stage = "loading" or "ready", auctionID, price, unit }
+local FLIP_LOAD_SECONDS = 5
+local flipBuy
+
+local function FlipWarn(msg, ...)
+    addon:Notify("loss", msg, ...)
+    addon:Alert("stop")
+end
+
+local function FlipRowText(e)
+    if flipBuy and flipBuy.entry == e then
+        if flipBuy.stage == "loading" then return "Loading..." end
+        return "Buy " .. addon:FormatMoney(flipBuy.price)
+    end
+    return "+" .. addon:FormatMoney(e.gain)
+end
+
+local function FlipName(e) return C_Item.GetItemNameByID(e.itemID) or ("item " .. e.itemID) end
+
+local function DropFlip(e)
+    for i, other in ipairs(flipList) do
+        if other == e then
+            table.remove(flipList, i)
+            break
+        end
+    end
+    if flipBuy and flipBuy.entry == e then flipBuy = nil end
+end
+
+local function FlipKey(e)
+    if e.key then return e.key end
+    local ok, key = pcall(C_AuctionHouse.MakeItemKey, e.itemID)
+    return ok and key or nil
+end
+
+local function FlipIsCommodity(itemID)
+    local ok, status = pcall(C_AuctionHouse.GetItemCommodityStatus, itemID)
+    local kinds = Enum.ItemCommodityStatus
+    return ok and kinds and kinds.Commodity ~= nil and status == kinds.Commodity
+end
+
+-- The cheapest listing you can buy: { auctionID, price (all of it), unit }
+local function CheapestListing(e)
+    local key = FlipKey(e)
+    if not key then return nil end
+    local ok, count = pcall(C_AuctionHouse.GetNumItemSearchResults, key)
+    local best
+    for i = 1, ok and count or 0 do
+        local okR, r = pcall(C_AuctionHouse.GetItemSearchResultInfo, key, i)
+        if okR and type(r) == "table" and not r.containsOwnerItem and (r.buyoutAmount or 0) > 0 and r.auctionID then
+            local unit = r.buyoutAmount / (r.quantity or 1)
+            if not best or unit < best.unit then
+                best = { auctionID = r.auctionID, price = r.buyoutAmount, unit = unit }
+            end
+        end
+    end
+    return best
+end
+
+local function FlipResults(key)
+    local buy = flipBuy
+    if not buy or buy.stage ~= "loading" then return end
+    local e = buy.entry
+    if type(key) == "table" and key.itemID ~= e.itemID then return end
+    local name, listing = FlipName(e), CheapestListing(e)
+    local minimum = addon:Setting("flipMin") or 0
+    if not listing then
+        FlipWarn("%s isn't available any more", name)
+        DropFlip(e)
+    elseif listing.unit >= e.sell or e.sell - listing.unit < minimum then
+        FlipWarn("%s is now %s each, under your minimum", name, addon:FormatMoney(listing.unit))
+        DropFlip(e)
+    else
+        if math.floor(listing.unit + 0.5) ~= math.floor(e.low + 0.5) then
+            FlipWarn("%s is now %s each, was %s. Still makes %s each. Click to buy", name,
+                addon:FormatMoney(listing.unit), addon:FormatMoney(e.low), addon:FormatMoney(e.sell - listing.unit))
+            e.low = listing.unit
+        end
+        buy.stage, buy.auctionID, buy.price, buy.unit = "ready", listing.auctionID, listing.price, listing.unit
+    end
+    ShowFlips()
+end
+
+local function BuyFlip(e)
+    local buy = flipBuy
+    local listing = CheapestListing(e)
+    if not listing or listing.auctionID ~= buy.auctionID or listing.price ~= buy.price then
+        flipBuy = nil
+        FlipWarn("%s changed just now. Click to check it again", FlipName(e))
+    elseif GetMoney() < buy.price then
+        FlipWarn("Not enough gold for %s", FlipName(e))
+    else
+        -- Core.lua records it and says so in chat
+        C_AuctionHouse.PlaceBid(buy.auctionID, buy.price)
+        DropFlip(e)
+    end
+    ShowFlips()
+end
+
+local function ClickFlip(e)
+    if flipBuy and flipBuy.entry == e then
+        if flipBuy.stage == "ready" then BuyFlip(e) end
+        return
+    end
+    if FlipIsCommodity(e.itemID) then return SearchItem(e.itemID) end
+    local key = FlipKey(e)
+    local okT, ready = pcall(C_AuctionHouse.IsThrottledMessageSystemReady)
+    if not key or (okT and ready == false) then
+        FlipWarn("The AH is busy. Click again in a moment")
+        return
+    end
+    local buy = { entry = e, stage = "loading" }
+    flipBuy = buy
+    C_AuctionHouse.SendSearchQuery(key, { { sortOrder = Enum.AuctionHouseSortOrder.Price, reverseSort = false } }, true)
+    ShowFlips()
+    C_Timer.After(FLIP_LOAD_SECONDS, function()
+        if flipBuy == buy and buy.stage == "loading" then
+            flipBuy = nil
+            FlipWarn("%s didn't load. Click to try again", FlipName(e))
+            ShowFlips()
+        end
+    end)
+end
+
+-- For the bench
+function addon:GetFlips() return flipList end
+function addon:ClickFlip(e) ClickFlip(e) end
+
+ShowFlips = function()
+    if flipTime and time() - flipTime > FLIP_FRESH then
+        flipTime, flipListings, flipBuy = nil, nil, nil
+        wipe(flipList)
+        if flipFrame then flipFrame:Hide() end
+        return
+    end
     if not panel or not panel:IsShown() then return end
     if not flipFrame then
         flipFrame = CreateFrame("Frame", nil, panel, "BackdropTemplate")
@@ -650,7 +799,7 @@ local function ShowFlips()
             row.name:SetPoint("RIGHT", -70, 0)
             row.gain = UI.Text(row, "small", "profit", "RIGHT")
             row.gain:SetPoint("RIGHT", 0, 0)
-            row:SetScript("OnClick", function(self) if self.itemID then SearchItem(self.itemID) end end)
+            row:SetScript("OnClick", function(self) if self.entry then ClickFlip(self.entry) end end)
             row:SetScript("OnEnter", function(self)
                 if not self.entry then return end
                 local e = self.entry
@@ -662,7 +811,7 @@ local function ShowFlips()
                 GameTooltip:AddDoubleLine("Vendor pays", addon:FormatMoney(e.sell) .. " each", 0.8, 0.8, 0.8, 1, 1, 1)
                 GameTooltip:AddDoubleLine("Buy them all", addon:FormatMoney(e.cost), 0.8, 0.8, 0.8, 1, 1, 1)
                 GameTooltip:AddDoubleLine("You make", addon:FormatMoney(e.gain), 0.8, 0.8, 0.8, 0.2, 1, 0.2)
-                GameTooltip:AddLine("Click: search it on the AH", 0.6, 0.6, 0.6)
+                GameTooltip:AddLine("Click twice to buy the cheapest", 0.6, 0.6, 0.6)
                 GameTooltip:Show()
             end)
             row:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -683,7 +832,7 @@ local function ShowFlips()
         if e then
             local name = C_Item.GetItemNameByID(e.itemID) or ("item " .. e.itemID)
             row.name:SetText(string.format("%s x%d", name, e.count))
-            row.gain:SetText("+" .. addon:FormatMoney(e.gain))
+            row.gain:SetText(FlipRowText(e))
             row:Show()
         else
             row:Hide()
@@ -694,19 +843,24 @@ local function ShowFlips()
     if not GoldsmithDB.ui2.scanPanel then PlacePanel() end
 end
 
-local function RankFlips(listings)
+-- flipMin: what an item must make each to be listed (Settings; user,
+-- 2026-11-05). quiet: the list redrawn for a new minimum, nothing to announce
+local function RankFlips(listings, quiet)
     flipList = {}
+    flipBuy = nil
+    flipListings = listings
+    local minimum = addon:Setting("flipMin") or 0
     for itemID, rows in pairs(listings) do
         local sell = SellPrice(itemID)
         if sell and sell > 0 then
             local e
             for _, r in ipairs(rows) do
-                if r[1] < sell then
-                    e = e or { itemID = itemID, sell = sell, count = 0, cost = 0, gain = 0, low = r[1] }
+                if r[1] < sell and sell - r[1] >= minimum then
+                    e = e or { itemID = itemID, sell = sell, count = 0, cost = 0, gain = 0, low = r[1], key = r[3] }
                     e.count = e.count + r[2]
                     e.cost = e.cost + r[1] * r[2]
                     e.gain = e.gain + (sell - r[1]) * r[2]
-                    if r[1] < e.low then e.low = r[1] end
+                    if r[1] < e.low then e.low, e.key = r[1], r[3] end
                 end
             end
             if e then e.cost, e.gain = math.floor(e.cost + 0.5), math.floor(e.gain + 0.5); table.insert(flipList, e) end
@@ -715,10 +869,18 @@ local function RankFlips(listings)
     table.sort(flipList, function(a, b) return a.gain > b.gain end)
     local total = 0
     for _, e in ipairs(flipList) do total = total + e.gain end
-    if #flipList > 0 then
+    if not quiet then
+        flipTime = time()
+        C_Timer.After(FLIP_FRESH + 1, function() ShowFlips() end)
+    end
+    if #flipList > 0 and not quiet then
         addon:Notify("info", "Goldsmith: %d items on the AH under vendor price, about %s to make.", #flipList, addon:FormatMoney(total))
     end
     ShowFlips()
+end
+
+function addon:RefreshFlips()
+    if flipListings then RankFlips(flipListings, true) end
 end
 
 -- Reads the scan's listings (a frame at a time), then waits for item data
@@ -756,7 +918,7 @@ function addon:FindVendorFlips(method)
             local key = r.itemKey
             if key and key.itemID and (key.battlePetSpeciesID or 0) == 0 and type(r.minPrice) == "number" and r.minPrice > 0 then
                 listings[key.itemID] = listings[key.itemID] or {}
-                table.insert(listings[key.itemID], { r.minPrice, 1 })
+                table.insert(listings[key.itemID], { r.minPrice, 1, key })
             end
         end
         Rank()
@@ -765,6 +927,14 @@ end
 
 local flipEvents = CreateFrame("Frame")
 flipEvents:RegisterEvent("AUCTION_HOUSE_SHOW")
-flipEvents:SetScript("OnEvent", function()
-    C_Timer.After(0.2, function() if flipMethod then ShowFlips() end end)
+flipEvents:RegisterEvent("AUCTION_HOUSE_CLOSED")
+flipEvents:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
+flipEvents:SetScript("OnEvent", function(_, event, key)
+    if event == "AUCTION_HOUSE_CLOSED" then
+        flipBuy = nil
+    elseif event == "ITEM_SEARCH_RESULTS_UPDATED" then
+        FlipResults(key)
+    else
+        C_Timer.After(0.2, function() if flipMethod then ShowFlips() end end)
+    end
 end)

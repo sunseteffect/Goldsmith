@@ -995,7 +995,7 @@ local function GetOwnSoldPerDay(itemName)
     local since = time() - OWN_SALES_DAYS * 86400
     local units = 0
     for _, e in ipairs(addon.ledger:getAll()) do
-        if e.type == "REVENUE" and e.item == itemName and e.timestamp >= since then
+        if e.type == "REVENUE" and not e.vendor and not e.trade and e.item == itemName and e.timestamp >= since then
             units = units + e.quantity
         end
     end
@@ -1016,7 +1016,7 @@ function addon:GetOwnSalePrice(itemName)
     local since = time() - OWN_SALES_DAYS * 86400
     local units, copper = 0, 0
     for _, e in ipairs(addon.ledger:getAll()) do
-        if e.type == "REVENUE" and e.item == itemName and e.timestamp >= since then
+        if e.type == "REVENUE" and not e.vendor and not e.trade and e.item == itemName and e.timestamp >= since then
             units = units + e.quantity
             copper = copper + e.totalCopper
         end

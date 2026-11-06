@@ -103,16 +103,21 @@ end
 
 local function MoneyRows(s)
     local a = s.agg
-    return {
+    local flips = a.flipProfit or 0
+    local trades = a.tradeProfit or 0
+    local fromAH = s.salesProfit - flips - trades
+    local rows = {
         { "Lifetime profit", Signed(s.profit), addon:MoneyColor(s.profit), tooltip = function(t)
             White(t, "Lifetime profit")
-            Pair(t, "From sales", Signed(s.salesProfit))
+            Pair(t, "From sales", Signed(fromAH))
+            if flips ~= 0 then Pair(t, "From vendor flips", Signed(flips)) end
+            if trades ~= 0 then Pair(t, "From trades", Signed(trades)) end
             Pair(t, "From players' crafting orders", Signed(s.orderProfit))
             Grey(t, "Sales: what you sold for after the AH cut, less what the items cost you and AH deposits. A sale at a loss takes it down.")
             Grey(t, "Orders: the commission, plus materials you kept, less your own materials.")
             addon:Explain(t, "Patron orders aren't in it: they're often taken at a loss on purpose, for knowledge. They're under Orders and gathering. Sales with no cost known aren't in it either.")
         end },
-        { "From sales", Signed(s.salesProfit), addon:MoneyColor(s.salesProfit) },
+        { "From sales", Signed(fromAH), addon:MoneyColor(fromAH) },
         { "From players' orders", Signed(s.orderProfit), addon:MoneyColor(s.orderProfit) },
         { "Sales after the AH cut", Money(a.revenue), "text" },
         { "What the sold items cost you", Money(a.cost), "text" },
@@ -140,8 +145,8 @@ local function MoneyRows(s)
             White(t, "Deposits lost")
             Grey(t, "AH deposits on auctions that expired or were cancelled. Deposits on ones that sold came back.")
         end },
-        { "Spent on materials", Money(a.spent), "text", tooltip = function(t)
-            White(t, "Spent on materials")
+        { "Spent on purchases", Money(a.spent), "text", tooltip = function(t)
+            White(t, "Spent on purchases")
             Pair(t, "Purchases", Count(a.purchases))
             Pair(t, "Items bought", Count(a.bought))
             if a.bigPurchase then
@@ -151,6 +156,24 @@ local function MoneyRows(s)
         { "Biggest purchase", a.bigPurchase and Money(a.bigPurchase.gold) or "-", "text",
           tooltip = SaleTooltip("Biggest purchase", a.bigPurchase, "Paid") },
     }
+    -- AH buys sold to a vendor, after From sales and From players' orders
+    if addon.isForever or (a.flips or 0) > 0 then
+        table.insert(rows, 4, { "From vendor flips", Signed(flips), addon:MoneyColor(flips), tooltip = function(t)
+            White(t, "From vendor flips")
+            Pair(t, "Flips", Count(a.flips or 0))
+            Grey(t, "What vendors paid for items you bought on the AH, less what you paid.")
+        end })
+    end
+    -- Sold in the trade window, after the rows above
+    if addon.isForever or (a.trades or 0) > 0 then
+        local at = rows[4][1] == "From vendor flips" and 5 or 4
+        table.insert(rows, at, { "From trades", Signed(trades), addon:MoneyColor(trades), tooltip = function(t)
+            White(t, "From trades")
+            Pair(t, "Sales", Count(a.trades or 0))
+            Grey(t, "What players paid in the trade window, less what the items cost you. No AH cut.")
+        end })
+    end
+    return rows
 end
 
 local function AuctionRows(s)

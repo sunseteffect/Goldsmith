@@ -218,6 +218,23 @@ local function Cancel()
     quote, asking = nil, nil
 end
 
+-- The queue's profit if this item costs total. The queue is planned again
+-- once the price is in, from the listings just fetched, so q.profit may
+-- hold that price already: only what's over the new plan's cost comes off.
+-- Taking off all that's over the old plan counted it twice: 3.60 profit,
+-- 2.70 over, said it would lose 1.80 when it still makes 0.90 (user,
+-- 2026-11-05).
+local function ProfitAt(qt, total)
+    local planned = qt.planCost
+    for _, b in ipairs(q.buyAH or {}) do
+        if b.itemID == qt.itemID and b.cost then
+            planned = b.cost
+            break
+        end
+    end
+    return q.profit - (total - (planned or total))
+end
+
 -- What the price means for the plan: extra over the plan's cost, the
 -- queue's profit then (nil when the queue has no profit to show), and
 -- whether the price takes it below zero (it made money before)
@@ -226,8 +243,8 @@ local function Gap()
     local extra = quote.total - (quote.planCost or quote.total)
     -- A stock-up isn't in the queue's profit, so its price doesn't change it
     local stock = q and q.stockOnly and q.stockOnly[quote.itemID]
-    local profitThen = not stock and q and q.complete and q.profit and (q.profit - extra) or nil
-    return extra, extra > 0, profitThen, profitThen and profitThen < 0 and q.profit >= 0
+    local profitThen = not stock and q and q.complete and q.profit and ProfitAt(quote, quote.total) or nil
+    return extra, extra > 0, profitThen, profitThen and profitThen < 0 and profitThen + extra >= 0
 end
 
 -- A queued craft this item is for loses gold at current prices: what it
@@ -296,8 +313,9 @@ local function BuyWithoutAsking(qt, total)
     if share <= 0 then return false end
     -- A stock-up: only its own cost counts (it isn't in the queue's profit)
     local stock = q and q.stockOnly and q.stockOnly[qt.itemID]
-    local profit = not stock and q and q.complete and q.profit or nil
-    if profit and profit >= 0 and profit - extra < 0 then return false end
+    local profitThen = not stock and q and q.complete and q.profit and ProfitAt(qt, total) or nil
+    local profit = profitThen and profitThen + extra
+    if profit and profit >= 0 and profitThen < 0 then return false end
     return extra <= qt.planCost * share or (profit and profit > 0 and extra <= profit * share) or false
 end
 

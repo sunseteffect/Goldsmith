@@ -143,9 +143,12 @@ local function FillRow(row, item)
     c.make:SetText(made > 0 and string.format("%d of %d", item.remaining, item.entry.quantity) or tostring(item.remaining))
     local plan = item.plan
     local full = RowConcentration(item)
-    c.conc:SetText(full and ConcText(full) or "")
-    -- Orange past what the character has (Refresh)
-    c.conc:SetTextColor(addon:Color(item.concShort and "warning" or "conc"))
+    -- Forever has no Conc column
+    if c.conc then
+        c.conc:SetText(full and ConcText(full) or "")
+        -- Orange past what the character has (Refresh)
+        c.conc:SetTextColor(addon:Color(item.concShort and "warning" or "conc"))
+    end
     if plan and plan.stock then
         -- No crafts or profit: it's shopping
         c.crafts:SetText("-")
