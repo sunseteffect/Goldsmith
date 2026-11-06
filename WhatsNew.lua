@@ -14,6 +14,16 @@ local UI = addon.UI
 -- this is marked seen. /gsm news shows it again.
 local NEWS = {
     {
+        key = "2.8.0",
+        title = "What's new in Goldsmith 2.8",
+        items = {
+            { "WoW Forever", "Goldsmith now works in WoW Forever, from your own AH scans." },
+            { "Themes", "Settings > Display > Theme: Goldsmith, World of Warcraft, Alliance, Horde or Match my faction." },
+            { "Trade sales", "Items you sell to a player in the trade window now count as sales, with no AH cut." },
+            { "Failed posts", "If the AH never confirms a post, a red chat line says so." },
+        },
+    },
+    {
         key = "2.7.3",
         title = "What's new in Goldsmith 2.7.3",
         items = {

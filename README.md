@@ -16,11 +16,20 @@ Most players don't want to study the auction house. Goldsmith gives you a short 
 - **Characters:** a to-do list for each alt, with their professions, concentration and craft cooldowns. Cooldowns that are ready and worth making show up in Do this next.
 - **Items and History:** prices and price history, your stock across bags, banks and the warband bank, every sale, purchase and deposit with real profit after the AH cut, and your total gold over time with where it is. Collecting AH sales from the mailbox lists what each sold for, then the total. Cheap materials suggests stock-ups from what you actually use; right-click one to queue it for Buy next.
 - **Stats:** lifetime numbers to compare with friends: a Goldsmith title earned by profit, best sale, best day, profit streaks, biggest mailbox haul, multicraft procs, your most profitable professions and characters, and how much of the profit it expected Goldsmith's suggestions made. Share in chat to brag.
+- **Themes:** Settings > Display > Theme picks Goldsmith's own dark look, the game's own windows and buttons, Alliance, Horde, or Match my faction.
 - **Hovers that explain themselves:** hovers stay short, just the numbers. Hold Ctrl over one to see what each number means and how it's worked out.
 
 ## Requirements
 - English game client (other languages aren't supported yet)
 - [Goldsmith Data](https://github.com/sunseteffect/GoldsmithData): region-wide AH prices for US, EU, KR and TW, refreshed daily, and how well each item sells. CurseForge installs it with Goldsmith.
+
+## WoW Forever
+Goldsmith works in WoW Forever with the same install. Forever has no Goldsmith Data, so prices come from your own AH scans: press **Scan the AH** first. Parts of Midnight that Forever doesn't have (concentration, material qualities, crafting orders) stay hidden, and money reads in silver and copper.
+
+Made for Forever:
+- **Buy to vendor:** items on the AH selling under vendor price, shown for 5 minutes after a scan. Click once to load one, again to buy it, only at the scan's price. Settings has a minimum profit.
+- **Vendor flips:** what you buy on the AH and sell to a vendor counts in your profit.
+- **Failed posts:** Forever drops an item auction with copper in its price. Goldsmith tells you, so use whole silver.
 
 ## Using Auctionator?
 Not needed: Goldsmith scans the AH itself and Buy next does the shopping. If you have it, Goldsmith reads its scans. To shop with Auctionator's shopping lists instead, turn on Settings > Send to Auctionator button.
@@ -47,6 +56,7 @@ You can also set keys for opening Goldsmith and for Craft next in the game's Key
 ## Good to know
 - Goldsmith never crafts, buys or posts on its own. Every craft and every purchase is one press of a button or key.
 - Posting your crafts on the AH is up to you.
+- Items you sell to a player in the trade window count as sales, with no AH cut. Trades with your own characters, swaps and enchants for a tip don't.
 - Characters on more than one realm group: material prices from your AH scan count everywhere in your region (one AH for the whole region), gear prices only on the realms they came from.
 
 ## Support and feedback
