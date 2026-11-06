@@ -18,6 +18,7 @@ local NEWS = {
         title = "What's new in Goldsmith 2.8",
         items = {
             { "WoW Forever", "Goldsmith now works in WoW Forever, from your own AH scans." },
+            { "Buy to vendor", "In Forever, the AH panel lists items selling under vendor price after a scan. Click twice to buy, then sell them to a vendor for the profit." },
             { "Themes", "Settings > Display > Theme: Goldsmith, World of Warcraft, Alliance, Horde or Match my faction." },
             { "Trade sales", "Items you sell to a player in the trade window now count as sales, with no AH cut." },
             { "Failed posts", "If the AH never confirms a post, a red chat line says so." },
