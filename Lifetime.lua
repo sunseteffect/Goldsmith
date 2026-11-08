@@ -42,8 +42,12 @@ local TITLES = {
 }
 -- Forever's gold is about a hundredth of retail's: Journeyman at 10g,
 -- Ascended at 100,000g (stress test, 2026-10-21)
-local FOREVER_TITLES = {}
-for i, t in ipairs(TITLES) do FOREVER_TITLES[i] = { t[1] / 100, t[2] } end
+-- One more first step: Novice, then Apprentice at 5g, as 10g took a while
+-- (user, 2026-11-07)
+local FOREVER_TITLES = { { 0, "Novice" } }
+for i, t in ipairs(TITLES) do
+    table.insert(FOREVER_TITLES, { i == 1 and 5 or t[1] / 100, t[2] })
+end
 
 function addon:GoldsmithTitles()
     return addon.isForever and FOREVER_TITLES or TITLES

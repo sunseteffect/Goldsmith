@@ -3536,6 +3536,15 @@ local function AddTooltipLines(tooltip, data)
 
     local name = C_Item.GetItemNameByID(data.id)
     if not name then return end
+    -- Gear with a random suffix: purchases are saved by the link's name
+    -- ("Sergeant's Warhammer of Magic") but the ID only gives "Sergeant's
+    -- Warhammer", so what you paid never showed (user, 2026-11-06)
+    local link = data.hyperlink or (tooltip.GetItem and select(2, tooltip:GetItem()))
+    local linkName = type(link) == "string" and link:match("%[(.-)%]")
+    if linkName then
+        linkName = linkName:gsub("%s*|A.-|a", "")
+        if addon.ledger:index().purchases[linkName] then name = linkName end
+    end
 
     -- Short: craft cost and profit for something you craft, otherwise
     -- average cost and today's price against usual

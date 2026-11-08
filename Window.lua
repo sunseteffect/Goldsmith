@@ -767,7 +767,13 @@ function addon:CreateWindow()
         PanelTemplates_SetNumTabs(frame, #TABS)
         hooksecurefunc(tabBar, "Select", function(_, key)
             for i, tab in ipairs(TABS) do
-                if tab.key == key then PanelTemplates_SetTab(frame, i) end
+                if tab.key == key then
+                    PanelTemplates_SetTab(frame, i)
+                    -- The game turns the current tab's button off, so
+                    -- clicking it never reached the home view (user,
+                    -- 2026-11-06: stuck on a plan after clicking Crafts)
+                    frame.Tabs[i]:Enable()
+                end
             end
         end)
         -- The gold line under the old tabs isn't the game's

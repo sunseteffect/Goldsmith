@@ -458,12 +458,15 @@ local function OnPostCommodity(itemLocation, duration, quantity, unitPrice)
     pcall(CheckPostPrice, itemLocation, quantity, unitPrice)
 end
 
+-- An item's bid and buyout are for each one: quantity 2 posts two
+-- auctions at that price. Divided by the quantity, 2 Linen Reagent Bags at
+-- 5s each were "posted at 2s 50c: a loss" (user, 2026-11-07).
 local function OnPostItem(itemLocation, duration, quantity, bid, buyout)
     local price = buyout or bid
-    local remembered = RememberPost(itemLocation, quantity, price and quantity and quantity > 0 and price / quantity)
+    local remembered = RememberPost(itemLocation, quantity, price)
     QueuePost(itemLocation, C_AuctionHouse.CalculateItemDeposit(itemLocation, duration, quantity), quantity,
         { remembered = remembered, item = true, bid = bid, buyout = buyout, duration = duration })
-    if price and quantity and quantity > 0 then pcall(CheckPostPrice, itemLocation, quantity, price / quantity) end
+    if price and quantity and quantity > 0 then pcall(CheckPostPrice, itemLocation, quantity, price) end
 end
 
 -- The game's red error while a post waits: why it didn't go up

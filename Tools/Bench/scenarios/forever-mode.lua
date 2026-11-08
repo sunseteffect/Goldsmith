@@ -31,7 +31,10 @@ bench.HasNot("Stats: no players' orders", screens.stats, "From players' orders")
 
 bench.Equal("12s 40c", addon:FormatMoney(1240), "12s 40c")
 bench.Equal("3g 25s", addon:FormatMoney(32500), "3g 25s")
-local title = addon:GoldsmithTitles()[2]
+local titles = addon:GoldsmithTitles()
+bench.Equal("starts at Novice", titles[1][2], "Novice")
+bench.Equal("Apprentice at 5g", titles[2][1], 5)
+local title = titles[3]
 bench.Equal("Journeyman at 10g", title[1], 10)
 bench.Check("minLine default in silver", addon:Setting("minLine") == 0.005 or GoldsmithDB.settings.minLine ~= nil)
 bench.Equal("no-price text after a scan", addon:NoPriceText("x"),

@@ -395,7 +395,9 @@ local function Create(parent)
     view.list:SetColumns(COLUMNS)
     view.footnote = UI.Text(parent, "small", "dim")
     view.footnote:SetPoint("BOTTOMLEFT", 2, 2)
-    view.summary:SetPoint("BOTTOMRIGHT", -2, 2)
+    -- Clear of the window's carved corner, which covered the gold out
+    -- (user, 2026-11-07)
+    view.summary:SetPoint("BOTTOMRIGHT", -40, 2)
     -- Deleted entries are kept to undo until you leave History (another
     -- tab, or the window closes)
     parent:HookScript("OnHide", function() wipe(deletedRows) end)

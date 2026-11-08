@@ -1626,8 +1626,19 @@ end
 
 local function CraftStepState(node, state)
     local recipe = node.best.recipe
+    state.stepRecipe = recipe
+    -- A material from another profession (Copper Bar for a mace): this was
+    -- a greyed-out "Open Mining" (user, 2026-11-06), as salvage's once was
     if not ProfessionOpen(recipe) then
-        table.insert(state.blockers, string.format("Open %s to make %s first.", recipe.profession, node.name))
+        if not addon:KnowsRecipe(recipe.recipeID) then
+            table.insert(state.blockers, string.format("This character doesn't know %s.", node.name))
+        elseif C_TradeSkillUI.OpenRecipe then
+            state.label, state.enabled, state.open, state.openRecipeID = "Open " .. recipe.profession, true, true, recipe.recipeID
+            table.insert(state.notes, string.format("Opens %s to make %s. The game only crafts with the profession open.",
+                recipe.profession, node.name))
+        else
+            table.insert(state.blockers, string.format("Open %s to make %s first.", recipe.profession, node.name))
+        end
         return state
     end
     local info = C_TradeSkillUI.GetRecipeInfo(recipe.recipeID)
@@ -1742,6 +1753,14 @@ local function CraftState(p, tierInfo, plan)
         end
     end
     if not ProfessionOpen(recipe) then
+        -- The next step is another profession's: that comes first, or the
+        -- button only sends you back here (Mining open, it said Open
+        -- Blacksmithing, then Open Mining again)
+        local steps = plan and plan.nodes and CollectSteps(plan.nodes, {}) or {}
+        local first = steps[1]
+        if first and first.best.method == "Craft" and first.best.recipe.profession ~= recipe.profession then
+            return StepState(steps, plan)
+        end
         state.label, state.enabled, state.open = "Open " .. recipe.profession, true, true
         table.insert(state.notes, "Opens " .. recipe.profession .. " at this recipe. The game only crafts with the profession open.")
         return state
@@ -1833,6 +1852,8 @@ end
 -- press (the game only crafts from one).
 local function PerformCraftState(state, recipe, onOpened)
     if not (state and state.enabled) then return end
+    -- A step from another profession opens that one, not the plan's
+    recipe = state.stepRecipe or recipe
     if addon:TourBlocks(state.open and ("open " .. (recipe.profession or "the profession")) or "craft") then return end
     if state.open then
         if C_TradeSkillUI.OpenRecipe then
@@ -2579,7 +2600,7 @@ local function CreatePlanScreen(parent)
     -- each craft, so it's never changed mid-craft
     local function SyncWindow(state)
         local p = screen.plan
-        if not (state and state.reagents and p and ProfessionOpen(p.recipe)) then
+        if not (state and state.reagents and p and ProfessionOpen(state.stepRecipe or p.recipe)) then
             screen.syncedKey = nil
             return
         end

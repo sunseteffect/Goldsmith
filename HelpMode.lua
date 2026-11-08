@@ -266,7 +266,7 @@ TAB_PARTS.stats = function(list)
     local view = Screen("stats")
     if not view then return end
     Add(list, "Goldsmith title",
-        "Earned by lifetime profit, from Apprentice up. Hover it for every title and what it takes.",
+        "Earned by lifetime profit. Hover it for every title and what it takes.",
         view.tiles[1])
     Add(list, "Share in chat",
         "Writes your title and best numbers in the chat box. Press Enter to send it to friends or your guild.",

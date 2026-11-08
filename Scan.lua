@@ -25,7 +25,13 @@ local FULL_COOLDOWN = 15 * 60   -- the server's limit on full scans
 local FULL_WAIT = 120           -- seconds for the full scan's data before paging instead
 -- Forever: its AH is small, and full scans sat out the whole wait before
 -- paging, 2 minutes where paging takes 23 s (user, 2026-11-05)
-local FULL_WAIT_FOREVER = 15
+-- The wait was 15 s, but Forever's data came, just with no
+-- REPLICATE_ITEM_LIST_UPDATE (208,747 listings within a minute; user,
+-- 2026-11-08). It's looked for every second now, so this is only how long
+-- to wait when none comes.
+local FULL_WAIT_FOREVER = 60
+local STEADY = 3                -- seconds the count holds still before reading it (no event)
+local ARRIVE_MAX = 180          -- seconds of a growing count before reading what's there
 local SETTLE = 2                -- seconds after the first data event before reading
 local PAGE_STALL = 20           -- seconds without a page before stopping
 local PAGES_GUESS = 70          -- pages in a page scan, until one has run (69 on retail)
@@ -177,6 +183,21 @@ end
 
 -- Full scan
 
+-- How many items a full scan's listing is, its buyout being for all of
+-- them. Forever's materials are pooled past a stack (214 Linen Cloth for
+-- 18,190c), so a stack size can't cap those. An item that doesn't stack is
+-- one: Forever's counts for those can be far off (a bag search said 8),
+-- with the price for one (user, 2026-11-08).
+local stackOf = {}
+function addon:ReplicateUnits(count, itemID)
+    if not addon.isForever or not itemID or (count or 0) <= 1 then return count end
+    if stackOf[itemID] == nil then
+        local ok, stack = pcall(C_Item.GetItemMaxStackSizeByID, itemID)
+        stackOf[itemID] = ok and type(stack) == "number" and stack or false
+    end
+    return stackOf[itemID] == 1 and 1 or count
+end
+
 -- Each item's listings as price levels, then its fair price
 local function PriceBooks(books, auctions)
     local prices, ids = {}, {}
@@ -233,6 +254,7 @@ local function ReadFullScan()
                 pcall(api.GetReplicateItemInfo, n)
             if okI and type(buyout) == "number" and buyout > 0 and type(count) == "number" and count > 0
                 and Priced(itemID) then
+                count = addon:ReplicateUnits(count, itemID)
                 local unit = buyout / count
                 local book = books[itemID]
                 if not book then book = {}; books[itemID] = book end
@@ -275,11 +297,17 @@ local function FinishPages()
     -- priced all of Winged Stalk (about 10g; user, 2026-10-19). An item
     -- under half its last fair price keeps that price (the lowest stays
     -- as p[2]); the next full scan says whether it really dropped.
+    -- Only once in a row: a page scan's kept price was kept again by every
+    -- page scan after it, and Forever has had no full scan to end it. Red
+    -- Linen Bag stayed 20s for hours while the AH sold it at 4s (user,
+    -- 2026-11-08). A full scan's price, or a page scan's own lowest, can be
+    -- kept; one already kept isn't.
     local lastScan = GoldsmithDB.ownScan
     local last = lastScan and lastScan.prices
     for itemID, p in pairs(prices) do
         local before = last and addon:PriceHoldsHere(lastScan.group, itemID) and last[itemID]
-        if before and before[1] and p[1] < before[1] * LOW_KEEP then p[1] = before[1] end
+        local keepable = before and before[1] and (lastScan.method == "full" or before[1] == before[2])
+        if keepable and p[1] < before[1] * LOW_KEEP then p[1] = before[1] end
     end
     timing = {}
     Timed("pricing", started)
@@ -344,7 +372,8 @@ function addon:ScanAH(auto)
     local lastFull = GoldsmithDB.lastFullRequest or 0
     if api.ReplicateItems and time() - lastFull >= FULL_COOLDOWN then
         GoldsmithDB.lastFullRequest = time()
-        run = { phase = "waiting", method = "full", started = time() }
+        local okN, before = pcall(api.GetNumReplicateItems)
+        run = { phase = "waiting", method = "full", started = time(), countBefore = okN and before or 0 }
         local ok = pcall(api.ReplicateItems)
         if not ok then StartPages() end
     else
@@ -425,7 +454,32 @@ end
 -- worked (user, 2026-10-30 and 31).
 C_Timer.NewTicker(1, function()
     if not run then return end
-    if run.phase == "waiting" and time() - run.started > (addon.isForever and FULL_WAIT_FOREVER or FULL_WAIT) then
+    -- The data without its event (Forever): read it as if the event came,
+    -- once the count has stopped growing for STEADY seconds. Read 2 s after
+    -- the first, it had 22,528 of 208,747 listings, 1,855 items (user,
+    -- 2026-11-08). Only a count that changed since asking, so an older
+    -- scan's list still held isn't read as this one. Still growing at
+    -- ARRIVE_MAX, what's there is read.
+    if run.phase == "waiting" and not run.settling and not run.borrowed then
+        local okN, num = pcall(C_AuctionHouse.GetNumReplicateItems)
+        if okN and type(num) == "number" and num > 0 and num ~= run.countBefore then
+            run.arriving = run.arriving or time()
+            if num ~= run.lastCount then
+                run.lastCount, run.steady = num, 0
+            else
+                run.steady = run.steady + 1
+            end
+            if run.steady >= STEADY or time() - run.arriving > ARRIVE_MAX then
+                run.settling = true
+                ReadFullScan()
+                return
+            end
+            UpdatePanel()
+            return
+        end
+    end
+    if run.phase == "waiting" and not run.settling and not run.arriving
+        and time() - run.started > (addon.isForever and FULL_WAIT_FOREVER or FULL_WAIT) then
         if run.borrowed then run = nil else StartPages() end
         UpdatePanel()
     elseif run.phase == "pages" and GetTime() - run.lastPage > PAGE_STALL then
@@ -681,33 +735,51 @@ local function FlipIsCommodity(itemID)
     return ok and kinds and kinds.Commodity ~= nil and status == kinds.Commodity
 end
 
--- The cheapest listing you can buy: { auctionID, price (all of it), unit }
+-- The cheapest listing you can buy: { auctionID, price (all of it), unit },
+-- or nil and why: "bid" (listed with a bid only, no buyout), "own" or nil
 local function CheapestListing(e)
     local key = FlipKey(e)
     if not key then return nil end
     local ok, count = pcall(C_AuctionHouse.GetNumItemSearchResults, key)
-    local best
+    local best, why
     for i = 1, ok and count or 0 do
         local okR, r = pcall(C_AuctionHouse.GetItemSearchResultInfo, key, i)
-        if okR and type(r) == "table" and not r.containsOwnerItem and (r.buyoutAmount or 0) > 0 and r.auctionID then
+        if okR and type(r) == "table" and r.containsOwnerItem then
+            why = why or "own"
+        elseif okR and type(r) == "table" and (r.buyoutAmount or 0) <= 0 then
+            why = "bid"
+        elseif okR and type(r) == "table" and r.auctionID then
             local unit = r.buyoutAmount / addon:AuctionQuantity(r, e.itemID)
             if not best or unit < best.unit then
                 best = { auctionID = r.auctionID, price = r.buyoutAmount, unit = unit }
             end
         end
     end
-    return best
+    return best, why
 end
+
+-- Bid-only listings: the scan shows their bid as the price, and they can't
+-- be bought out, so Buy to vendor listed Spiked Chain Gauntlets of Power at
+-- 7s, then said it wasn't available (user, 2026-11-08). Kept off the list
+-- while the item's lowest price is still that bid.
+local bidOnly = {}
 
 local function FlipResults(key)
     local buy = flipBuy
     if not buy or buy.stage ~= "loading" then return end
     local e = buy.entry
     if type(key) == "table" and key.itemID ~= e.itemID then return end
-    local name, listing = FlipName(e), CheapestListing(e)
+    local name, listing, why = FlipName(e), CheapestListing(e)
     local minimum = addon:Setting("flipMin") or 0
-    if not listing then
-        FlipWarn("%s isn't available any more", name)
+    if not listing and why == "bid" then
+        bidOnly[e.itemID] = e.low
+        FlipWarn("%s is bid only, with no buyout to buy. Taken off the list", name)
+        DropFlip(e)
+    elseif not listing and why == "own" then
+        FlipWarn("%s is your own listing. Taken off the list", name)
+        DropFlip(e)
+    elseif not listing then
+        FlipWarn("%s sold or was taken down. Taken off the list", name)
         DropFlip(e)
     elseif listing.unit >= e.sell or e.sell - listing.unit < minimum then
         FlipWarn("%s is now %s each, under your minimum", name, addon:FormatMoney(listing.unit))
@@ -855,7 +927,8 @@ local function RankFlips(listings, quiet)
         if sell and sell > 0 then
             local e
             for _, r in ipairs(rows) do
-                if r[1] < sell and sell - r[1] >= minimum then
+                local bid = bidOnly[itemID] and math.floor(r[1] + 0.5) == math.floor(bidOnly[itemID] + 0.5)
+                if r[1] < sell and sell - r[1] >= minimum and not bid then
                     e = e or { itemID = itemID, sell = sell, count = 0, cost = 0, gain = 0, low = r[1], key = r[3] }
                     e.count = e.count + r[2]
                     e.cost = e.cost + r[1] * r[2]
@@ -905,7 +978,7 @@ function addon:FindVendorFlips(method)
                 i = i + 1
                 if okI and itemID and type(buyout) == "number" and buyout > 0 and type(count) == "number" and count > 0 then
                     listings[itemID] = listings[itemID] or {}
-                    count = addon:AuctionQuantity({ quantity = count }, itemID)
+                    count = addon:ReplicateUnits(count, itemID)
                     table.insert(listings[itemID], { buyout / count, count })
                 end
                 if debugprofilestop() - started > 6 then break end

@@ -72,7 +72,7 @@ bench.Equal("nothing bought", Bids(), before)
 
 -- Gone
 Load(BOW, {})
-bench.Has("gone warns", bench.Chat(), "isn't available", true)
+bench.Has("gone warns", bench.Chat(), "sold or was taken down", true)
 bench.Check("row dropped", Find(BOW) == nil)
 bench.Equal("nothing bought", Bids(), before)
 
