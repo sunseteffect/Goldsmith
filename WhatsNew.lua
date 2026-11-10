@@ -98,9 +98,9 @@ local function Build()
     shade:SetScript("OnClick", function() box:Hide() end)
     shade:Hide()
     -- Near solid, like the AH and mailbox panels: "highlight" is 60% in
-    -- the game themes and the window showed through (user, 2026-11-11)
+    -- the game themes and the window showed through (user, 2026-11-10)
     -- (UI.Panel has no "floating" style: restyled, as the mail panel is.
-    -- UI.Panel(window, "floating") was a Lua error, 2026-11-11)
+    -- UI.Panel(window, "floating") was a Lua error, 2026-11-10)
     box = UI.Panel(window, "highlight")
     UI.Style(box, "floating", "borderGold")
     box:SetWidth(WIDTH)

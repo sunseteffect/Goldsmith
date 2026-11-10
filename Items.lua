@@ -1083,7 +1083,7 @@ local function CreatePage(parent)
             local held = d.breakEvenFrom ~= "estimated"
             local crafted = d.recipe and not d.material
             -- None held: "the ones you hold" next to You have 0 read wrong
-            -- (user, 2026-11-11, gold Gloaming Alloy): your last ones'
+            -- (user, 2026-11-10, gold Gloaming Alloy): your last ones'
             local whose = not held and "ones you make now"
                 or (d.have or 0) > 0 and "the ones you hold"
                 or d.breakEvenFrom == "paid" and "the ones you bought"

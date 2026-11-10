@@ -4114,7 +4114,7 @@ local function Refresh(v, state)
     -- for your crafts (most enchant profit is with it)
     local unlearnedMode = not focus and CraftsShow() == "unlearned"
     -- "cooldown" lists every recipe with a cooldown on any of your
-    -- characters, ready or not (Idea Board, 2026-10-28; built 2026-11-11).
+    -- characters, ready or not (Idea Board, 2026-10-28; built 2026-11-10).
     -- Cooldowns were only on the Characters card hover and Do this next.
     local cooldownRecipes
     if needle == "cooldown" or needle == "cooldowns" then

@@ -1,4 +1,4 @@
--- Coin icons (Settings > Display, off by default; user, 2026-11-11)
+-- Coin icons (Settings > Display, off by default; user, 2026-11-10)
 local bench = dofile(BENCH_DIR .. "bench.lua")
 local addon = bench.Login("Mysticmead")
 local G, S, C = "UI%-GoldIcon", "UI%-SilverIcon", "UI%-CopperIcon"

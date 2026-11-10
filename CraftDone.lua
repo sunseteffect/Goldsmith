@@ -332,8 +332,12 @@ local function Finish()
     if not b or b.done == 0 then return end
     ShowToast(b)
     local _, _, _, profit = Describe(b)
+    -- Only the first letter lowered ("estimated profit"): lowering it all
+    -- broke the coin icons' |T codes into text in chat (user, 2026-11-10)
+    local line = profit and profit:match("^[^\n]*"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+    line = line and (line:gsub("^%u", string.lower))
     addon:Notify("info", "%s: %d %s%s.", b.done >= b.crafts and "Craft complete" or "Crafting stopped",
-        b.made, b.name, profit and (", " .. profit:match("^[^\n]*"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):lower()) or "")
+        b.made, b.name, line and (", " .. line) or "")
 end
 
 -- Crafts are being followed (the plan doesn't set the game's window

@@ -1627,7 +1627,7 @@ function addon:CreateSettingsPanel(parent)
     end
     TileOpens(tiles[2], "prices", "Prices and scan")
     TileOpens(tiles[3], "keys", "Keys")
-    -- Opens What's new (Idea Board, user 2026-10-30; built 2026-11-11):
+    -- Opens What's new (Idea Board, user 2026-10-30; built 2026-11-10):
     -- Settings closes so the box isn't behind it
     tiles[1]:SetScript("OnMouseUp", function()
         panel:Hide()

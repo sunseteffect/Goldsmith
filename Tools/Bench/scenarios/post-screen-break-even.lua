@@ -1,5 +1,5 @@
 -- Break-even on the AH posting screen, above the Post button (Idea Board;
--- user, 2026-11-11): the break-even and the profit each at the price typed
+-- user, 2026-11-10): the break-even and the profit each at the price typed
 local bench = dofile(BENCH_DIR .. "bench.lua")
 local addon = bench.Login("Mysticmead")
 local BAG = 990071

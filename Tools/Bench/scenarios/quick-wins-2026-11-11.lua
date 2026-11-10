@@ -1,4 +1,4 @@
--- Idea Board quick wins (user, 2026-11-11): the Version tile opens What's
+-- Idea Board quick wins (user, 2026-11-10): the Version tile opens What's
 -- new, "cooldown" as a Crafts search word, craft cost on History rows
 local bench = dofile(BENCH_DIR .. "bench.lua")
 local addon = bench.Login("Mysticmead")

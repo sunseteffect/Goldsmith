@@ -1,4 +1,4 @@
--- With BugSack installed, Goldsmith still records its own errors (2026-11-11:
+-- With BugSack installed, Goldsmith still records its own errors (2026-11-10:
 -- today's BugGrabber announces them through EventRegistry, and Goldsmith
 -- only listened the old way, so a What's new error showed in BugSack only)
 local bench = dofile(BENCH_DIR .. "bench.lua")

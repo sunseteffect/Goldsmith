@@ -5,7 +5,7 @@ local addon = _G.Goldsmith or {}
 -- Under the Post button on the game's sell screens (commodities and
 -- items) and Auctionator's Selling tab: the break-even of the item you're posting and the profit each
 -- at the price typed in, so you don't have to hover the item to check
--- (Idea Board, 2026-10-29; built 2026-11-11, user: "i find myself mostly
+-- (Idea Board, 2026-10-29; built 2026-11-10, user: "i find myself mostly
 -- look at break even cost"). The same cost as the "posted under
 -- break-even" warning (Core.lua's PostCost): your crafts or what you paid,
 -- never an estimate; nothing shows for gathered or looted items.
@@ -17,10 +17,10 @@ local lines = {} -- sell frame -> its font string
 
 -- Each sell screen: its frame, Post button, and how to read the item,
 -- price each and quantity. Under the Post button: above it, the text sat
--- on the game's Total Price (user, 2026-11-11). Auctionator's Selling tab
--- too (user, 2026-11-11: "lets support auctionator selling"): one line
+-- on the game's Total Price (user, 2026-11-10). Auctionator's Selling tab
+-- too (user, 2026-11-10: "lets support auctionator selling"): one line
 -- after the item's name on its title line. Under its Post button it sat
--- against the price list's headers (user, 2026-11-11: "i don't like the
+-- against the price list's headers (user, 2026-11-10: "i don't like the
 -- auctionator break even text placement").
 local function Get(fn, ...)
     local ok, value = pcall(fn, ...)

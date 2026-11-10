@@ -647,7 +647,7 @@ end
 
 -- First Aid saved as "Aid" in Forever's launch week: a skill line's last
 -- word was taken as its profession before 2.7.6 checked it was one. Stats
--- listed "5. Aid" under First Aid (user, 2026-11-11). Only when one of your
+-- listed "5. Aid" under First Aid (user, 2026-11-10). Only when one of your
 -- characters has First Aid, so a real profession called Aid is left alone.
 function addon:RepairAidProfession()
     if GoldsmithDB.aidRepaired then return end

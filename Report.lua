@@ -45,7 +45,7 @@ local sessionCount = 0
 local told = false
 
 -- "Interface/AddOns/Goldsmith/..." from the game, "Goldsmith/..." from
--- BugGrabber, which shortens paths (2026-11-11). Not GoldsmithData or
+-- BugGrabber, which shortens paths (2026-11-10). Not GoldsmithData or
 -- another addon whose name ends in Goldsmith.
 local function IsOurs(text)
     return type(text) == "string" and text:find("%f[%w_]Goldsmith[/\\]") ~= nil
@@ -130,7 +130,7 @@ local function WatchBugGrabber()
     end
     -- Today's BugGrabber says so through the game's EventRegistry, with
     -- the error's ID; the callback below never fired, so with BugSack
-    -- installed Goldsmith saw none of its own errors (2026-11-11: a What's
+    -- installed Goldsmith saw none of its own errors (2026-11-10: a What's
     -- new error showed in BugSack only)
     if EventRegistry and EventRegistry.RegisterCallback and grabber.GetErrorByID then
         EventRegistry:RegisterCallback("BugGrabber.BugGrabbed", function(_, tableID)

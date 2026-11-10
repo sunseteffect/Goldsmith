@@ -26,4 +26,20 @@ bench.HasNot("chat stays one line", chat, "today's", true)
 addon:StartCraftBatch(recipe, { crafts = 1 })
 addon:CraftBatchResult(999100, recipe, { itemID = KEY, quantity = 2 }, { qty = 2, unitCost = 235 }, { [BAR] = 1 })
 bench.HasNot("no line when they're close", table.concat(bench.Screen(), "\n"), "At today's prices", true)
+-- Coin icons on: the chat line keeps the icons' |T codes (lowering the
+-- whole line broke them into text: "+4interface\moneyframe\ui-silvericon",
+-- user 2026-11-10)
+GoldsmithDB.settings.coinIcons = true
+local rawLine
+local benchPrint = print
+print = function(...) rawLine = table.concat({ ... }, " ") return benchPrint(...) end
+addon:StartCraftBatch(recipe, { crafts = 1 })
+bench.Chat()
+addon:CraftBatchResult(999100, recipe, { itemID = KEY, quantity = 2 }, { qty = 2, unitCost = 520 }, { [BAR] = 1 })
+print = benchPrint
+local last = rawLine or ""
+bench.Check("coin icon code intact in chat", last:find("|TInterface", 1, true) ~= nil and last:find("|t", 1, true) ~= nil, last)
+bench.Check("no lowered icon code", last:find("interface", 1, true) == nil, last)
+bench.Has("still lower-case estimated", last, "estimated profit", true)
+GoldsmithDB.settings.coinIcons = nil
 bench.Done()

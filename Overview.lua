@@ -146,7 +146,7 @@ end
 local function FillSalesTile(tile, s, prof)
     local scope = ScopeText(prof)
     -- Filtered, just the profession: "Cooking only, after the AH c..." ran
-    -- off the tile (user, 2026-11-11); the hover says it's after the cut
+    -- off the tile (user, 2026-11-10); the hover says it's after the cut
     tile:Set("Sales", Money(s.sales), "text", scope or "after the AH cut, all characters")
     tile.tooltip = function(tooltip)
         tooltip:AddLine("Sales", 1, 1, 1)

@@ -1,4 +1,4 @@
--- Forever's launch-week "Aid" (First Aid) put right once (user, 2026-11-11:
+-- Forever's launch-week "Aid" (First Aid) put right once (user, 2026-11-10:
 -- Stats listed "5. Aid" under First Aid)
 local bench = dofile(BENCH_DIR .. "bench.lua")
 local db = bench.LoadSaved()
