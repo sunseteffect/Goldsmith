@@ -650,16 +650,19 @@ local function Refresh(v)
         v.spendLine:SetText(text)
         v.spendLine:SetTextColor(addon:Color(short and "warning" or "muted"))
     end
-    if #q.buyVendor > 0 then
-        local parts = {}
-        for _, entry in ipairs(q.buyVendor) do table.insert(parts, entry.quantity .. " " .. entry.name) end
-        -- Orange and "first": 53 Luminant Flux in muted text was missed and
-        -- the queue stalled on Needs materials (user, 2026-10-22)
-        v.vendorLine:SetText("Vendor: " .. table.concat(parts, ", "))
-        v.vendorLine:SetTextColor(addon:Color("warning"))
-    else
-        v.vendorLine:SetText("")
+    -- Orange and "first": 53 Luminant Flux in muted text was missed and
+    -- the queue stalled on Needs materials (user, 2026-10-22). The bank's
+    -- the same: the whole queue's, before you go (Forever, user 2026-11-10)
+    local lines = {}
+    for _, list in ipairs({ { "Vendor", q.buyVendor }, { "Bank", addon:QueueFromBank(q) } }) do
+        if #list[2] > 0 then
+            local parts = {}
+            for _, entry in ipairs(list[2]) do table.insert(parts, entry.quantity .. " " .. entry.name) end
+            table.insert(lines, list[1] .. ": " .. table.concat(parts, ", "))
+        end
     end
+    v.vendorLine:SetText(table.concat(lines, "   "))
+    v.vendorLine:SetTextColor(addon:Color("warning"))
 
     local canSend = #q.buyAH > 0 and addon:HasAuctionator()
     v.shop:SetEnabled(canSend)

@@ -14,6 +14,18 @@ local UI = addon.UI
 -- this is marked seen. /gsm news shows it again.
 local NEWS = {
     {
+        key = "2.9.0",
+        title = "What's new in Goldsmith 2.9",
+        items = {
+            { "Break-even where you post", "On the AH's sell screen and Auctionator's: your break-even, and the profit each at the price you type." },
+            { "Shared materials in one go", "Craft next makes a material for every queued craft at once: all the bars first, then the crafts." },
+            { "One trip to the bank", "In Forever, the Queue tab says what to take from the bank, and at the bank Take all moves just that." },
+            { "Now a loss", "A queued craft whose price fell says so, and Craft next asks once before making it." },
+            { "Search History", "Find any item's sales, purchases and crafts by name." },
+            { "Coin icons", "Settings > Display > Coin icons shows money with the game's coins." },
+        },
+    },
+    {
         key = "2.8.0",
         title = "What's new in Goldsmith 2.8",
         items = {
@@ -85,7 +97,12 @@ local function Build()
     dark:SetColorTexture(0, 0, 0, SHADE_ALPHA)
     shade:SetScript("OnClick", function() box:Hide() end)
     shade:Hide()
+    -- Near solid, like the AH and mailbox panels: "highlight" is 60% in
+    -- the game themes and the window showed through (user, 2026-11-11)
+    -- (UI.Panel has no "floating" style: restyled, as the mail panel is.
+    -- UI.Panel(window, "floating") was a Lua error, 2026-11-11)
     box = UI.Panel(window, "highlight")
+    UI.Style(box, "floating", "borderGold")
     box:SetWidth(WIDTH)
     box:SetPoint("CENTER", window, "CENTER", 0, 20)
     box:SetFrameStrata("DIALOG")

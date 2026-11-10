@@ -157,7 +157,7 @@ TAB_PARTS.crafts = function(list)
             view.show)
         Add(list, "Only this character",
             "Only what the character you're on can make, with their own stats.", view.onlyMine)
-        Add(list, "Find a craft", "Search every craft and salvage by name.", view.searchBox)
+        Add(list, "Find a craft", "Search every craft and salvage by name. Type cooldown for every recipe with a cooldown.", view.searchBox)
         if not addon.isForever then
             Add(list, "Concentration",
                 "Shows the better quality concentration reaches, and how much gold each point earns (g/conc).",
@@ -180,7 +180,7 @@ TAB_PARTS.queue = function(list)
     Add(list, "Shopping list",
         "With Auctionator, one shopping list for everything in this character's queue (the one picked in Whose queue). Items come off it as you buy them. Or press Buy next in Goldsmith's panel by the AH, and use the panel beside a vendor for vendor materials.",
         view.shop)
-    Add(list, "Craft next", "Does the next step of the queue: one click per craft.", view.craft)
+    Add(list, "Craft next", "Does the next step of the queue: one click per craft. A material several crafts need is made for all of them at once.", view.craft)
 end
 
 TAB_PARTS.items = function(list)
@@ -198,7 +198,7 @@ TAB_PARTS.items = function(list)
         Add(list, "Break-even",
             "The lowest price that doesn't lose money on what yours cost you, after the AH cut. List the ones you hold above this.",
             t[5])
-        Add(list, "What it costs", "What yours cost you (crafted, bought or salvaged), what making one costs now, and the profit each at today's price.",
+        Add(list, "What it costs", "What yours cost you (crafted, bought or salvaged), what making one costs now, the profit each at today's price, and the break-even of one made now.",
             page.concNote:GetParent())
         local firstTier, lastTier
         for _, row in ipairs(page.tierRows or {}) do
@@ -237,6 +237,7 @@ TAB_PARTS.history = function(list)
     local view = Screen("history")
     if not view then return end
     local chips = view.chips or {}
+    Add(list, "Find an item", "Show only entries whose item name has what you type.", view.searchBox)
     Add(list, "Kinds", "Show one kind: sales, purchases, deposits, crafts, orders, gathering or boxes opened.",
         chips[1], chips[#chips])
     Add(list, "Character", "Show one character's entries.", view.character)

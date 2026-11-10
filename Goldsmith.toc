@@ -4,7 +4,7 @@
 ## Author: sunseteffect
 ## SavedVariables: GoldsmithDB
 ## OptionalDeps: Auctionator, TradeSkillMaster, GoldsmithData
-## Version: 2.8.2-beta
+## Version: 2.9.0-beta
 ## IconTexture: Interface\AddOns\Goldsmith\Media\Logo
 ## AddonCompartmentFunc: Goldsmith_OnAddonCompartmentClick
 
@@ -38,6 +38,8 @@ Scan.lua
 Shop.lua
 Vendor.lua
 Mail.lua
+Bank.lua
+PostInfo.lua
 Items.lua
 History.lua
 CharactersTab.lua

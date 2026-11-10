@@ -107,13 +107,29 @@ end
 
 -- Tiles
 
-local function FillProfitTile(tile, s)
-    local note = s.margin and string.format("%.0f%% margin, all characters", s.margin)
+-- The profession filter, said on every tile it narrows, so a Cooking-only
+-- total isn't mistaken for everything (user, 2026-11-08)
+local function ScopeText(prof)
+    if not prof or prof == "All" then return nil end
+    return addon:ProfessionIconText(prof) .. prof .. " only"
+end
+
+local function AddScopeLine(tooltip, prof)
+    if prof and prof ~= "All" then
+        tooltip:AddLine("Only " .. prof .. ". Pick All professions at the top to see everything.", 1, 0.82, 0, true)
+    end
+end
+
+local function FillProfitTile(tile, s, prof)
+    local scope = ScopeText(prof)
+    local note = s.margin and string.format("%.0f%% margin, %s", s.margin, scope or "all characters")
         or (s.sales > 0 and "cost unknown" or "no sales yet")
+    if not s.margin and scope then note = scope .. ", " .. note end
     tile:Set("Profit on sales", Signed(s.profit), addon:MoneyColor(s.profit), note)
     tile.tooltip = function(tooltip)
         tooltip:AddLine("Profit on sales", 1, 1, 1)
         tooltip:AddLine("All your characters.", 0.6, 0.6, 0.6)
+        AddScopeLine(tooltip, prof)
         tooltip:AddDoubleLine("Sales", Money(s.sales), 0.8, 0.8, 0.8, 1, 1, 1)
         tooltip:AddDoubleLine("What the items sold cost you", "-" .. Money(s.soldCost), 0.8, 0.8, 0.8, 1, 1, 1)
         tooltip:AddDoubleLine("AH deposits", "-" .. Money(s.deposits), 0.8, 0.8, 0.8, 1, 1, 1)
@@ -127,11 +143,15 @@ local function FillProfitTile(tile, s)
     end
 end
 
-local function FillSalesTile(tile, s)
-    tile:Set("Sales", Money(s.sales), "text", "after the AH cut, all characters")
+local function FillSalesTile(tile, s, prof)
+    local scope = ScopeText(prof)
+    -- Filtered, just the profession: "Cooking only, after the AH c..." ran
+    -- off the tile (user, 2026-11-11); the hover says it's after the cut
+    tile:Set("Sales", Money(s.sales), "text", scope or "after the AH cut, all characters")
     tile.tooltip = function(tooltip)
         tooltip:AddLine("Sales", 1, 1, 1)
-        tooltip:AddLine("All your characters.", 0.6, 0.6, 0.6)
+        tooltip:AddLine("All your characters, after the AH cut.", 0.6, 0.6, 0.6)
+        AddScopeLine(tooltip, prof)
         tooltip:AddDoubleLine("Spent on purchases", Money(s.spent), 0.8, 0.8, 0.8, 1, 1, 1)
         addon:Explain(tooltip, "Materials you still hold aren't a loss until they're used or sold.", 0.6, 0.6, 0.6, true)
     end
@@ -1304,8 +1324,8 @@ local function Refresh(view, state)
     loading:Begin(view.professionsPanel)
 
     local summary = addon:GetSummary(prof, range)
-    FillProfitTile(view.tiles[1], summary)
-    FillSalesTile(view.tiles[2], summary)
+    FillProfitTile(view.tiles[1], summary, prof)
+    FillSalesTile(view.tiles[2], summary, prof)
     loading:Done(view.tiles[1])
     loading:Done(view.tiles[2])
     local stock = addon:GetStockValue(prof)

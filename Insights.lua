@@ -1412,7 +1412,7 @@ function addon:GetCraftRows(prof, opts)
             and not addon:IsSalvageRecipe(recipe)
             and (not opts.showExpansion or opts.showExpansion(addon:GetRecipeExpansion(recipe)))
             and (opts.showIgnored or not addon:IsIgnored(recipe.outputItemID))
-            and (not opts.match or opts.match({ recipe.outputName, recipe.name }))
+            and (not opts.match or opts.match({ recipe.outputName, recipe.name }, recipe))
             -- Recipes only excluded characters know are left out, and so are
             -- recipes nobody knows (saved from a link or another profession's
             -- window: Amani Resourcefulness showed as a craft, 2026-10-09)
@@ -1483,7 +1483,7 @@ function addon:GetUnlearnedRows(prof, opts)
         if recipe and not GoldsmithDB.recipes[recipeID]
             and (prof == "All" or recipe.profession == prof)
             and addon:CanAuction(recipe.outputItemID) ~= false
-            and (not opts.match or opts.match({ recipe.outputName, recipe.name })) then
+            and (not opts.match or opts.match({ recipe.outputName, recipe.name }, recipe)) then
             -- Who'd learn it: you if you can, otherwise the first counted
             -- character with the profession
             local learners = recipe.learners or {}
@@ -2082,7 +2082,8 @@ end
 -- they can't be deleted here, and don't record who crafted them).
 -- filters: prof ("All" or one), since (a time or nil), kind ("Sale",
 -- "Purchase", "Deposit", "Craft" or nil for all), character ("Name-Realm"
--- or nil), item (a name or nil).
+-- or nil), item (a name or nil), search (lowercase text the item's name
+-- contains, or nil).
 -- Crafts for crafting orders (GoldsmithDB.orderCrafts) are "Order" rows.
 -- Gathered materials (GoldsmithDB.gathered) are one "Gathered" row a day
 -- with worth (at the AH price when gathered), items ({ itemID, name, qty,
@@ -2102,9 +2103,9 @@ local CRAFT_BATCH_GAP = 5 * 60
 
 function addon:GetHistory(filters)
     local store = historyCache:Get()
-    local id = string.format("%s|%s|%s|%s|%s|%s", tostring(filters.prof), tostring(filters.since),
+    local id = string.format("%s|%s|%s|%s|%s|%s|%s", tostring(filters.prof), tostring(filters.since),
         tostring(filters.kind), tostring(filters.character), tostring(filters.item),
-        filters.item and "" or addon:ExpansionFilterKey())
+        filters.item and "" or addon:ExpansionFilterKey(), tostring(filters.search))
     store[id] = store[id] or { History(filters) }
     return store[id][1], store[id][2]
 end
@@ -2147,6 +2148,7 @@ History = function(filters)
         return (not filters.kind or filters.kind == kind)
             and (not filters.since or t >= filters.since)
             and (not filters.item or filters.item == item)
+            and (not filters.search or (item and item:lower():find(filters.search, 1, true) ~= nil))
             and (filters.prof == "All" or profession == filters.prof)
             and (not filters.character or filters.character == character)
             and Shown(itemID, item)

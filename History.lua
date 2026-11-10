@@ -12,6 +12,11 @@ local UI = addon.UI
 -- (Insights.lua).
 
 local TOP_HEIGHT = 26
+-- The search line above the filters (user, 2026-11-10: "put the search
+-- above the filters in its own line"), then the filters' line
+local SEARCH_HEIGHT = TOP_HEIGHT + 8
+local SEARCH_MIN_LETTERS = 2
+local SEARCH_DELAY = 0.3
 
 local Money, Signed = function(c) return addon:FormatMoney(c) end, function(c) return addon:FormatSignedMoney(c) end
 
@@ -86,6 +91,13 @@ local function FillRow(r, row)
         -- Gathered: what it's worth, grey because no gold moved
         c.gold:SetText(Money(row.worth))
         c.gold:SetTextColor(addon:Color("muted"))
+    elseif row.kind == "Craft" and row.cost and row.qty then
+        -- What the batch's materials cost, grey with no minus: crafting
+        -- moves no gold (the materials were Purchase rows), so it's not in
+        -- the in/out totals. Each is in the hover (Idea Board, Reddit
+        -- feedback 2026-10-29: the cost only showed on hover)
+        c.gold:SetText(Money(row.cost * row.qty) .. (row.partial and "+" or ""))
+        c.gold:SetTextColor(addon:Color("muted"))
     else
         c.gold:SetText("-")
         c.gold:SetTextColor(addon:Color("dim"))
@@ -102,6 +114,8 @@ end
 -- A gathered day's hover lists this many materials, most valuable first;
 -- all of them with Ctrl (user, 2026-10-11: "and 14 more" hid the rest)
 local GATHERED_LINES = 15
+
+addon.HistoryFillRow = FillRow -- for the bench
 
 local function Tooltip(tooltip, row)
     if row.deleted then
@@ -327,6 +341,25 @@ local function Create(parent)
     local ui = GoldsmithDB.ui2
     local view = {}
 
+    -- Find entries by item name. Waits for a pause in typing: each search
+    -- reads the whole ledger once.
+    view.search = ""
+    view.searchBox = UI.SearchBox(parent, 260, "Find an item", function(text)
+        view.search = text
+        if view.searchTimer then view.searchTimer:Cancel() end
+        view.searchTimer = C_Timer.NewTimer(text == "" and 0 or SEARCH_DELAY, function()
+            view.searchTimer = nil
+            view.list:ScrollToTop()
+            addon.RefreshWindow()
+        end)
+    end)
+    view.searchBox:SetPoint("TOPLEFT", 0, 0)
+    UI.SetTooltip(view.searchBox, function(tooltip)
+        tooltip:AddLine("Find an item", 1, 1, 1)
+        addon:Explain(tooltip, "Two letters or more, anywhere in the item's name. The type, character and the filters at the top still apply. Escape clears it.",
+            0.6, 0.6, 0.6, true)
+    end)
+
     view.chips = {}
     local previous
     for _, kind in ipairs(KINDS) do
@@ -337,7 +370,7 @@ local function Create(parent)
                 addon.RefreshWindow()
             end)
             chip.key = kind.key
-            if previous then chip:SetPoint("LEFT", previous, "RIGHT", 6, 0) else chip:SetPoint("TOPLEFT", 0, 0) end
+            if previous then chip:SetPoint("LEFT", previous, "RIGHT", 6, 0) else chip:SetPoint("TOPLEFT", 0, -SEARCH_HEIGHT) end
             previous = chip
             table.insert(view.chips, chip)
         end
@@ -367,11 +400,13 @@ local function Create(parent)
     view.itemChip:HookScript("OnLeave", function(self) self:SetBackdropBorderColor(addon:Color("borderGold")) end)
     view.itemChip.label:SetTextColor(addon:Color("gold"))
     view.itemChip.label:SetWordWrap(false)
-    -- Fills what's left of the row: at a fixed 200 it ran past the window's
-    -- edge (Reddit feedback, Harandar Celebration, 2026-10-29); long names
-    -- end in "..."
-    view.itemChip:SetPoint("LEFT", view.character, "RIGHT", 10, 0)
-    view.itemChip:SetPoint("RIGHT", parent, "RIGHT", 0, 0)
+    view.itemChip.label:SetJustifyH("LEFT")
+    -- On the search line, after the box (user, 2026-11-10), as wide as its
+    -- text up to the window's edge (Refresh): at a fixed 200 it ran past
+    -- the edge (Reddit feedback, Harandar Celebration, 2026-10-29); long
+    -- names end in "..."
+    view.itemChip:SetPoint("LEFT", view.searchBox, "RIGHT", 10, 0)
+    view.parent = parent
 
     -- Bottom right, on the footnote's line: by the filters, long totals ran
     -- under the character dropdown (user 2026-10-14, "plenty of space there")
@@ -390,14 +425,16 @@ local function Create(parent)
             end
         end,
     })
-    view.list:SetPoint("TOPLEFT", 0, -(TOP_HEIGHT + 12))
+    view.list:SetPoint("TOPLEFT", 0, -(SEARCH_HEIGHT + TOP_HEIGHT + 12))
     view.list:SetPoint("BOTTOMRIGHT", 0, 22)
     view.list:SetColumns(COLUMNS)
     view.footnote = UI.Text(parent, "small", "dim")
-    view.footnote:SetPoint("BOTTOMLEFT", 2, 2)
-    -- Clear of the window's carved corner, which covered the gold out
-    -- (user, 2026-11-07)
-    view.summary:SetPoint("BOTTOMRIGHT", -40, 2)
+    -- Both clear of the window's carved corners, which covered the gold
+    -- out (user, 2026-11-07) and the notes on the left (2026-11-10: "all
+    -- dates and professions for this item" started under the silver corner)
+    -- 35 in: 40 left a gap (user, 2026-11-10: "5 pixels closer")
+    view.footnote:SetPoint("BOTTOMLEFT", 35, 2)
+    view.summary:SetPoint("BOTTOMRIGHT", -35, 2)
     -- Deleted entries are kept to undo until you leave History (another
     -- tab, or the window closes)
     parent:HookScript("OnHide", function() wipe(deletedRows) end)
@@ -419,21 +456,30 @@ local function Refresh(view, state)
     end
     view.character:SetLabel(characterName)
     view.itemChip:SetShown(view.item ~= nil)
-    if view.item then view.itemChip:SetLabel("Item: " .. view.item .. "   x") end
+    if view.item then
+        view.itemChip:SetLabel("Item: " .. view.item .. "   x")
+        local room = (view.parent:GetWidth() or 0) - view.searchBox:GetWidth() - 10
+        local label = view.itemChip.label
+        local want = (label.GetUnboundedStringWidth and label:GetUnboundedStringWidth() or label:GetStringWidth()) + 20
+        view.itemChip:SetWidth(math.max(math.min(want, room > 0 and room or want), 80))
+    end
 
     -- Runs as work over frames (Window.lua): the list shows "Loading" if
     -- it takes more than a frame; the filters above stay usable
     state.loading:Begin(view.list)
     -- One item's history (from its page) covers every date and profession
+    local needle = view.search:lower():match("^%s*(.-)%s*$")
     local filter = {
         prof = view.item and "All" or state.profession, since = not view.item and state.since or nil,
         kind = ui.historyKind, character = ui.historyCharacter, item = view.item,
+        search = #needle >= SEARCH_MIN_LETTERS and needle or nil,
     }
     currentFilter = table.concat({ tostring(filter.prof), tostring(filter.since), tostring(filter.kind),
-        tostring(filter.character), tostring(filter.item), addon:ExpansionFilterKey() }, "|")
+        tostring(filter.character), tostring(filter.item), addon:ExpansionFilterKey(), tostring(filter.search) }, "|")
     local rows, totals = addon:GetHistory(filter)
     view.list:SetEmptyText(#addon.ledger:getAll() == 0
         and "Nothing recorded yet. Purchases, sales and AH deposits are recorded as you make them."
+        or filter.search and string.format("No item matching \"%s\". Try another type, All characters, or a longer date range or All expansions at the top.", needle)
         or "Nothing matches. Try another type, All characters, or a longer date range or All expansions at the top.")
     -- Deleted ones back in their place, newest first like the list (the
     -- history rows are shared until data changes, so a new list)
@@ -486,6 +532,9 @@ local function Reset(view)
     local ui = GoldsmithDB.ui2
     view.item = nil
     ui.historyKind, ui.historyCharacter = nil, nil
+    view.search = ""
+    view.searchBox:SetText("")
+    view.searchBox:ClearFocus()
     view.list:ScrollToTop()
 end
 
@@ -508,6 +557,12 @@ local function Filters(view)
     end
     if view.item then
         table.insert(list, { label = view.item, clear = function() view.item = nil end })
+    end
+    if #view.search:match("^%s*(.-)%s*$") >= SEARCH_MIN_LETTERS then
+        table.insert(list, { label = "\"" .. view.search .. "\"", clear = function()
+            view.search = ""
+            view.searchBox:SetText("")
+        end })
     end
     return list
 end

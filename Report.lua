@@ -44,8 +44,11 @@ local early = {}
 local sessionCount = 0
 local told = false
 
+-- "Interface/AddOns/Goldsmith/..." from the game, "Goldsmith/..." from
+-- BugGrabber, which shortens paths (2026-11-11). Not GoldsmithData or
+-- another addon whose name ends in Goldsmith.
 local function IsOurs(text)
-    return type(text) == "string" and text:find("AddOns[/\\]Goldsmith[/\\]") ~= nil
+    return type(text) == "string" and text:find("%f[%w_]Goldsmith[/\\]") ~= nil
 end
 
 -- "Interface/AddOns/Goldsmith/Pricing.lua:1815: ..." -> "Goldsmith/Pricing.lua:1815: ..."
@@ -120,7 +123,20 @@ seterrorhandler(OnError)
 local function WatchBugGrabber()
     local grabber = _G.BugGrabber
     if not grabber or geterrorhandler() == OnError then return end
-    if grabber.RegisterCallback then
+    local function Grabbed(err)
+        if type(err) == "table" and (IsOurs(err.message) or IsOurs(err.stack)) then
+            Record(err.message, err.stack)
+        end
+    end
+    -- Today's BugGrabber says so through the game's EventRegistry, with
+    -- the error's ID; the callback below never fired, so with BugSack
+    -- installed Goldsmith saw none of its own errors (2026-11-11: a What's
+    -- new error showed in BugSack only)
+    if EventRegistry and EventRegistry.RegisterCallback and grabber.GetErrorByID then
+        EventRegistry:RegisterCallback("BugGrabber.BugGrabbed", function(_, tableID)
+            pcall(function() Grabbed(grabber:GetErrorByID(tableID)) end)
+        end, addon)
+    elseif grabber.RegisterCallback then
         pcall(grabber.RegisterCallback, addon, "BugGrabber_BugGrabbed", function(_, err)
             if type(err) == "table" and (IsOurs(err.message) or IsOurs(err.stack)) then
                 Record(err.message, err.stack)

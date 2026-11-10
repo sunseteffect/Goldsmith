@@ -416,15 +416,17 @@ end
 local AH_CUT = 0.05
 local POST_WARN_GAP = 15 * 60
 local postWarned = {}
-local function CheckPostPrice(itemLocation, quantity, unitPrice)
-    if not (unitPrice and unitPrice > 0 and C_Item.DoesItemExist(itemLocation)) then return end
-    local itemID, name = C_Item.GetItemID(itemLocation), C_Item.GetItemName(itemLocation)
+
+-- What one you're posting cost you in gold spent, for the warning below
+-- and the posting screen's break-even (PostInfo.lua): your crafts or what
+-- you paid, never a recipe's estimate. Gathered and payout bag loot count
+-- at the AH price for a sale's profit, so their break-even sat over the
+-- market and every post of patron order bag loot warned (user,
+-- 2026-10-26). Here only the gold you spent counts; those are free.
+-- Returns the cost each, or nil.
+function addon:PostCost(itemID, name, quantity)
     local cost, _, source = addon:GetUnitCostBasis(name, quantity, itemID)
-    if not cost or cost <= 0 or (source ~= "crafted" and source ~= "paid") then return end
-    -- Gathered and payout bag loot count at the AH price for a sale's
-    -- profit, so their break-even sat over the market and every post of
-    -- patron order bag loot warned (user, 2026-10-26). Here only the gold
-    -- you spent counts; those are free.
+    if not cost or cost <= 0 or (source ~= "crafted" and source ~= "paid") then return nil end
     if source == "paid" then
         local _, _, parts = addon:GetOwnCost(name, nil, itemID, true)
         if parts then
@@ -435,8 +437,16 @@ local function CheckPostPrice(itemLocation, quantity, unitPrice)
             end
             cost = units > 0 and spent / units or cost
         end
-        if cost <= 0 then return end
+        if cost <= 0 then return nil end
     end
+    return cost
+end
+
+local function CheckPostPrice(itemLocation, quantity, unitPrice)
+    if not (unitPrice and unitPrice > 0 and C_Item.DoesItemExist(itemLocation)) then return end
+    local itemID, name = C_Item.GetItemID(itemLocation), C_Item.GetItemName(itemLocation)
+    local cost = addon:PostCost(itemID, name, quantity)
+    if not cost then return end
     local breakEven = cost / (1 - AH_CUT)
     if unitPrice >= breakEven then return end
     local key = itemID or name
@@ -633,6 +643,37 @@ function addon:AuctionQuantity(r, itemID)
     local ok, stack = pcall(C_Item.GetItemMaxStackSizeByID, itemID)
     if not ok or type(stack) ~= "number" or stack < 1 then return 1 end
     return math.min(r.quantity or 1, stack)
+end
+
+-- First Aid saved as "Aid" in Forever's launch week: a skill line's last
+-- word was taken as its profession before 2.7.6 checked it was one. Stats
+-- listed "5. Aid" under First Aid (user, 2026-11-11). Only when one of your
+-- characters has First Aid, so a real profession called Aid is left alone.
+function addon:RepairAidProfession()
+    if GoldsmithDB.aidRepaired then return end
+    local hasFirstAid = false
+    for _, c in pairs(GoldsmithDB.characters or {}) do
+        if c.professions and c.professions["First Aid"] then hasFirstAid = true end
+    end
+    if not hasFirstAid then return end
+    for _, e in ipairs(addon.ledger:getAll()) do
+        if e.profession == "Aid" then e.profession = "First Aid" end
+    end
+    for _, map in ipairs({ GoldsmithDB.reagents or {}, GoldsmithDB.products or {} }) do
+        for name, prof in pairs(map) do
+            if prof == "Aid" then map[name] = "First Aid" end
+        end
+    end
+    -- Proc stats kept under Aid were First Aid's: they move over when
+    -- First Aid has none yet, else they go (First Aid has no procs)
+    for _, c in pairs(GoldsmithDB.characters or {}) do
+        local cal = c.calibration
+        if cal and cal.Aid then
+            if not cal["First Aid"] then cal["First Aid"] = cal.Aid end
+            cal.Aid = nil
+        end
+    end
+    GoldsmithDB.aidRepaired = true
 end
 
 -- Purchases recorded before AuctionQuantity with more than the item stacks
@@ -992,6 +1033,8 @@ function addon:Initialize()
     addon:RepairRewardSales()
     -- Forever auctions recorded at more than a stack (once)
     addon:RepairAuctionQuantities()
+    -- Forever's launch-week "Aid" back to First Aid (once)
+    addon:RepairAidProfession()
     -- A one-off repair of the developer's own Missive lots, done and removed
     GoldsmithDB.harmoniousLotsRepaired = nil
     -- Keep history for (Settings); after login settles, like the other chores

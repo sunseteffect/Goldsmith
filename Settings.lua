@@ -70,6 +70,7 @@ local DEFAULTS = {
     sounds = true,
     peekKey = "alt",
     theme = "clean",
+    coinIcons = false,
 }
 
 function addon:Setting(key)
@@ -937,6 +938,11 @@ local HELP = {
         "Crafts you've told Goldsmith to ignore: they're never suggested in Do this next and are hidden on the Crafts tab.",
         "Turn one off to stop ignoring it. To ignore a craft, right-click it on the Crafts tab. Tick Show ignored in the Crafts tab's Show menu to see ignored crafts there.",
     },
+    coinIcons = {
+        "Coin icons",
+        "Shows money with the game's gold, silver and copper coins, like the game's own windows: 12 gold 40 silver instead of 12.40g.",
+        "Everywhere Goldsmith shows money: its window, item tooltips, the AH and mailbox panels and chat lines.",
+    },
     showMinimap = {
         "Minimap button",
         "The Goldsmith button on the edge of the minimap: click to show or hide Goldsmith, right-click for these settings, drag to move it.",
@@ -1033,7 +1039,7 @@ local PAGES = {
     { group = "Interface" },
     { key = "display", label = "Display",
       intro = "Goldsmith's lines in the game's own windows, and its minimap button.",
-      rows = { "theme", "tooltips", "craftCost", "showMinimap" } },
+      rows = { "theme", "coinIcons", "tooltips", "craftCost", "showMinimap" } },
     { key = "alerts", label = "Chat and sounds",
       intro = "What Goldsmith tells you as things happen.",
       rows = { "chat", "sounds" } },
@@ -1492,6 +1498,8 @@ function addon:CreateSettingsPanel(parent)
     }
     rows.theme = ChoiceRow(content, panel, "theme", "Theme", "Goldsmith's own, the game's, or your faction's.",
         function() StaticPopup_Show("GOLDSMITH_RELOAD_THEME") end)
+    rows.coinIcons = ToggleRow(content, panel, "coinIcons", "Coin icons", "The game's gold, silver and copper coins in place of g, s and c.",
+        function() addon.Refresh() end)
     rows.tooltips = ChoiceRow(content, panel, "tooltips", "Item tooltips", "Goldsmith's lines in the game's item tooltips.")
     rows.craftCost = ToggleRow(content, panel, "craftCost", "Cost in the profession window", "Your materials and Profit under a recipe's materials.",
         function() if addon.UpdateCraftCostLines then addon:UpdateCraftCostLines() end end)
@@ -1619,9 +1627,15 @@ function addon:CreateSettingsPanel(parent)
     end
     TileOpens(tiles[2], "prices", "Prices and scan")
     TileOpens(tiles[3], "keys", "Keys")
+    -- Opens What's new (Idea Board, user 2026-10-30; built 2026-11-11):
+    -- Settings closes so the box isn't behind it
+    tiles[1]:SetScript("OnMouseUp", function()
+        panel:Hide()
+        addon:ShowNews()
+    end)
     tiles[1].tooltip = function(tooltip)
         tooltip:AddLine("Goldsmith " .. addon:GetVersion(), 1, 1, 1)
-        tooltip:AddLine("/gsm news shows what's new in this version.", 0.8, 0.8, 0.8, true)
+        addon:ClickHint(tooltip, "Click for what's new in this version", true)
     end
     tiles[4].tooltip = function(tooltip)
         tooltip:AddLine("Settings changed from recommended", 1, 1, 1)
@@ -1672,7 +1686,7 @@ function addon:CreateSettingsPanel(parent)
         local scan = GoldsmithDB.ownScan
         local key = addon:ToggleKeyText()
         local changed = ChangedKeys()
-        tiles[1]:Set("Version", addon:GetVersion(), "text", "/gsm news: what's new")
+        tiles[1]:Set("Version", addon:GetVersion(), "text", "Click: what's new")
         if not addon:Setting("ahScan") then
             tiles[2]:Set("Last AH scan", "Off", "muted", "Scan turned off")
         elseif scan and scan.time then
@@ -1921,16 +1935,16 @@ local HELP_SECTIONS = {
     { "The tabs", table.concat({
         addon:Colorize("Overview", "text") .. ": what to do next on the character you're on (and what you hold that sells above break-even now), which of your other characters has the most waiting, and how you're doing across all of them. \"followed\" by Do this next adds up what the suggestions you crafted have made; Set a goal on the Total gold chart gives you a gold goal.",
         addon:Colorize("Characters", "text") .. ": a to-do list for each character, its craft cooldowns, and which characters count.",
-        addon:Colorize("Crafts", "text") .. ": what you can make, with its cost, profit and how well it sells. Show picks Recommended, All crafts or Not learned yet (recipes worth going to learn), and can hide gear. Click a craft to plan it: type how many crafts, and it shows what they make and what to buy. With concentration it plans only what yours covers now; Why this mix shows the material qualities compared, and clicking one uses it instead.",
-        addon:Colorize("Queue", "text") .. ": crafts lined up to make, with one shopping list and a button that does the next step.",
+        addon:Colorize("Crafts", "text") .. ": what you can make, with its cost, profit and how well it sells. Show picks Recommended, All crafts or Not learned yet (recipes worth going to learn), and can hide gear. Search by name; cooldown lists every recipe with a cooldown. Click a craft to plan it: type how many crafts, and it shows what they make and what to buy. With concentration it plans only what yours covers now; Why this mix shows the material qualities compared, and clicking one uses it instead.",
+        addon:Colorize("Queue", "text") .. ": crafts lined up to make, with one shopping list and a button that does the next step. A material several crafts need is made for all of them at once.",
         addon:Colorize("Items", "text") .. ": any item's page, In my bags for everything you hold, Cheap materials (right-click one to stock up), and the Held board with what sells above break-even now first.",
-        addon:Colorize("History", "text") .. ": every sale, purchase, deposit, craft, order, gathering and box opened; right-click an entry to fix it.",
+        addon:Colorize("History", "text") .. ": every sale, purchase, deposit, craft, order, gathering and box opened. Search by item; right-click an entry to fix it.",
         addon:Colorize("Stats", "text") .. ": lifetime stats and your Goldsmith title; Share in chat to brag.",
       }, "\n") },
     { "Getting to the AH and the mailbox",
       "Hold Alt and Goldsmith fades almost away: clicks go through it, so you can click the auctioneer or the mailbox behind it without moving the window. Let go and it's back. Pick another key in Settings > Keys. The game's Interact key works too: turn on Options > Gameplay > Controls > Enable Interact Key, bind Interact with Target in Keybindings, and press it beside the auctioneer or a mailbox." },
     { "At the AH, vendors and the mailbox",
-      "At the AH, Goldsmith's panel scans prices and Buy next buys what the queue needs, one click per item; tick All queues to shop for every character. It asks twice when a craft would lose money. At a vendor, its panel buys the vendor materials. At the mailbox, a panel lists what to send each character: click once to fill in the mail, again to send it. Collecting AH sales says what each sold for, then the total; History has each sale's profit. Drag a panel or notice by its move icon; right-click the icon to put it back." },
+      "At the AH, Goldsmith's panel scans prices and Buy next buys what the queue needs, one click per item; tick All queues to shop for every character. It asks twice when a craft would lose money. When you post, the AH's sell screen shows your break-even and the profit each at the price you type. At a vendor, its panel buys the vendor materials. At the mailbox, a panel lists what to send each character: click once to fill in the mail, again to send it. Collecting AH sales says what each sold for, then the total; History has each sale's profit. Drag a panel or notice by its move icon; right-click the icon to put it back." },
     { "Sales outside the AH",
       "Items you sell to a player for gold in the trade window count as sales: in your profit, with no AH cut. Items you get in the trade count at their AH price. Trades with your own characters and enchants for a tip don't count. Hover a sale in History to see who bought it." },
     { "In the game's windows",
@@ -1942,7 +1956,7 @@ local HELP_SECTIONS = {
     { "Item tooltips",
       "Show your cost, profit and break-even price. Hold Shift for each material's cost. Settings > Item tooltips makes them shorter or turns them off." },
     { "Using Auctionator?",
-      "Not needed: Goldsmith scans the AH itself and Buy next does the shopping. If you have it, Goldsmith reads its scans. If you'd rather shop with Auctionator's shopping lists, turn on Settings > Send to Auctionator button." },
+      "Not needed: Goldsmith scans the AH itself and Buy next does the shopping. If you have it, Goldsmith reads its scans, and its Selling tab shows your break-even. If you'd rather shop with Auctionator's shopping lists, turn on Settings > Send to Auctionator button." },
     { "If you already use TSM",
       "Not needed: Goldsmith Data covers prices and how well each item sells (Sells / Slow / Hardly sells). If TSM and its desktop app are installed anyway, Goldsmith uses TSM's region sales per day and sale rates instead, a check on listings far from the usual price, and prices between AH scans." },
     { "Commands",
@@ -1953,6 +1967,7 @@ local HELP_SECTIONS = {
 -- (Goldsmith Data's region prices, concentration, material qualities,
 -- crafting orders). By heading; the rest read the same in both games.
 local FOREVER_HELP = {
+    ["At the AH, vendors and the mailbox"] = "At the AH, Goldsmith's panel scans prices and Buy next buys what the queue needs, one click per item; tick All queues to shop for every character. It asks twice when a craft would lose money. When you post, the AH's sell screen shows your break-even and the profit each at the price you type. At a vendor, its panel buys the vendor materials. At the mailbox, a panel lists what to send each character: click once to fill in the mail, again to send it.\n\nForever crafts from your bags only. The Queue tab says what to take out of the bank for the whole queue, and at the bank a panel lists it: Take all moves just that much into your bags.\n\nDrag a panel or notice by its move icon; right-click the icon to put it back.",
     ["Getting started"] = "Open each profession once on every crafter (press K) so Goldsmith loads its recipes. Then open the auction house and press Scan the AH: Forever's prices come from your own scans. From then on, purchases, sales, crafts and AH deposits are recorded by themselves.",
     ["In the game's windows"] = "Under the reagents in a profession window, Goldsmith shows what your materials cost and the profit, the same as on Crafts; hover it for the breakdown.",
     ["Sales outside the AH"] = "Items you sell to a player for gold in the trade window count as sales: in your profit, with no AH cut. Items you get in the trade count at their AH price. Trades with your own characters and enchants for a tip don't count. AH purchases you sell to a vendor count too, under From vendor flips in Stats.\n\nBuy to vendor lists items selling under vendor price for 5 minutes after a scan. Click one to load it, click again to buy it at the scan's price.\n\nItem auctions need whole silver: the AH drops a price with copper in it, and Goldsmith tells you.",

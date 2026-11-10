@@ -198,21 +198,47 @@ end
 -- Not learned yet was 400 Tailoring rows, most out of reach (user,
 -- 2026-11-06: "can't tell what i can learn that should learn"). In Forever:
 -- only what you have the skill for and that makes gold, with a cost known.
--- A trainer's first: "~" ones may also need a pattern. A search finds the rest.
+-- A search finds the rest. Sorted by the column like any list: a trainer's
+-- went first, which read as a broken profit sort (user, 2026-11-09); the
+-- green or grey "Needs" already tells them apart.
 function addon:KeepWorthLearning(items)
     local kept, minROI = {}, addon:Setting("minROI")
     for _, item in ipairs(items) do
-        local _, needed, exact = addon:SkillNeeded(item)
+        local _, needed = addon:SkillNeeded(item)
         local info = item.info
         -- No number yet (its profession hasn't been opened): not known to be
         -- learnable, so it waits (Green Silk Armor at skill 80, 2026-11-06)
         if needed and SkillOf(item) >= needed and info.profit and info.profit > 0 and not info.partial
             and (not info.margin or info.margin >= minROI) then
-            item.pinned = exact or nil
             table.insert(kept, item)
         end
     end
     return kept
+end
+
+-- Skill-up arrow after a recipe's name (Forever), the profession window's
+-- own icons: orange, yellow, green while it still gives skill, nothing once
+-- grey. The color is saved when that character's profession window updates
+-- (Pricing.lua ScanLearnedRecipes). Sort by Profit to find the cheapest
+-- skill-up (user, 2026-11-09).
+local SKILL_UP_ATLAS = { [0] = "Professions-Icon-Skill-High", [1] = "Professions-Icon-Skill-Medium",
+    [2] = "Professions-Icon-Skill-Low" }
+local SKILL_UP_COLOR = { [0] = "ff8040", [1] = "ffff00", [2] = "40bf40" }
+function addon:SkillUpDifficulty(item)
+    if item.unlearned or item.salvage or not item.recipe then return nil end
+    local c = GoldsmithDB.characters[item.charKey or addon.charKey]
+    local d = c and c.skillUps and c.skillUps[item.recipe.recipeID]
+    return SKILL_UP_ATLAS[d or -1] and d or nil
+end
+
+function addon:SkillUpLabel(item)
+    local d = addon:SkillUpDifficulty(item)
+    if not d then return "" end
+    local atlas = SKILL_UP_ATLAS[d]
+    if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) and CreateAtlasMarkup then
+        return "  " .. CreateAtlasMarkup(atlas, 12, 12)
+    end
+    return "  |cff" .. SKILL_UP_COLOR[d] .. "+|r"
 end
 
 local function FillCraftRow(row, item)
@@ -224,7 +250,7 @@ local function FillCraftRow(row, item)
         or addon:GetRecipeExpansion(item.recipe))
     local label = expansionID
         and addon:Colorize("  " .. addon:GetExpansionName(expansionID), "expansion") or ""
-    label = addon:SkillNeededLabel(item) .. label
+    label = addon:SkillNeededLabel(item) .. addon:SkillUpLabel(item) .. label
     -- A daily or out of charges, right after the name: profitable but not
     -- makeable yet (user, 2026-10-17; from what was saved, no game call)
     local cooldown = not item.salvage and item.recipe and addon.GetRecipeCooldown
@@ -1458,6 +1484,31 @@ local function CollectSteps(nodes, steps)
     end
     return steps
 end
+addon.CollectPlanSteps = CollectSteps
+
+-- A material step made the same way in more than one queue entry: one
+-- step for all of them (user, 2026-11-10: smelt 6 Tin Bars once, not 2
+-- for one craft and 4 for the next). The queue adds up toGet by this key
+-- (BuildQueue) and passes the totals in.
+local function StepKey(node)
+    local best = node.best
+    return table.concat({ node.itemID or node.name or "?", best.method or "",
+        best.recipe and best.recipe.recipeID or best.herbID or "" }, ":")
+end
+addon.PlanStepKey = StepKey
+
+-- How many of a step's material to make: this plan's, or the whole
+-- queue's when it's more, with a note saying so
+local function StepToGet(node, state, totals)
+    local key = node.best and node.itemID and StepKey(node)
+    state.stepKey, state.stepToGet = key, node.toGet
+    local total = key and totals and totals[key]
+    if total and total > node.toGet + 0.0001 then
+        table.insert(state.notes, string.format("Makes %s for the whole queue at once.", node.name or "it"))
+        return total
+    end
+    return node.toGet
+end
 
 -- The salvage recipe (milling, prospecting) that takes an item, for the
 -- open profession: recipe ID and how many items one cast uses, or nil
@@ -1524,7 +1575,8 @@ end
 -- A salvage step (mill, prospect, crush): salvage enough items for what's
 -- still needed, from one stack at a time. node.best = { herbID, herbName,
 -- perHerb (outputs per item), verb ("Mill" unless given) }.
-local function MillStepState(node, state)
+local function MillStepState(node, state, totals)
+    local toGet = StepToGet(node, state, totals)
     local herbID, herbName = node.best.herbID, node.best.herbName
     local verb = node.best.verb or "Mill"
     local lower = verb:lower()
@@ -1540,7 +1592,7 @@ local function MillStepState(node, state)
         return state
     end
     local location, stack = LargestBagStack(herbID)
-    local wanted = math.ceil(node.toGet / math.max(node.best.perHerb, 0.01) / perCast - 0.0001)
+    local wanted = math.ceil(toGet / math.max(node.best.perHerb, 0.01) / perCast - 0.0001)
     local casts = math.min(wanted, math.floor(stack / perCast))
     if casts <= 0 then
         local inBags = C_Item.GetItemCount(herbID) or 0
@@ -1624,7 +1676,8 @@ function addon.StationsMet(recipes)
     return true
 end
 
-local function CraftStepState(node, state)
+local function CraftStepState(node, state, totals)
+    local toGet = StepToGet(node, state, totals)
     local recipe = node.best.recipe
     state.stepRecipe = recipe
     -- A material from another profession (Copper Bar for a mace): this was
@@ -1648,7 +1701,7 @@ local function CraftStepState(node, state)
     end
     CheckStation(state, recipe.recipeID)
     local outputPerCraft = addon:GetCraftModel(recipe)
-    local wanted = math.max(math.ceil(node.toGet / math.max(outputPerCraft, 0.01) - 0.0001), 1)
+    local wanted = math.max(math.ceil(toGet / math.max(outputPerCraft, 0.01) - 0.0001), 1)
     -- A tier item (gold ingot): the tier row's mix, and its concentration
     -- when only that reaches the tier; else the qualities the plan chose
     local row = node.best.tierRow
@@ -1696,7 +1749,7 @@ end
 
 -- The Craft button while there are steps left: the first step, with the
 -- full list for the tooltip
-local function StepState(steps, plan)
+local function StepState(steps, plan, totals)
     local state = { label = "Craft", blockers = {}, notes = {}, steps = {} }
     for _, node in ipairs(steps) do
         local verb = node.best.method == "Mill" and (node.best.verb or "Mill") or "Craft"
@@ -1706,9 +1759,9 @@ local function StepState(steps, plan)
     table.insert(state.steps, string.format("Craft %d %s", plan.crafts, plan.recipe.outputName))
     local node = steps[1]
     if node.best.method == "Mill" then
-        return MillStepState(node, state)
+        return MillStepState(node, state, totals)
     end
-    return CraftStepState(node, state)
+    return CraftStepState(node, state, totals)
 end
 
 -- What the Craft button can do for a plan. Returns { label, enabled,
@@ -1716,8 +1769,9 @@ end
 -- crafts, reagents, concentrate, points }. While materials still need
 -- milling or crafting, it's that step instead: steps (labels, the last is
 -- the final craft), and salvage = { recipeID, casts, location } for a mill
--- or recipeID for a craft.
-local function CraftState(p, tierInfo, plan)
+-- or recipeID for a craft. totals (the queue): a step's material needed
+-- by the whole queue, by PlanStepKey, so one step makes it for all.
+local function CraftState(p, tierInfo, plan, totals)
     local recipe = p.recipe
     local state = { label = "Craft", blockers = {}, notes = {} }
     local learned = addon:KnowsRecipe(recipe.recipeID)
@@ -1759,7 +1813,7 @@ local function CraftState(p, tierInfo, plan)
         local steps = plan and plan.nodes and CollectSteps(plan.nodes, {}) or {}
         local first = steps[1]
         if first and first.best.method == "Craft" and first.best.recipe.profession ~= recipe.profession then
-            return StepState(steps, plan)
+            return StepState(steps, plan, totals)
         end
         state.label, state.enabled, state.open = "Open " .. recipe.profession, true, true
         table.insert(state.notes, "Opens " .. recipe.profession .. " at this recipe. The game only crafts with the profession open.")
@@ -1782,7 +1836,7 @@ local function CraftState(p, tierInfo, plan)
     -- click; the button moves on as your bags fill up
     local steps = CollectSteps(plan.nodes, {})
     if #steps > 0 then
-        return StepState(steps, plan)
+        return StepState(steps, plan, totals)
     end
 
     CheckStation(state, recipe.recipeID)
@@ -3858,7 +3912,7 @@ local function Create(parent)
     end)
     Explain(view.searchBox, function(tooltip)
         tooltip:AddLine("Find a craft", 1, 1, 1)
-        Why(tooltip, "Two letters or more. Matches crafts by name and salvage by what goes in or comes out, in every expansion, profitable or not.")
+        Why(tooltip, "Two letters or more. Matches crafts by name and salvage by what goes in or comes out, in every expansion, profitable or not. \"cooldown\" lists every recipe with a cooldown.")
         Why(tooltip, "Only " .. (addon.char.name or "me") .. " and the profession picked at the top still apply. Escape clears it.")
     end)
     Explain(view.onlyMine, function(tooltip)
@@ -3930,20 +3984,54 @@ local function Create(parent)
     function view:CloseSalvage()
         local target = view.salvage.target
         local returnTab = target and target.returnTab
-        if target and not returnTab then
+        if returnTab then
+            view:RestoreHome()
+            addon:ShowTab(returnTab)
+            return
+        end
+        if target then
             view.list:ScrollToItem({ function(item) return item.salvage and item.itemID == target.itemID end })
         end
         view.salvage.target = nil
         view.salvage.current = nil
         view.salvage.qty:ClearFocus()
-        if returnTab then addon:ShowTab(returnTab) else addon.RefreshWindow() end
+        addon.RefreshWindow()
+    end
+
+    -- Back for each tab on its own (user, 2026-11-09): a plan opened from
+    -- another tab (the Queue) is a detour. Back takes it to that tab;
+    -- leaving it by another tab ends it too. Either way Crafts then shows
+    -- what it had before: its own plan, mill planner or the list. Before,
+    -- the detour stayed, and Back from Crafts jumped to the Queue.
+    function view:SaveHome()
+        if view.home then return end -- on a detour already: keep the first
+        local qty = view.plan.plan and view.plan.qty or view.salvage.target and view.salvage.qty
+        view.home = { plan = view.plan.plan, salvage = view.salvage.target, qty = qty and tonumber(qty:GetText()) }
+    end
+    function view:RestoreHome()
+        local home = view.home
+        view.home = nil
+        view.plan.plan, view.plan.current = nil, nil
+        view.plan.qty:ClearFocus()
+        view.salvage.target, view.salvage.current = nil, nil
+        view.salvage.qty:ClearFocus()
+        if home and home.plan then
+            view.plan:Open(home.plan, nil, home.qty)
+        elseif home and home.salvage then
+            view.salvage:Open(home.salvage, home.qty)
+        end
     end
 
     -- Back goes to the Queue tab for a plan opened from there
     function view:ClosePlan()
         local plan = view.plan.plan
         local returnTab = plan and plan.returnTab
-        if plan and not returnTab then
+        if returnTab then
+            view:RestoreHome()
+            addon:ShowTab(returnTab)
+            return
+        end
+        if plan then
             local recipeID = plan.recipe and plan.recipe.recipeID
             local function Same(item)
                 return not item.salvage and item.recipe and item.recipe.recipeID == recipeID
@@ -3957,7 +4045,7 @@ local function Create(parent)
         view.plan.plan = nil
         view.plan.current = nil
         view.plan.qty:ClearFocus()
-        if returnTab then addon:ShowTab(returnTab) else addon.RefreshWindow() end
+        addon.RefreshWindow()
     end
     return view
 end
@@ -3965,6 +4053,9 @@ end
 local function Refresh(v, state)
     local ui = GoldsmithDB.ui2
     if pending then
+        -- Opened from another tab: a detour over what Crafts shows now
+        local opened = pending.plan or pending.salvage
+        if opened and opened.returnTab then v:SaveHome() else v.home = nil end
         if pending.plan then
             v.salvage.target = nil
             v.plan:Open(pending.plan, pending.quantity, pending.crafts)
@@ -4022,6 +4113,16 @@ local function Refresh(v, state)
     -- Not learned yet: its own rows (searchable); concentration works as
     -- for your crafts (most enchant profit is with it)
     local unlearnedMode = not focus and CraftsShow() == "unlearned"
+    -- "cooldown" lists every recipe with a cooldown on any of your
+    -- characters, ready or not (Idea Board, 2026-10-28; built 2026-11-11).
+    -- Cooldowns were only on the Characters card hover and Do this next.
+    local cooldownRecipes
+    if needle == "cooldown" or needle == "cooldowns" then
+        cooldownRecipes = {}
+        for _, c in pairs(GoldsmithDB.characters) do
+            for recipeID in pairs(c.cooldowns or {}) do cooldownRecipes[recipeID] = true end
+        end
+    end
     local rowOpts = {
         concentration = concOn,
         profitableOnly = show ~= "all",
@@ -4032,7 +4133,8 @@ local function Refresh(v, state)
         -- A search finds ignored crafts too, so they're easy to get back
         showIgnored = ui.craftsShowIgnored or searching,
         -- Names are matched before costing, so only matches are worked out
-        match = searching and function(names)
+        match = searching and function(names, recipe)
+            if cooldownRecipes and recipe and cooldownRecipes[recipe.recipeID] then return true end
             for _, name in pairs(names) do
                 if name:lower():find(needle, 1, true) then return true end
             end
@@ -4177,6 +4279,7 @@ end
 -- Clicking the Crafts tab again: out of a plan or a focused list, back to
 -- the whole list at the top (filters stay as set)
 local function Reset(v)
+    v.home = nil
     v.plan.plan, v.plan.current = nil, nil
     v.plan.qty:ClearFocus()
     v.salvage.target, v.salvage.current = nil, nil
@@ -4186,15 +4289,26 @@ local function Reset(v)
 end
 
 -- What narrows the list right now, for the window's Filtered marker.
--- Show (Recommended by default) isn't one: it's the list's purpose, and
--- its own dropdown names it.
+-- Show: Not learned yet narrows it to recipes you could learn, so it's one;
+-- All crafts shows more than the default, so it isn't. Clearing puts Show
+-- back to Recommended either way (user, 2026-11-10: "the clear filters
+-- button doesn't clear the drop down menu to put it back to default").
 local function Filters(v)
     local ui, list = GoldsmithDB.ui2, {}
+    local function Clear(fn)
+        return function()
+            fn()
+            ui.craftsShow = nil
+        end
+    end
+    if CraftsShow() == "unlearned" then
+        table.insert(list, { label = ShowLabel("unlearned"), clear = Clear(function() end) })
+    end
     if ui.craftsOnlyMine then
-        table.insert(list, { label = "Only " .. (addon.char.name or "me"), clear = function() ui.craftsOnlyMine = nil end })
+        table.insert(list, { label = "Only " .. (addon.char.name or "me"), clear = Clear(function() ui.craftsOnlyMine = nil end) })
     end
     if ui.craftsGear == "hide" then
-        table.insert(list, { label = "No gear", clear = function() ui.craftsGear = nil end })
+        table.insert(list, { label = "No gear", clear = Clear(function() ui.craftsGear = nil end) })
     end
     return list
 end
@@ -4224,8 +4338,14 @@ local function Legend(v)
     }
 end
 
-addon:RegisterView("crafts", { create = Create, refresh = Refresh, reset = Reset, filters = Filters,
-    legend = Legend, ownLoading = true })
+-- Another tab clicked: a plan opened from another tab (a detour) ends
+-- there, so Crafts shows its own screen when you come back
+local function Leave(v)
+    if v.home then v:RestoreHome() end
+end
+
+addon:RegisterView("crafts", { create = Create, refresh = Refresh, reset = Reset, leave = Leave,
+    filters = Filters, legend = Legend, ownLoading = true })
 
 -- Keep the planner's Craft button current while it's showing: the
 -- profession opening or closing, bags changing as you craft or buy,

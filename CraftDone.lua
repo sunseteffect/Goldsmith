@@ -238,6 +238,16 @@ local function Describe(b)
         local amount = revenue - b.cost
         profit = string.format("%s %s", b.partial and "Profit (at most):" or "Estimated profit:",
             Colored(addon:FormatSignedMoney(amount), addon:MoneyColor(amount)))
+        -- The Crafts list prices materials at today's prices, this at what
+        -- yours cost you: when those differ a lot, say both so the two
+        -- screens line up (user, 2026-11-09: Silver Skeleton Key -9s 48c
+        -- here, -1s 90c each on Crafts; the Silver Bars were smelted from
+        -- 10s ore, today's bars are 4s 59c)
+        local today = not b.marketPartial and b.market and (revenue - b.market) or nil
+        if today and math.abs(today - amount) >= math.max(100, b.market * 0.10) then
+            profit = profit .. "\n" .. Colored(string.format("At today's prices: %s (yours cost %s)",
+                addon:FormatSignedMoney(today), b.cost > b.market and "more" or "less"), "muted")
+        end
         -- Selling the materials today would clearly have made more: the
         -- same 10% (and 10g) as the plan's note
         local sellMats = not b.marketPartial and (b.market or 0) * (1 - AH_CUT) - revenue
@@ -323,7 +333,7 @@ local function Finish()
     ShowToast(b)
     local _, _, _, profit = Describe(b)
     addon:Notify("info", "%s: %d %s%s.", b.done >= b.crafts and "Craft complete" or "Crafting stopped",
-        b.made, b.name, profit and (", " .. profit:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):lower()) or "")
+        b.made, b.name, profit and (", " .. profit:match("^[^\n]*"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):lower()) or "")
 end
 
 -- Crafts are being followed (the plan doesn't set the game's window

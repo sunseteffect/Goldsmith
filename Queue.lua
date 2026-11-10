@@ -714,6 +714,19 @@ function addon:BuildQueue(charKey)
                     plan = addon:WithChoices(e.choices, addon.WithCharacter, addon, charKey, addon.BuildPlan, addon,
                         planRecipe, row.remaining, useOnHand, row.tierInfo, pool)
                     if mine then row.state = addon.GetCraftState(row.p, row.tierInfo, plan) end
+                    -- Queued while it made gold and a loss now (the price
+                    -- fell): said on the row, and Craft next asks once before
+                    -- making it (user, 2026-11-09: 2 Woolen Bags made at
+                    -- -4s 39c each, queued when they sold for 15s). A craft
+                    -- queued at a loss on purpose (skill, knowledge) never
+                    -- made gold here, so it isn't flagged.
+                    if plan and plan.revenue and plan.profit and not e.orderID then
+                        if plan.profit > 0 and plan.complete then
+                            e.wasProfitable, e.lossOk = true, nil
+                        elseif plan.profit < 0 and e.wasProfitable then
+                            row.turnedLoss = plan.profit
+                        end
+                    end
                     if e.orderID and plan then
                         -- What the order pays, not what the item sells for
                         plan.revenue = (e.commission or 0) + (e.rewardsValue or 0)
@@ -759,12 +772,64 @@ function addon:BuildQueue(charKey)
         end
         table.insert(q.rows, row)
     end
+    -- A material made the same way for several entries (Bronze Bars for a
+    -- knife and a breastplate): its step makes it for all of them at once,
+    -- not 2 for one entry and 4 for the next (user, 2026-11-10). Each
+    -- entry's toGet already leaves out what the ones above it use of your
+    -- bags (the pool), so they add up to what's left to make.
+    if mine then
+        local totals = {}
+        for _, row in ipairs(q.rows) do
+            local plan = row.plan
+            if plan and plan.nodes and not plan.salvage then
+                for _, node in ipairs(addon.CollectPlanSteps(plan.nodes, {})) do
+                    if node.itemID then
+                        local key = addon.PlanStepKey(node)
+                        totals[key] = (totals[key] or 0) + node.toGet
+                    end
+                end
+            end
+        end
+        for _, row in ipairs(q.rows) do
+            local s = row.state
+            if s and s.stepKey and row.p and (totals[s.stepKey] or 0) > s.stepToGet + 0.0001 then
+                row.state = addon.GetCraftState(row.p, row.tierInfo, row.plan, totals)
+            end
+        end
+    end
+    -- What every entry counts on from what you hold (QueueFromBank)
+    q.pool = mine and pool or nil
     q.buyAH, q.buyVendor = Sorted(ah), Sorted(vendor)
     -- For hovers: what the vendor panel buys for your whole queue
     if mine then addon.lastQueueVendor = q.buyVendor end
     q.spend = 0
     for _, entry in ipairs(q.buyAH) do q.spend = q.spend + entry.cost end
     return q
+end
+
+-- What the whole queue needs out of the bank: Forever crafts from your
+-- bags only, and the Craft button only said "In the bank" for the entry it
+-- was on, so the next entry's bank items took a second trip (user,
+-- 2026-11-10: "i just didn't know"). From what every entry counts on of
+-- what you hold (q.pool), less what's in your bags and mailbox. Returns
+-- { { itemID, name, quantity } } by name.
+function addon:QueueFromBank(q)
+    local list = {}
+    if not (addon.isForever and q and q.mine and q.pool) then return list end
+    for itemID, used in pairs(q.pool) do
+        if used > 0 then
+            local all = C_Item.GetItemCount(itemID, true, false, true, true) or 0
+            local bags = C_Item.GetItemCount(itemID) or 0
+            local mail = addon.InMailCount and addon:InMailCount(itemID) or 0
+            local take = math.min(all - bags, math.ceil(used - bags - mail - 0.0001))
+            if take > 0 then
+                table.insert(list, { itemID = itemID, quantity = take,
+                    name = C_Item.GetItemNameByID(itemID) or ("item " .. itemID) })
+            end
+        end
+    end
+    table.sort(list, function(a, b) return a.name < b.name end)
+    return list
 end
 
 -- Materials across the queue with a missing or old AH price
@@ -839,9 +904,15 @@ function addon:QueueRowStatus(row, q)
     if not q.mine then return "On " .. CharName(q.charKey), "muted" end
     local s = row.state
     if not s then return "", "muted" end
+    if s.enabled and addon:QueueAsksLoss(row) then return "Now a loss", "loss" end
     if s.enabled and s.open then return s.label, "muted" end
     if s.enabled then return s.label, "profit" end
     return addon:BlockedLabel(s)
+end
+
+-- Turned into a loss since it was queued, and not okayed yet (BuildQueue)
+function addon:QueueAsksLoss(row)
+    return row and row.turnedLoss ~= nil and not row.entry.lossOk
 end
 
 -- Why a craft state can't craft, short, and its color ("Needs Alchemist's
@@ -977,6 +1048,7 @@ function addon:QueueButtonLabel(row, q)
     if addon.QueueBusy() then return "Crafting..." end
     local s = row and row.state
     if not s then return "Craft next" end
+    if s.enabled and addon:QueueAsksLoss(row) then return "Craft anyway" end
     if s.enabled then return s.label end
     local status = addon:QueueRowStatus(row, q)
     return (status:gsub("^%l", string.upper))
@@ -1059,6 +1131,16 @@ function addon:CraftNext()
     end
     if not row.state.enabled then
         addon:Notify("info", "%s: %s", row.recipe.outputName, row.state.blockers[1] or "can't craft yet")
+        return
+    end
+    -- Now a loss: this press only okays it, the next one crafts
+    if addon:QueueAsksLoss(row) then
+        row.entry.lossOk = true
+        local lost = addon:FormatMoney(-row.turnedLoss)
+        addon:Notify("loss", "%s now loses %s (its price fell since you queued it). Press again to craft anyway, or take it off the queue.",
+            row.recipe.outputName, lost)
+        addon:Alert("loss", string.format("%s now loses %s.", row.recipe.outputName, lost))
+        UpdateSoon()
         return
     end
     addon.PerformCraftState(row.state, row.recipe, UpdateSoon)
@@ -1334,7 +1416,9 @@ local function UpdatePanel()
     panel.button:SetLabel(addon:QueueButtonLabel(row, q))
     panel.button:SetEnabled(enabled)
     panel.button:SetAlpha(enabled and 1 or 0.5)
-    panel.hint:SetText(KeyText() and ("or press " .. KeyText()) or "set a key in Keybindings > Goldsmith")
+    panel.hint:SetText(state and state.enabled and addon:QueueAsksLoss(row)
+        and addon:Colorize(string.format("now %s: the price fell since you queued it", addon:FormatSignedMoney(row.turnedLoss)), "loss")
+        or KeyText() and ("or press " .. KeyText()) or "set a key in Keybindings > Goldsmith")
     panel:Show()
 
     -- Show the next craft in the profession window, once per change (never

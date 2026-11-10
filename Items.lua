@@ -832,9 +832,10 @@ local function CreatePage(parent)
     local costsTitle = UI.Text(costs, "heading")
     costsTitle:SetPoint("TOPLEFT", 16, -14)
     costsTitle:SetText("What it costs")
-    page.costRows = { CostRow(costs, -44), CostRow(costs, -94), CostRow(costs, -144), CostRow(costs, -194) }
+    page.costRows = { CostRow(costs, -44), CostRow(costs, -94), CostRow(costs, -144), CostRow(costs, -194),
+                      CostRow(costs, -244) }
     page.concNote = UI.Text(costs, "small", "conc")
-    page.concNote:SetPoint("TOPLEFT", 16, -242)
+    page.concNote:SetPoint("TOPLEFT", 16, -292)
     page.concNote:SetPoint("RIGHT", -16, 0)
     page.tiersLabel = UI.Text(costs, "label", "muted")
     page.tiersLabel:SetText("TIERS")
@@ -1081,11 +1082,17 @@ local function CreatePage(parent)
             -- read as a contradiction (Reddit feedback, 2026-10-29)
             local held = d.breakEvenFrom ~= "estimated"
             local crafted = d.recipe and not d.material
-            t[5]:Set("Break-even", Money(d.breakEven), "gold", held and "for the ones you hold" or "for ones you make now")
+            -- None held: "the ones you hold" next to You have 0 read wrong
+            -- (user, 2026-11-11, gold Gloaming Alloy): your last ones'
+            local whose = not held and "ones you make now"
+                or (d.have or 0) > 0 and "the ones you hold"
+                or d.breakEvenFrom == "paid" and "the ones you bought"
+                or "the ones you made"
+            t[5]:Set("Break-even", Money(d.breakEven), "gold", "for " .. whose)
             t[5].tooltip = function(tooltip)
                 tooltip:AddLine("Break-even", 1, 1, 1)
                 tooltip:AddLine(string.format("Sell above this and %s don't lose gold: %s (%s) plus the 5%% AH cut.",
-                    held and "the ones you hold" or "ones you make now", fromText[d.breakEvenFrom],
+                    whose, fromText[d.breakEvenFrom],
                     Money(d.breakEven * (1 - AH_CUT))), 0.6, 0.6, 0.6, true)
                 if crafted then
                     tooltip:AddLine("Concentration costs no gold, so it isn't in it.", 0.6, 0.6, 0.6, true)
@@ -1141,7 +1148,17 @@ local function CreatePage(parent)
             -- Held ones at what they cost, else what the next ones will
             if d.yours and (d.have or 0) > 0 then ProfitNow(r[4], d.yours, "what yours cost")
             else ProfitNow(r[4], d.estimated, "the estimated cost") end
+            -- The break-even of one made now, when the Break-even tile is
+            -- the held ones': it was only in that tile's hover (Idea Board,
+            -- user 2026-10-29; Reddit feedback: held vs made now)
+            if d.breakEven and d.breakEvenFrom ~= "estimated" and d.estimated then
+                r[5]:Set("Break-even, made now", Money(d.estimated / (1 - AH_CUT)) .. (d.partial and "+" or ""),
+                    "gold", "for the next ones you make, after the AH cut")
+            else
+                r[5]:Set(nil)
+            end
         else
+            r[5]:Set(nil)
             local sources = { paid = "bought", milled = "milled", crafted = "crafted",
                               gathered = "gathered (at the AH price)" }
             local how = {}

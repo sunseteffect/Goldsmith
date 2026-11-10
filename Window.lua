@@ -39,6 +39,8 @@ local TABS = {
 
 -- Views: key -> { create = function(parent) -> view, refresh = function(view, state),
 --                 reset = function(view) (optional: back to the home view),
+--                 leave = function(view) (optional: another tab was
+--                 clicked while this one showed),
 --                 filters = function(view) (optional: what narrows the tab
 --                 now, a list of { label, clear = function }, for the
 --                 Filtered marker),
@@ -732,9 +734,9 @@ function addon:CreateWindow()
 
     -- Clicking the tab you're on takes it back to its home view (e.g. from a
     -- craft plan to the Crafts list)
-    local ResetView -- defined below
+    local ResetView, LeaveView -- defined below
     local tabBar = UI.TabBar(tabArea, TABS, function(key)
-        if key == ui.tab then ResetView(key) end
+        if key == ui.tab then ResetView(key) else LeaveView(ui.tab) end
         ui.tab = key
         Refresh()
     end)
@@ -985,6 +987,10 @@ function addon:CreateWindow()
     ResetView = function(key)
         local screen = created[key]
         if screen and screen.def.reset then screen.def.reset(screen.view) end
+    end
+    LeaveView = function(key)
+        local screen = created[key]
+        if screen and screen.def.leave then screen.def.leave(screen.view) end
     end
 
     -- What narrows the current tab: the header's profession (the Queue

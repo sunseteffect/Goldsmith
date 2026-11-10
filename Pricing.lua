@@ -167,6 +167,38 @@ local function RecordOrderBook(itemID)
     end
 end
 
+-- The same for an item that isn't a commodity (bags, gear), Forever only:
+-- clicking into Red Linen Bag showed it from 4s while Goldsmith said 20s
+-- (user, 2026-11-08). On retail one item ID is every item level, so its
+-- listings aren't one price. Bid-only listings (no buyout) are left out.
+-- Forever pools them like materials: a row is how many are up at that
+-- price, the buyout for one (Red Linen Bag: 207 at 4s, 1,388 at 5s, 2,466
+-- in all; user, 2026-11-08). Counted as one a row, it priced at the 3rd
+-- row's 6s.
+local function RecordItemListings(itemKey)
+    if not addon.isForever or type(itemKey) ~= "table" or not itemKey.itemID then return false end
+    local itemID = itemKey.itemID
+    local ok, count = pcall(C_AuctionHouse.GetNumItemSearchResults, itemKey)
+    if not ok or not count or count == 0 then return false end
+    local byPrice, total = {}, 0
+    for i = 1, count do
+        local okR, r = pcall(C_AuctionHouse.GetItemSearchResultInfo, itemKey, i)
+        if okR and type(r) == "table" and (r.buyoutAmount or 0) > 0 then
+            local qty = math.max(r.quantity or 1, 1)
+            local unit = r.buyoutAmount
+            byPrice[unit] = (byPrice[unit] or 0) + qty
+            total = total + qty
+        end
+    end
+    local levels = {}
+    for price, qty in pairs(byPrice) do table.insert(levels, { price = price, qty = qty }) end
+    if #levels == 0 then return false end
+    table.sort(levels, function(a, b) return a.price < b.price end)
+    while #levels > ORDER_BOOK_LEVELS do table.remove(levels) end
+    GoldsmithDB.orderBooks[itemID] = { time = time(), total = total, levels = levels }
+    return true
+end
+
 -- AH search results (the list a search shows, before clicking an item):
 -- each item's lowest price, so searching updates prices without
 -- Auctionator (user, 2026-10-09: Goldsmith Data was 1,250g, the AH 866g).
@@ -3570,6 +3602,27 @@ local function AddTooltipLines(tooltip, data)
     if not own then own, ownSource, parts = addon:GetOwnCost(name) end
     local madeFor, _, madePartial = addon:GetCraftedCost(data.id)
     local ownPartial = madeFor and madePartial
+    -- Lowest AH listing price that doesn't lose money after the AH cut, from
+    -- what yours cost you. Not when all of it was gathered: that's just the
+    -- AH price plus the cut, and any sale is gold you didn't have
+    -- (Nocturnal Lotus from a payout bag, 2026-10-09). First and in gold:
+    -- the line most looked at (user, 2026-11-10: "i find myself mostly
+    -- look at break even cost")
+    if not short then
+        local BR, BG, BB = 1, 0.82, 0
+        if own and own > 0 and ownSource ~= "gathered" then
+            tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r break-even on yours",
+                FormatGold(own / (1 - AH_CUT)) .. (ownPartial and "+" or ""), 1, 1, 1, BR, BG, BB)
+        elseif not own then
+            -- None of yours: from the estimated cost (a recipe you haven't
+            -- crafted yet)
+            local unitCost, partial = addon:GetUnitCostBasis(name)
+            if unitCost and unitCost > 0 then
+                tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r break-even price",
+                    FormatGold(unitCost / (1 - AH_CUT)) .. (partial and "+" or ""), 1, 1, 1, BR, BG, BB)
+            end
+        end
+    end
     if own then
         tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r yours cost you",
             string.format("%s%s each", FormatGold(own), ownPartial and "+" or ""), 1, 1, 1, 1, 1, 1)
@@ -3616,23 +3669,6 @@ local function AddTooltipLines(tooltip, data)
             1, 1, 1, r, g, b)
     end
     if short then return end
-
-    -- Lowest AH listing price that doesn't lose money after the AH cut, from
-    -- what yours cost you. Not when all of it was gathered: that's just the
-    -- AH price plus the cut, and any sale is gold you didn't have
-    -- (Nocturnal Lotus from a payout bag, 2026-10-09).
-    if own and own > 0 and ownSource ~= "gathered" then
-        tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r break-even on yours",
-            FormatGold(own / (1 - AH_CUT)) .. (ownPartial and "+" or ""), 1, 1, 1, 1, 1, 1)
-    elseif not own then
-        -- None of yours: from the estimated cost (a recipe you haven't
-        -- crafted yet)
-        local unitCost, partial = addon:GetUnitCostBasis(name)
-        if unitCost and unitCost > 0 then
-            tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r break-even price",
-                FormatGold(unitCost / (1 - AH_CUT)) .. (partial and "+" or ""), 1, 1, 1, 1, 1, 1)
-        end
-    end
 
     if recipe then
         addon:WithCharacter(crafter, addon.AddRecipeTooltipLines, addon, tooltip, recipe, data.id, IsShiftKeyDown())
@@ -3797,6 +3833,27 @@ local function ScanLearnedRecipes()
 
     local ok, ids = pcall(C_TradeSkillUI.GetAllRecipeIDs)
     if not ok or not ids then return end
+
+    -- Skill-up colors (Forever): this character's relativeDifficulty (0
+    -- orange, 1 yellow, 2 green, 3 grey) for each saved recipe of the open
+    -- profession, read on every list update so it follows your skill as you
+    -- craft. For the arrows on Crafts rows (user, 2026-11-09). Forever only:
+    -- retail's long recipe lists would cost a frame each update.
+    if addon.isForever and addon.char then
+        addon.char.skillUps = addon.char.skillUps or {}
+        local changed = false
+        for _, id in ipairs(ids) do
+            if GoldsmithDB.recipes[id] then
+                local okI, info = pcall(C_TradeSkillUI.GetRecipeInfo, id)
+                local difficulty = okI and type(info) == "table" and info.learned and info.relativeDifficulty or nil
+                if difficulty ~= addon.char.skillUps[id] then
+                    addon.char.skillUps[id] = difficulty
+                    changed = true
+                end
+            end
+        end
+        if changed and addon.Refresh then addon.Refresh() end
+    end
 
     -- New learned recipes to save, and saved ones whose stats haven't been
     -- read since the window opened (stats change with gear, specialization
@@ -4208,9 +4265,13 @@ function addon:InitializePricing()
     end
     local bookFrame = CreateFrame("Frame")
     bookFrame:RegisterEvent("COMMODITY_SEARCH_RESULTS_UPDATED")
-    bookFrame:SetScript("OnEvent", function(_, _, itemID)
-        if itemID then
-            RecordOrderBook(itemID)
+    bookFrame:RegisterEvent("ITEM_SEARCH_RESULTS_UPDATED")
+    bookFrame:RegisterEvent("ITEM_SEARCH_RESULTS_ADDED")
+    bookFrame:SetScript("OnEvent", function(_, event, arg)
+        if event ~= "COMMODITY_SEARCH_RESULTS_UPDATED" then
+            if RecordItemListings(arg) and addon.Refresh then addon.Refresh() end
+        elseif arg then
+            RecordOrderBook(arg)
             if addon.Refresh then
                 addon.Refresh()
             end
@@ -4304,6 +4365,8 @@ function addon:InitializePricing()
             -- Skill, knowledge points or gear (profession tools too): the
             -- next window open reads every recipe's stats again
             statsDirty = true
+            -- A skill point changes recipe colors (skill-up arrows)
+            if event == "SKILL_LINES_CHANGED" and addon.isForever then QueueRecipeScan() end
         else
             -- Stats change with knowledge points, gear and skill, so they're
             -- read again when a profession window opens after one of those

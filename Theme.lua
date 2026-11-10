@@ -291,7 +291,31 @@ function addon:FormatMoney(copper)
     else
         text = string.format("%.2fM g", gold / 1000000)
     end
+    if addon:Setting("coinIcons") then text = addon:CoinIcons(text) end
     return copper < 0 and ("-" .. text) or text
+end
+
+-- The game's coin icons in place of g, s and c (Settings > Display > Coin
+-- icons, off by default; Idea Board, 2026-10-28): 12.40g reads
+-- 12[gold] 40[silver], 3s 25c reads 3[silver] 25[copper]
+local COIN = {
+    g = "|TInterface\\MoneyFrame\\UI-GoldIcon:0:0:1:0|t",
+    s = "|TInterface\\MoneyFrame\\UI-SilverIcon:0:0:1:0|t",
+    c = "|TInterface\\MoneyFrame\\UI-CopperIcon:0:0:1:0|t",
+}
+function addon:CoinIcons(text)
+    -- Retail's two decimals are silver: 12.40g, 0.40g
+    local g, s = text:match("^([%d,]+)%.(%d%d)g$")
+    if g then
+        local gold = g ~= "0" and (g .. COIN.g) or ""
+        local silver = s ~= "00" and ((s:gsub("^0", "")) .. COIN.s) or ""
+        if gold == "" and silver == "" then return "0" .. COIN.g end
+        return gold .. ((gold ~= "" and silver ~= "") and " " or "") .. silver
+    end
+    local m = text:match("^([%d%.]+)M g$")
+    if m then return m .. "M" .. COIN.g end
+    -- 12,345g, 3g 25s, 12s 40c
+    return (text:gsub("([%d,]+)([gsc])", function(n, unit) return n .. COIN[unit] end))
 end
 
 -- With a sign in front: +12.40g, -3.00g

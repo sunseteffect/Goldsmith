@@ -130,6 +130,9 @@ local function LoadSaved()
     setfenv(fn, env)
     fn()
     saved = env.GoldsmithDB or false
+    -- Scenarios compare money as text: coin icons (a display setting you
+    -- may have on in game) start off; coin-icons.lua turns them on
+    if saved and saved.settings then saved.settings.coinIcons = nil end
     return saved
 end
 B.LoadSaved = LoadSaved

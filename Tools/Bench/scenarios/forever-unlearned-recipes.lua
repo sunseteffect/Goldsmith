@@ -71,7 +71,7 @@ bench.Check("estimate you may have isn't the red", addon:SkillNeededLabel(row) ~
 GoldsmithDB.trainerSkill[recipe.outputItemID] = 145
 bench.Has("a trainer's number wins", addon:SkillNeededLabel(row), "Needs 145")
 
--- The list: what you can learn now that makes gold, trainer's first
+-- The list: what you can learn now that makes gold
 local function Row(need, gray, skill, profit, partial)
     return { unlearned = true, charKey = addon.charKey, info = { profit = profit, partial = partial },
         recipe = { outputItemID = need and 990200 + need or 990300, grayLevel = gray, profession = "Alchemy" } }
@@ -84,6 +84,5 @@ local estimate = Row(nil, 120, 80, 100)
 local kept = addon:KeepWorthLearning({ trainer, estimate, Row(nil, nil, 80, 100), Row(90, nil, 80, 100), Row(nil, 180, 80, 100),
     Row(50, nil, 80, -5), Row(50, nil, 80, 100, true) })
 bench.Equal("only the two worth learning", #kept, 2)
-bench.Equal("a trainer's goes first", trainer.pinned, true)
-bench.Check("an estimate doesn't", not estimate.pinned)
+bench.Check("sorted by the column, not a trainer's first", not trainer.pinned and not estimate.pinned)
 bench.Done()
