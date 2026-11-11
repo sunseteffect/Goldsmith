@@ -1086,7 +1086,11 @@ function addon:QueueNextRow(q)
     -- opening another profession: at the Blacksmithing orders, a Jewelcrafting
     -- order first in the queue said Open Jewelcrafting, just to come back
     -- (user, 2026-11-03)
-    local open, stuck, station, waiting, here
+    -- openStation: stuck only on a station, in the profession that's open.
+    -- It beats opening another one wherever it sits: Cooking open, Mithril
+    -- Head Trout needing a fire, and the button said Open Mining for the
+    -- axe above it (user, 2026-11-11: "i was going to cook first")
+    local open, stuck, station, waiting, here, openStation
     for _, row in ipairs(q.rows) do
         local s = row.state
         if s then
@@ -1099,11 +1103,15 @@ function addon:QueueNextRow(q)
                 waiting = waiting or row
             else
                 if not open and not stuck then station = row end
+                if not openStation and s.nearby and addon.ProfessionOpen
+                    and addon.ProfessionOpen(s.stepRecipe or row.recipe) then
+                    openStation = row
+                end
                 stuck = stuck or row
             end
         end
     end
-    return here or station or open or stuck or waiting
+    return here or station or openStation or open or stuck or waiting
 end
 
 -- Crafting in progress (a batch still casting)
@@ -1376,8 +1384,18 @@ local function UpdatePanel()
     local q = addon:BuildQueue(addon.charKey)
     local row = addon:QueueNextRow(q)
     panel.row = row
-    -- Blocked by "Needs Anvil nearby": checked every second (below)
-    panel.nearby = row and row.state and row.state.nearby or nil
+    -- Blocked by "Needs Anvil nearby": checked every second (below), for
+    -- every row, not just the button's: lighting a fire for the trout
+    -- further down never woke the panel while it sat on Open Mining (user,
+    -- 2026-11-11)
+    local nearbyRecipes
+    for _, r in ipairs(q.rows) do
+        for _, recipeID in ipairs(r.state and r.state.nearbyRecipes or {}) do
+            nearbyRecipes = nearbyRecipes or {}
+            table.insert(nearbyRecipes, recipeID)
+        end
+    end
+    panel.nearby = nearbyRecipes
 
     -- Without stock-ups (the Queue tab and Buy next show those)
     local rows = {}
@@ -1486,9 +1504,14 @@ end)
 C_Timer.NewTicker(1, function()
     -- Only once the station is there: planning every second dropped frames
     -- (Crafts.lua's StationsMet)
-    local state = panel and panel.row and panel.row.state
-    if panel and panel:IsShown() and panel.nearby and addon.StationsMet(state and state.nearbyRecipes) then
-        UpdateSoon()
+    -- Any row's station showing up is enough (a fire for the trout while
+    -- the anvil for the axe is still far away)
+    if not (panel and panel:IsShown() and panel.nearby) then return end
+    for _, recipeID in ipairs(panel.nearby) do
+        if addon.StationsMet({ recipeID }) then
+            UpdateSoon()
+            return
+        end
     end
 end)
 
