@@ -17,7 +17,11 @@ bench.HoldCrafted(addon)
 local item
 for _, held in ipairs(addon:GetStockValue("All").heldLong) do
     local cost, _, source = addon:GetUnitCostBasis(held.name, held.count, held.itemID)
-    if not item and cost and cost > 0 and not addon:IsGear(held.itemID) and (source == "crafted" or source == "paid") then
+    -- Not a material: Sell now blends what you paid into those (HeldCost),
+    -- so 4 Sunglass Vial held were 225g each there and 75g here
+    -- (2026-11-13). Worth 30g or more held: 1.5x cost clears 10g in all.
+    if not item and cost and cost > 0 and cost * held.count >= g(30) and not addon:IsGear(held.itemID)
+        and not addon:GetTrackedMaterials()[held.itemID] and (source == "crafted" or source == "paid") then
         item = { itemID = held.itemID, name = held.name, cost = cost }
     end
 end

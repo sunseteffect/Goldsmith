@@ -17,7 +17,9 @@ db.ownScan.prices[db.recipes[AZEROOT_TEA].outputItemID] = { 50 * 10000 }
 -- Azeroot as it was when this was written: the 19g quote below is under
 -- it (17.47g in the 2026-11-12 scan made 19g a price jump)
 db.ownScan.prices[AZEROOT], db.ownScan.prices[AZEROOT + 1] = { 297400, 297400, 20774 }, { 351700, 351700, 44158 }
-db.searchPrices = {}
+-- No live AH searches either: your own (2026-11-13 12:12) priced the
+-- materials over the pinned scan, so the craft lost and Buy next warned
+db.searchPrices, db.orderBooks = {}, {}
 db.inMail["Mysticmead-Sargeras"] = {}
 -- Nothing of the buyer's in the mail: it would count toward the order
 db.inMail["Maddoxynn-Sargeras"] = {}
