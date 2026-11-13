@@ -13,6 +13,12 @@ for _, t in ipairs(page.tiers) do
 end
 bench.Check("silver and gold found", silver ~= nil and gold ~= nil)
 
+-- A gold tier you've never made: Mysticmead has crafted gold since (5
+-- lots by 2026-11-11, its own 66.96g cost on the page, not silver's), so
+-- those crafts are left out here
+GoldsmithDB.craftLots[gold] = nil
+addon:DataChanged()
+
 local g = addon:GetItemDetails("Crystalline Glass", gold)
 bench.Check("gold page knows the tiers share a name", g.sharedName == "both tiers")
 bench.Check("gold page has no cost of yours (never bought or milled gold)", g.paid == nil)

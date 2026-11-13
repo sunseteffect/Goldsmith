@@ -91,13 +91,23 @@ if away then
     bench.Advance(2)
     local entry = db.queues[key][1]
     bench.Equal("queue follows the click", entry and entry.prefMix, away.entry.description)
+    -- The card's mix, when it's listed: the plan lists the top 3 and the
+    -- one in use, so a card's #4 is gone once another is clicked (2026-11-11).
+    -- Then any other listed mix: what's tested is Update queue keeping
+    -- the one clicked last.
     local back = MixRow(first.row.description)
-    bench.Check("the card's mix row", back ~= nil)
+    if not back then
+        for _, f in ipairs(bench.wow.frames) do
+            if not back and f.entry and f:IsVisible() and not f.picked
+                and f.entry.description ~= away.entry.description then back = f end
+        end
+    end
+    bench.Check("a mix row to go back to", back ~= nil)
     if back then back:Click() end
     bench.Advance(2)
     bench.Click("Update queue")
     bench.Advance(2)
-    bench.Equal("queue back on the card's mix", entry and entry.prefMix, first.row.description)
+    bench.Equal("queue keeps the mix clicked last", entry and entry.prefMix, back and back.entry.description)
 end
 for line in screen:gmatch("[^\n]+") do
     if line:find("concentration (", 1, true) then bench.Log("%s", line) end

@@ -9,6 +9,8 @@ local db = bench.LoadSaved()
 db.ownScan, db.orderBooks, db.searchPrices = nil, {}, {}
 db.sellNowTold = nil
 local addon = bench.Login("Mysticmead", { db = db })
+-- One held a while whatever your bags hold today
+bench.HoldCrafted(addon)
 
 -- Everything held under its break-even but one, priced above it
 local prices, item = {}, nil

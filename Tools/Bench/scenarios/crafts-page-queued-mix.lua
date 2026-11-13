@@ -30,6 +30,9 @@ db.ui2 = db.ui2 or {}
 db.ui2.planMixOpen = true
 -- Silver Powder Pigment held, as on 2026-10-24 (used up since)
 db.characters[MADDOXYNN].stock[245808] = 60
+-- and the other quality the 17 gold mix takes 9 of (used up by
+-- 2026-11-11: the queue bought Tranquility Bloom to mill it)
+db.characters[MADDOXYNN].stock[245807] = 20
 -- and the silver Argentleaf for the rest (milled since)
 db.characters[MADDOXYNN].stock[236776] = 200
 -- and Mana Lily (milled since, 2026-10-29)

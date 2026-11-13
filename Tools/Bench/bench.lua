@@ -305,6 +305,44 @@ function B.SetBags(changes)
     B.Advance(1)
 end
 
+-- Something you crafted, held `days` days (default 10) in the bags of
+-- whoever is logged in, for the Sell now and Held scenarios. Picked from
+-- your craft lots: sellable on the AH, not gear, not one of your
+-- materials, its cost from the craft. They found one in your bags before,
+-- and failed the day you'd sold it all (2026-11-11). Returns { itemID,
+-- name, cost } or nil.
+function B.HoldCrafted(addon, days)
+    local db = GoldsmithDB
+    local materials = addon:GetTrackedMaterials()
+    local ids = {}
+    for id in pairs(db.craftLots or {}) do table.insert(ids, id) end
+    table.sort(ids)
+    for _, id in ipairs(ids) do
+        local lots = db.craftLots[id]
+        local last = lots[#lots]
+        local name = last and last.name or C_Item.GetItemNameByID(id)
+        if name and last and last.unitCost and not materials[id] and not addon:IsGear(id)
+            and addon:CanAuction(id) ~= false and not addon:IsVendorItem(id) and not addon:IsKept(id) then
+            if not world.items[id] then B.AddItem(id, name) end
+            local count = 3
+            db.craftLots[id] = { { name = name, qty = count, time = time() - (days or 10) * 86400,
+                partial = false, unitCost = last.unitCost } }
+            -- In the bags, and in what Goldsmith counted (its count runs
+            -- a few frames later)
+            B.SetBags({ [id] = count })
+            db.characters[addon.charKey].stock[id] = count
+            addon:DataChanged()
+            local cost, _, source = addon:GetUnitCostBasis(name, count, id)
+            if cost and cost > 0 and source == "crafted" then
+                return { itemID = id, name = name, cost = cost }
+            end
+            db.craftLots[id] = lots
+            db.characters[addon.charKey].stock[id] = nil
+            B.SetBags({ [id] = false })
+        end
+    end
+end
+
 function B.SetMoney(copper)
     world.money = copper
     B.Fire("PLAYER_MONEY")

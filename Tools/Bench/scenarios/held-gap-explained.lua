@@ -15,6 +15,10 @@ for id, r in pairs(db.recipes) do
     if r.outputName == "Enchant Weapon - Flames of the Sin'dorei" then FLAMES = id end
     if r.outputName == "Thalassian Missive of the Aurora" then MISSIVE = id end
 end
+-- Flames (silver, the tier planned) worth its materials: with
+-- 2026-11-12's prices selling the materials paid ~159g more, and that note
+-- takes the plan's line (by design)
+db.ownScan.prices[244027] = { 9000000, 9000000, 500 }
 db.queues[MADDOXYNN] = {
     { recipeID = FLAMES, quantity = 2, made = 0, tier = 2, concentrate = true, added = os.time() },
     { recipeID = MISSIVE, quantity = 1, made = 0, tier = 1, added = os.time() },
@@ -52,7 +56,8 @@ bench.Has("queue footer: why", screen, "You paid " .. addon:FormatMoney(gap or 0
 addon:OpenCraftPlan(GoldsmithDB.recipes[FLAMES], { tier = 2, concentrate = true }, MADDOXYNN, 2, "queue")
 bench.Advance(2)
 screen = bench.Screen()
-bench.Has("plan: profit at today's prices", screen, "%d+%% ROI · %+[%d,%.]+g at today's prices", false)
+-- A loss too ("-17% ROI · -91.69g"): Flames turned to one as prices moved
+bench.Has("plan: profit at today's prices", screen, "%-?%d+%% ROI · [%+%-][%d,%.]+g at today's prices", false)
 bench.Has("plan: why", screen, "You paid [%d,%.]+g more for Petrified Root", false)
 
 -- Under the threshold (a few gold either way): nothing extra

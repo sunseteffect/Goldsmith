@@ -12,14 +12,16 @@ for _, run in ipairs(GoldsmithDB.salvageRuns or {}) do
 end
 bench.Check("Maddoxynn has milled Argentleaf before", recipeID ~= nil)
 
-local herbs, pigments = addon:HeldAnywhere(HERB), addon:HeldAnywhere(PIGMENT)
+-- 40 herbs in the bags, whatever Maddoxynn holds today (6 in the bank on
+-- 2026-11-11, and milling 20 of them never started)
+bench.SetBags({ [HERB] = 40 })
 local before = #GoldsmithDB.salvageRuns
 local expected = addon:GetHerbUnitCost(HERB, "Argentleaf")
 
 -- Mill 20 herbs into 26 pigments, then close the profession (ends the run)
 bench.OpenProfession("Inscription")
 C_TradeSkillUI.CraftSalvage(recipeID, 4, { itemID = HERB })
-bench.SetBags({ [HERB] = (bench.world.bags[HERB] or herbs) - 20,
+bench.SetBags({ [HERB] = 20,
                 [PIGMENT] = (bench.world.bags[PIGMENT] or 0) + 26 })
 bench.Advance(1)
 bench.CloseProfession()

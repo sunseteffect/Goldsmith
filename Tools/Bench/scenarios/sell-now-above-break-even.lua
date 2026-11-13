@@ -11,6 +11,8 @@ db.ownScan, db.orderBooks, db.searchPrices = nil, {}, {}
 db.sellNowTold = nil
 db.setupDone = true  -- Do this next, not the Getting started list
 local addon = bench.Login("Mysticmead", { db = db })
+-- One held a while whatever your bags hold today
+bench.HoldCrafted(addon)
 -- Prices set here, whatever the saved scans say: everything held a while
 -- under its break-even, so only the one raised
 -- below counts

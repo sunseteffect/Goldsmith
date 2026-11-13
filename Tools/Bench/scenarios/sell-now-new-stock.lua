@@ -16,7 +16,11 @@ for id, lots in pairs(db.craftLots) do
     -- The newest lot old too: a Missive crafted again lately is held
     -- since then (2026-10-30)
     local last = lots[#lots]
-    if #lots > 0 and last.unitCost and last.unitCost > 0 and last.time < os.time() - 10 * 86400
+    -- Not a material your recipes use: those are named only once listed
+    -- (IsForSale). Crystalline Glass turned 10 days old and was picked,
+    -- quiet by design (2026-11-12). Worth 10g+, so one clears SELL_NOW_MIN_GOLD
+    if #lots > 0 and last.unitCost and last.unitCost >= 100000 and not db.reagents[last.name or ""]
+        and last.time < os.time() - 10 * 86400
         and lots[1].time < os.time() - 10 * 86400 then
         itemID, lot = id, last
         break
