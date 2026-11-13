@@ -319,17 +319,23 @@ local SEARCH_COLUMNS = {
     { key = "profession", label = "Profession", width = 130 },
     { key = "have", label = "You have", width = 70, justify = "RIGHT" },
     { key = "price", label = "AH price", width = 90, justify = "RIGHT" },
+    { key = "vsUsual", label = "Vs usual", width = 60, justify = "RIGHT", hidden = true },
+    { key = "listed", label = "Listed", width = 56, justify = "RIGHT", hidden = true },
     { key = "demand", label = "Sold/day", width = 70, justify = "RIGHT" },
     { key = "saleRate", label = "Sale rate", width = 64, justify = "RIGHT", tsm = true },
 }
 
+-- Break-even and Sell all start hidden (right-click a column name; user,
+-- 2026-11-13): what selling what you hold at today's price would make
 local STOCK_COLUMNS = {
     { key = "item", label = "Item" },
     { key = "have", label = "Have", width = 56, justify = "RIGHT" },
     { key = "each", label = "Each", width = 84, justify = "RIGHT" },
     { key = "value", label = "Value", width = 90, justify = "RIGHT" },
     { key = "held", label = "Held", width = 64, justify = "RIGHT" },
+    { key = "breakEven", label = "Break-even", width = 80, justify = "RIGHT", hidden = true },
     { key = "price", label = "AH price", width = 90, justify = "RIGHT" },
+    { key = "sellAll", label = "Sell all", width = 84, justify = "RIGHT", hidden = true },
     { key = "demand", label = "Sold/day", width = 70, justify = "RIGHT" },
     { key = "saleRate", label = "Sale rate", width = 64, justify = "RIGHT", tsm = true },
 }
@@ -345,6 +351,8 @@ local CHEAP_COLUMNS = {
     { key = "usual", label = "Usually", width = 72, justify = "RIGHT" },
     { key = "have", label = "You have", width = 60, justify = "RIGHT" },
     { key = "use", label = "You use", width = 60, justify = "RIGHT" },
+    -- How many are up at about this price: 3 or 300 (starts hidden)
+    { key = "listed", label = "Listed", width = 56, justify = "RIGHT", hidden = true },
     -- Its last 30 days as a small line, to tell a dip from a slide at a
     -- glance (user, 2026-10-23)
     { key = "trend", label = "Trend", width = 64, gap = 10, make = function(row) return UI.Sparkline(row) end },
@@ -428,6 +436,35 @@ local function UsedInText(item)
     return "-", "dim"
 end
 
+local function Dash(cell)
+    cell:SetText("-")
+    cell:SetTextColor(addon:Color("dim"))
+end
+
+local function FillListed(cell, itemID)
+    local n = addon:GetListedCount(itemID)
+    if n then
+        cell:SetText(addon:FormatCount(n))
+        cell:SetTextColor(addon:Color("muted"))
+    else
+        Dash(cell)
+    end
+end
+
+-- Today's price against the usual: 0.4 is 40% above
+local function VsUsual(itemID, price)
+    local usual = price and itemID and addon:UsualPrice(itemID)
+    if usual and usual > 0 then return (price - usual) / usual end
+end
+
+-- In stock: what selling all you hold makes at today's price, after the
+-- cut, against what it cost you (nil without a real cost or a price)
+local function SellAll(item)
+    local cost = addon:HeldCost(item)
+    local price = addon:GetMarketPrice(item.itemID)
+    if cost and price then return (price * 0.95 - cost) * item.count, cost end
+end
+
 local function FillCheapRow(row, item)
     local c = row.cells
     c.item:SetText(ItemText(item.name, item.itemID))
@@ -448,6 +485,7 @@ local function FillCheapRow(row, item)
     local rate, rateColor = addon:FormatBuyRate(item.perWeek)
     c.use:SetText(rate)
     c.use:SetTextColor(addon:Color(rateColor))
+    FillListed(c.listed, item.itemID)
     c.trend:SetValues(item.series, TREND_COLORS[item.trend] or "muted")
     c.buy:SetText(item.buy and tostring(item.buy) or "-")
     c.buy:SetTextColor(addon:Color(item.buy and "gold" or "dim"))
@@ -615,6 +653,8 @@ local SORTS = {
         -- Held longest first: the oldest date
         held  = { firstDescending = false, value = function(i) return i.heldSince end },
         price = { firstDescending = true,  value = function(i) return addon:GetMarketPrice(i.itemID) end },
+        breakEven = { firstDescending = false, value = function(i) local c = addon:HeldCost(i) return c and c / 0.95 end },
+        sellAll = { firstDescending = true, value = function(i) return (SellAll(i)) end },
         demand   = { firstDescending = true, value = function(i) return i.demand end },
         saleRate = { firstDescending = true, value = function(i) return i.saleRate end },
     },
@@ -623,6 +663,8 @@ local SORTS = {
         profession = { firstDescending = false, value = function(i) return i.profession end },
         have       = { firstDescending = true,  value = function(i) return i.have > 0 and i.have or nil end },
         price      = { firstDescending = true,  value = function(i) return i.price end },
+        vsUsual    = { firstDescending = true,  value = function(i) return VsUsual(i.itemID, i.price) end },
+        listed     = { firstDescending = false, value = function(i) return (addon:GetListedCount(i.itemID)) end },
         demand     = { firstDescending = true,  value = function(i) return i.demand end },
         saleRate   = { firstDescending = true,  value = function(i) return i.saleRate end },
     },
@@ -635,6 +677,7 @@ local SORTS = {
         have     = { firstDescending = true,  value = function(i) return (i.have + (i.mail or 0)) > 0 and (i.have + (i.mail or 0)) or nil end },
         use      = { firstDescending = true,  value = function(i) return i.perWeek > 0 and i.perWeek or nil end },
         buy      = { firstDescending = true,  value = function(i) return i.buy end },
+        listed   = { firstDescending = true,  value = function(i) return (addon:GetListedCount(i.itemID)) end },
         trend    = { firstDescending = false, value = function(i) return i.move end },
         usedIn   = { firstDescending = true,  value = function(i) return #i.recipes > 0 and i.profitable or nil end },
     },
@@ -685,6 +728,15 @@ local function FillSearchRow(row, item)
     c.have:SetText(item.have > 0 and tostring(item.have) or "-")
     if item.have == 0 then c.have:SetTextColor(addon:Color("dim")) end
     c.price:SetText(item.price and Money(item.price) or "-")
+    local diff = VsUsual(item.itemID, item.price)
+    if diff then
+        local pct = math.floor(diff * 100 + (diff >= 0 and 0.5 or -0.5))
+        c.vsUsual:SetText((pct > 0 and "+" or "") .. pct .. "%")
+        c.vsUsual:SetTextColor(addon:Color(diff >= 0.25 and "warning" or "muted"))
+    else
+        Dash(c.vsUsual)
+    end
+    FillListed(c.listed, item.itemID)
     FillSalesCells(c, item)
 end
 
@@ -705,6 +757,20 @@ local function FillStockRow(row, item)
     local price = addon:GetMarketPrice(item.itemID)
     c.price:SetText(price and Money(price) or "-")
     c.price:SetTextColor(addon:Color("muted"))
+    local all, cost = SellAll(item)
+    local held = addon:HeldCost(item)
+    if held then
+        c.breakEven:SetText(Money(held / 0.95))
+        c.breakEven:SetTextColor(addon:Color("muted"))
+    else
+        Dash(c.breakEven)
+    end
+    if all then
+        c.sellAll:SetText(addon:FormatSignedMoney(all))
+        c.sellAll:SetTextColor(addon:Color(addon:MoneyColor(all)))
+    else
+        Dash(c.sellAll)
+    end
     FillSalesCells(c, item)
 end
 
@@ -761,7 +827,10 @@ local ACTIVITY_COLORS = { Sold = "profit", Bought = "loss", Posted = "warning", 
 
 local function CreatePage(parent)
     local page = CreateFrame("Frame", nil, parent)
-    page:SetAllPoints()
+    -- Laid out for the normal width: that, centered in a wider window
+    page:SetPoint("TOP")
+    page:SetPoint("BOTTOM")
+    page:SetWidth(WIDTH)
     page:Hide()
 
     page.back = UI.Button(page, "< Items", 76, 26, function()
@@ -1364,18 +1433,27 @@ local function Create(parent)
     view.note = UI.Text(landing, "label", "dim", "RIGHT")
     view.note:SetPoint("TOPRIGHT", 0, -7)
 
-    local boardWidth = (WIDTH - GAP) / 2
+    -- Two columns, each half the tab: they widen with the window
     local boardHeight = (addon.CONTENT_HEIGHT - TOP_HEIGHT - GAP - GAP) / 2
     view.boards = {}
     for i, def in ipairs(BOARDS) do
         local board = CreateBoard(landing, def)
-        board:SetSize(boardWidth, boardHeight)
+        board:SetHeight(boardHeight)
         local col, rowIndex = (i - 1) % 2, math.floor((i - 1) / 2)
-        board:SetPoint("TOPLEFT", col * (boardWidth + GAP), -(TOP_HEIGHT + GAP) - rowIndex * (boardHeight + GAP))
+        local top = -(TOP_HEIGHT + GAP) - rowIndex * (boardHeight + GAP)
+        if col == 0 then
+            board:SetPoint("TOPLEFT", landing, "TOPLEFT", 0, top)
+            board:SetPoint("TOPRIGHT", landing, "TOP", -GAP / 2, top)
+        else
+            board:SetPoint("TOPLEFT", landing, "TOP", GAP / 2, top)
+            board:SetPoint("TOPRIGHT", landing, "TOPRIGHT", 0, top)
+        end
         view.boards[i] = board
     end
 
     view.list = UI.List(landing, {
+        -- Each view (search, stock, cheap) keeps its own
+        columnsKey = function() return "items-" .. (view.listMode or "search") end,
         fill = function(row, item)
             if view.listMode == "stock" then FillStockRow(row, item)
             elseif view.listMode == "cheap" then FillCheapRow(row, item)

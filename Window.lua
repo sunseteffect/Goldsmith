@@ -20,6 +20,14 @@ local LEGEND_HEIGHT = 18
 -- A faction frame's border is about this much thicker than the game's plain one
 local FACTION_FRAME_PAD = 16
 local WIDTH, HEIGHT = 900, 710 + LEGEND_HEIGHT
+-- The window can be dragged wider (the corner grip), never narrower than
+-- WIDTH: every tab is laid out for it. Lists stretch (more columns fit,
+-- user 2026-11-13); the tabs laid out to a fixed width stay that width,
+-- centered. Items stretches too: its list said "no room" beside empty
+-- space (its item page stays its width, Items.lua). Height stays: the
+-- Overview and Characters are laid out for it.
+local FIXED_TABS = { overview = true, characters = true, stats = true }
+local CONTENT_WIDTH = WIDTH - 40
 -- Height left for a tab's content (header, tabs, legend and padding taken off)
 addon.CONTENT_HEIGHT = HEIGHT - 114 - LEGEND_HEIGHT
 local HEADER_HEIGHT = 48
@@ -197,7 +205,13 @@ function addon:CreateWindow()
     ui.range = ui.range or "7d"
 
     local frame = CreateFrame("Frame", "GoldsmithWindow", UIParent, "BackdropTemplate")
-    frame:SetSize(WIDTH, HEIGHT)
+    -- As wide as you dragged it, within the screen
+    local function MaxWidth()
+        local screen = UIParent:GetWidth() or 0
+        return math.max(WIDTH, math.floor(screen - 20))
+    end
+    local width = math.min(math.max(tonumber(ui.width) or WIDTH, WIDTH), MaxWidth())
+    frame:SetSize(width, HEIGHT)
     if ui.point then
         frame:SetPoint(ui.point, UIParent, ui.relativePoint, ui.x, ui.y)
     else
@@ -510,6 +524,65 @@ function addon:CreateWindow()
         end)
     end
     MakeDragHandle(header)
+
+    -- The resize grip, bottom right: drag for a wider window, double-click
+    -- for the normal width
+    if frame.SetResizable then
+        frame:SetResizable(true)
+        local function Bounds()
+            if frame.SetResizeBounds then frame:SetResizeBounds(WIDTH, HEIGHT, MaxWidth(), HEIGHT) end
+        end
+        Bounds()
+        local grip = CreateFrame("Button", nil, frame)
+        -- Bigger than the chat window's, and off a faction frame's thick border
+        -- onto the dark panel: on the Alliance border it was hard to see
+        -- (user, 2026-11-13)
+        local inset = framePad > 0 and 9 or 3
+        grip:SetSize(20, 20)
+        -- 1 px more to the left there, so its point lines up with the
+        -- border corner's (user, 2026-11-13)
+        local left = framePad > 0 and inset + 1 or inset
+        grip:SetPoint("BOTTOMRIGHT", -left, inset)
+        -- Above the frame art: the Alliance and Horde frames are drawn high
+        -- up and over the corner, which hid it (user, 2026-11-13)
+        grip:SetFrameLevel(math.max(frame:GetFrameLevel(), gameArt and gameArt.topLevel or 0) + 80)
+        grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+        grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+        grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+        local function Save()
+            local w = math.floor(frame:GetWidth() + 0.5)
+            ui.width = w > WIDTH and w or nil
+            local point, _, relativePoint, x, y = frame:GetPoint()
+            ui.point, ui.relativePoint, ui.x, ui.y = point, relativePoint, x, y
+        end
+        grip:SetScript("OnMouseDown", function(_, button)
+            if button ~= "LeftButton" then return end
+            Bounds()
+            UI.BeginSizing()
+            frame:StartSizing("BOTTOMRIGHT")
+        end)
+        grip:SetScript("OnMouseUp", function()
+            frame:StopMovingOrSizing()
+            UI.EndSizing()
+            Save()
+        end)
+        -- Let go off the grip, or the window hidden mid-drag: still ends it
+        frame:HookScript("OnHide", function() if UI.sizing then UI.EndSizing() end end)
+        grip:SetScript("OnDoubleClick", function()
+            frame:SetWidth(WIDTH)
+            Save()
+        end)
+        grip:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:AddLine("Drag: make the window wider", 1, 1, 1)
+            GameTooltip:AddLine("Double-click: normal width", 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        grip:SetScript("OnLeave", GameTooltip_Hide)
+        frame.resizeGrip = grip
+        -- The help line along the bottom stops short of it
+        frame.gripRoom = left + 20 + 6
+    end
 
     -- Logo mark (hammer and ingot, Media\Logo.tga) beside the name
     local logo = header:CreateTexture(nil, "ARTWORK")
@@ -918,12 +991,13 @@ function addon:CreateWindow()
     -- 2026-10-17: a reminder of the peek and close keys): only what fits
     -- beside the click legend, most useful first
     local keysText = UI.Text(frame, "small", "muted", "RIGHT")
-    keysText:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -20, 8)
+    -- Short of the resize grip: "CTRL-G: close" ran under it (user, 2026-11-13)
+    keysText:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -math.max(20, frame.gripRoom or 0), 8)
     keysText:SetWordWrap(false)
     -- The whole line, clicks and keys, for help mode's outline
     local legendArea = CreateFrame("Frame", nil, frame)
     legendArea:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 18, 5)
-    legendArea:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -18, 5)
+    legendArea:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -math.max(18, frame.gripRoom or 0), 5)
     legendArea:SetHeight(LEGEND_HEIGHT)
     local function KeyPart(key, text)
         return addon:Colorize(key .. ":", "text") .. " " .. addon:Colorize(text, "muted")
@@ -941,7 +1015,7 @@ function addon:CreateWindow()
     end
     local function FillLegend(text, tab)
         legend:SetText(text)
-        local room = frame:GetWidth() - 40 - legend:GetUnboundedStringWidth() - 24
+        local room = frame:GetWidth() - 20 - math.max(20, frame.gripRoom or 0) - legend:GetUnboundedStringWidth() - 24
         local shown = {}
         local sep = addon:Colorize("  ·  ", "dim")
         for _, part in ipairs(KeyReminders(tab)) do
@@ -978,7 +1052,14 @@ function addon:CreateWindow()
         if created[key] then return created[key] end
         local def = views[key]
         local screen = CreateFrame("Frame", nil, content)
-        screen:SetAllPoints()
+        if FIXED_TABS[key] then
+            -- Laid out for the normal width: that, centered
+            screen:SetPoint("TOP")
+            screen:SetPoint("BOTTOM")
+            screen:SetWidth(CONTENT_WIDTH)
+        else
+            screen:SetAllPoints()
+        end
         local view = def.create(screen)
         created[key] = { frame = screen, view = view, def = def }
         return created[key]

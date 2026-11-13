@@ -43,23 +43,37 @@ local function Roi(margin)
     return string.format("%d%%", margin >= 0 and math.floor(margin) or math.ceil(margin))
 end
 
+-- Columns marked hidden start hidden: right-click a column name to show
+-- them (user, 2026-11-13: data people may find useful)
 local SIMPLE_COLUMNS = {
     { key = "item", label = "Item" },
     { key = "cost", label = "Cost", width = 78, justify = "RIGHT" },
+    { key = "breakEven", label = "Break-even", width = 80, justify = "RIGHT", hidden = true },
     { key = "price", label = "AH price", width = 80, justify = "RIGHT" },
+    { key = "vsUsual", label = "Vs usual", width = 60, justify = "RIGHT", hidden = true },
     { key = "profit", label = "Profit", width = 84, justify = "RIGHT" },
     { key = "margin", label = "ROI", width = 56, justify = "RIGHT" },
+    { key = "make", label = "Make", width = 48, justify = "RIGHT", hidden = true },
+    { key = "batch", label = "Batch", width = 84, justify = "RIGHT", hidden = true },
+    { key = "have", label = "Have", width = 48, justify = "RIGHT" },
+    { key = "listed", label = "Listed", width = 56, justify = "RIGHT", hidden = true },
     { key = "demand", label = "Sold/day", width = 70, justify = "RIGHT" },
     { key = "saleRate", label = "Sale rate", width = 64, justify = "RIGHT", tsm = true },
 }
 local CONC_COLUMNS = {
     { key = "item", label = "Item" },
     { key = "cost", label = "Cost", width = 78, justify = "RIGHT" },
+    { key = "breakEven", label = "Break-even", width = 80, justify = "RIGHT", hidden = true },
     { key = "price", label = "AH price", width = 80, justify = "RIGHT" },
+    { key = "vsUsual", label = "Vs usual", width = 60, justify = "RIGHT", hidden = true },
     { key = "profit", label = "Profit", width = 84, justify = "RIGHT" },
     { key = "margin", label = "ROI", width = 56, justify = "RIGHT" },
     { key = "conc", label = "Conc", width = 50, justify = "RIGHT" },
     { key = "gpc", label = "g/conc", width = 60, justify = "RIGHT" },
+    { key = "make", label = "Make", width = 48, justify = "RIGHT", hidden = true },
+    { key = "batch", label = "Batch", width = 84, justify = "RIGHT", hidden = true },
+    { key = "have", label = "Have", width = 48, justify = "RIGHT" },
+    { key = "listed", label = "Listed", width = 56, justify = "RIGHT", hidden = true },
     { key = "demand", label = "Sold/day", width = 70, justify = "RIGHT" },
     { key = "saleRate", label = "Sale rate", width = 64, justify = "RIGHT", tsm = true },
 }
@@ -111,6 +125,101 @@ local function GoldPerConc(info)
     return info.concentrationValue
 end
 
+-- How many you own of what a row makes (what a salvage row salvages):
+-- bags, banks and mail on all your characters, the warband bank, and
+-- listed on the AH ("display the current owned amount of that item
+-- (already posted on AH, in the bags/bank etc.)", puvesis, CurseForge,
+-- 2026-11-13). Returns the total; with where, fills it with where they
+-- are (GetHeldParts), each character's mail as entry.mail.
+local function HaveCount(item, where)
+    local itemID = item.salvage and item.salvage.inputID or item.itemID
+    if not itemID then return 0 end
+    local stored, listed = addon:GetHeldParts(itemID, not item.salvage and item.tier or nil, where)
+    local mail = 0
+    for key in pairs(GoldsmithDB.inMail or {}) do
+        local n = addon:InMailCountFor(key, itemID)
+        if n > 0 then
+            mail = mail + n
+            if where then
+                local entry
+                for _, e in ipairs(where) do if e.key == key then entry = e end end
+                if not entry then
+                    local c = GoldsmithDB.characters[key]
+                    entry = { key = key, name = c and c.name or key, stored = 0, bank = 0, listed = 0 }
+                    table.insert(where, entry)
+                end
+                entry.mail = n
+            end
+        end
+    end
+    return stored + listed + mail
+end
+
+-- One place's count for the hover: "13 (10 bags, 3 bank)", or "13 (bags)"
+-- when it's all in one place
+local function WhereText(e)
+    local total = e.stored + e.listed + (e.mail or 0)
+    if e.key == "warband" then return tostring(total) end
+    local parts = {}
+    local bags = e.stored - e.bank
+    if bags > 0 then table.insert(parts, { bags, "bags" }) end
+    if e.bank > 0 then table.insert(parts, { e.bank, "bank" }) end
+    if (e.mail or 0) > 0 then table.insert(parts, { e.mail, "mail" }) end
+    if e.listed > 0 then table.insert(parts, { e.listed, "on the AH" }) end
+    if #parts == 1 then return string.format("%d (%s)", total, parts[1][2]) end
+    local text = {}
+    for _, p in ipairs(parts) do table.insert(text, p[1] .. " " .. p[2]) end
+    return string.format("%d (%s)", total, table.concat(text, ", "))
+end
+
+-- The lowest AH price that doesn't lose money after the cut, for one
+-- made now (not for salvage)
+local function BreakEven(item)
+    local cost = not item.salvage and item.info.cost
+    return cost and cost > 0 and cost / (1 - AH_CUT) or nil
+end
+
+-- Today's AH price against the item's usual (UsualPrice: Goldsmith Data's
+-- 7 days, TSM's, or your saved prices): 0.4 is 40% above. A big profit is
+-- often a price spike. Not for gear with qualities: they share an item
+-- ID, so the usual mixes them.
+local function VsUsual(item)
+    local price = item.info.price
+    if item.salvage or not (price and item.itemID) or (item.tier and addon:IsGear(item.itemID)) then return nil end
+    local usual, from = addon:UsualPrice(item.itemID)
+    if not usual or usual <= 0 then return nil end
+    return (price - usual) / usual, usual, from
+end
+
+local function Percent(diff)
+    local pct = math.floor(diff * 100 + (diff >= 0 and 0.5 or -0.5))
+    return (pct > 0 and "+" or "") .. pct .. "%"
+end
+
+-- How many to make, as Do this next would: a batch sized to how fast
+-- yours sell (SuggestedBatch), none while you hold some (more once they
+-- sell). Only for crafts worth making. Returns the count (0 while you hold
+-- some), why, and the batch's profit.
+local function MakeCount(item)
+    local info = item.info
+    if item.salvage or item.unlearned or item.whyNot or info.partial or not (info.profit and info.profit > 0)
+        or not item.recipe then return nil end
+    local have = HaveCount(item)
+    if have > 0 then
+        return 0, string.format("you have %d: more once %s", have, have == 1 and "it sells" or "they sell"), 0
+    end
+    local make, why = addon:SuggestedBatch(item.recipe, item.itemID or item.recipe.outputItemID)
+    return make, why, make * info.profit
+end
+
+-- How many are listed on the AH: your last scan, else Goldsmith Data's
+-- region count (commodities). Returns the count and where it's from.
+local function ListedCount(item)
+    return addon:GetListedCount(item.salvage and item.salvage.inputID or item.itemID)
+end
+
+local function Count(n) return addon:FormatCount(n) end
+
 local SORTS = {
     item   = { firstDescending = false, value = function(i) return i.recipe.outputName .. (i.tier or "") end },
     cost   = { firstDescending = false, value = function(i) return i.info.cost end },
@@ -119,6 +228,12 @@ local SORTS = {
     margin = { firstDescending = true,  value = function(i) return i.info.margin end },
     conc   = { firstDescending = false, value = function(i) return i.info.concentrate and i.info.concentration or nil end },
     gpc    = { firstDescending = true,  value = function(i) return GoldPerConc(i.info) end },
+    have   = { firstDescending = true,  value = function(i) local n = HaveCount(i) return n > 0 and n or nil end },
+    breakEven = { firstDescending = false, value = function(i) return BreakEven(i) end },
+    vsUsual = { firstDescending = true, value = function(i) return (VsUsual(i)) end },
+    make   = { firstDescending = true,  value = function(i) local n = MakeCount(i) return n and n > 0 and n or nil end },
+    batch  = { firstDescending = true,  value = function(i) local n, _, b = MakeCount(i) return n and n > 0 and b or nil end },
+    listed = { firstDescending = false, value = function(i) return (ListedCount(i)) end },
     demand = { firstDescending = true,  value = function(i) return i.info.demand end },
     saleRate = { firstDescending = true, value = function(i) return i.info.saleRate end },
 }
@@ -352,7 +467,9 @@ local function FillCraftRow(row, item)
         cells.margin:SetTextColor(addon:Color("dim"))
     end
 
-    if cells.conc and cells.conc:IsShown() then
+    -- Filled even when hidden: Conc can be hidden with g/conc still shown
+    -- (right-click a header)
+    if cells.conc then
         if info.concentrate then
             cells.conc:SetText(string.format("%d", info.concentration))
             cells.conc:SetTextColor(addon:Color("conc"))
@@ -369,6 +486,57 @@ local function FillCraftRow(row, item)
             cells.conc:SetTextColor(addon:Color("dim"))
             cells.gpc:SetText("-")
             cells.gpc:SetTextColor(addon:Color("dim"))
+        end
+    end
+
+    if cells.have then
+        local have = HaveCount(item)
+        cells.have:SetText(have > 0 and tostring(have) or "-")
+        cells.have:SetTextColor(addon:Color(have > 0 and "text" or "dim"))
+    end
+    -- The columns that start hidden (right-click a column name)
+    local function Dash(cell)
+        cell:SetText("-")
+        cell:SetTextColor(addon:Color("dim"))
+    end
+    if cells.breakEven then
+        local be = BreakEven(item)
+        if be then
+            cells.breakEven:SetText(Money(be) .. (info.partial and "+" or ""))
+            cells.breakEven:SetTextColor(addon:Color("muted"))
+        else
+            Dash(cells.breakEven)
+        end
+    end
+    if cells.vsUsual then
+        local diff = VsUsual(item)
+        if diff then
+            cells.vsUsual:SetText(Percent(diff))
+            -- Well above usual: the profit may be a spike
+            cells.vsUsual:SetTextColor(addon:Color(diff >= 0.25 and "warning" or "muted"))
+        else
+            Dash(cells.vsUsual)
+        end
+    end
+    if cells.make then
+        local make, _, batch = MakeCount(item)
+        if make and make > 0 then
+            cells.make:SetText(tostring(make))
+            cells.make:SetTextColor(addon:Color("text"))
+            cells.batch:SetText(Signed(batch))
+            cells.batch:SetTextColor(addon:Color(addon:MoneyColor(batch)))
+        else
+            Dash(cells.make)
+            Dash(cells.batch)
+        end
+    end
+    if cells.listed then
+        local n = ListedCount(item)
+        if n then
+            cells.listed:SetText(Count(n))
+            cells.listed:SetTextColor(addon:Color("muted"))
+        else
+            Dash(cells.listed)
         end
     end
 
@@ -636,10 +804,36 @@ local function CraftTooltip(tooltip, item)
             addon:SaleRateColor(info.saleRate))
         Why(tooltip, "TSM: the share of TSM players' auctions that sell. A low rate means listings often sit.")
     end
-    local have = item.itemID and addon:GetStock(item.itemID) or 0
+    local where = {}
+    local have = HaveCount(item, where)
     if have > 0 then
         Line(tooltip, "You have", tostring(have))
-        Why(tooltip, "In bags and banks on your counted characters, and the warband bank.")
+        table.sort(where, function(a, b)
+            local na, nb = a.stored + a.listed + (a.mail or 0), b.stored + b.listed + (b.mail or 0)
+            if na ~= nb then return na > nb end
+            return a.name < b.name
+        end)
+        for _, e in ipairs(where) do Line(tooltip, "   " .. e.name, WhereText(e), "muted") end
+        Why(tooltip, item.salvage and "Of what's salvaged, on all your characters and the warband bank, with your AH listings."
+            or "On all your characters and the warband bank, with your AH listings. Listings are read each time you open the AH.")
+    end
+    local make, makeWhy, batch = MakeCount(item)
+    if make and make > 0 then
+        Line(tooltip, "Make", string.format("%d (%s)", make, Signed(batch)))
+        Why(tooltip, "How many, as Do this next would: " .. makeWhy .. ".")
+    elseif make then
+        Line(tooltip, "Make", "none yet", "muted")
+        Why(tooltip, "Do this next waits: " .. makeWhy .. ".")
+    end
+    local diff, usual, usualFrom = VsUsual(item)
+    if diff then
+        Line(tooltip, "Usually", string.format("%s (%s now)", Money(usual), Percent(diff)), diff >= 0.25 and "warning" or nil)
+        Why(tooltip, "From " .. usualFrom .. ". Well above usual, the profit may not last.")
+    end
+    local listed, listedFrom = ListedCount(item)
+    if listed then
+        Line(tooltip, "Listed", Count(listed))
+        Why(tooltip, "On the AH, from " .. listedFrom .. ". Many listed: more sellers ahead of you.")
     end
 
     if info.concentrate then
@@ -3951,6 +4145,7 @@ local function Create(parent)
 
     view.list = UI.List(list, {
         rowHeight = ROW_HEIGHT,
+        columnsKey = "crafts",
         fill = FillCraftRow,
         tooltip = CraftTooltip,
         onClick = function(item, button)

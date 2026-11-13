@@ -356,6 +356,12 @@ local function HeldCost(item, materials)
     local cost, _, source = addon:GetUnitCostBasis(item.name, item.count, item.itemID)
     return cost, source
 end
+-- For the Items tab's In stock columns: { name, count, itemID }; the cost
+-- only when it's real (crafted or paid), as Sell now goes by
+function addon:HeldCost(item)
+    local cost, source = HeldCost(item, addon:GetTrackedMaterials())
+    if cost and cost > 0 and (source == "crafted" or source == "paid") then return cost end
+end
 
 function addon:GetSellNow()
     local list = {}

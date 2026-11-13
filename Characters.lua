@@ -24,6 +24,8 @@ end
 --     money, gold   = { ["YYYY-MM-DD"] = copper at the end of that day },
 --     goldTime      = { ["YYYY-MM-DD"] = seconds spent making gold },
 --     stock, stockTime = { [itemID] = count in bags and bank } and when,
+--                        not counting what you wear (bags in bag slots too)
+--     bankBags      = { [itemID] = count } in the bank's bag slots (Forever)
 --     auctions, auctionsTime = { [itemID] = count listed on the AH } and
 --                              when it was last read from the AH,
 --     gearTiers, auctionTiers = { [itemID] = { [tier] = count } } for
@@ -281,14 +283,36 @@ end
 -- What you have equipped ({ [itemID] = count }): gear and profession tools
 -- in use aren't stock (the item count includes them; an equipped Sin'dorei
 -- Quill counted 2,400g in Gold in stock, user 2026-10-11)
+-- Bags in your bag slots too: two Linen Reagent Bags in use said "You
+-- have 2" on the Crafts list (user, 2026-11-13). bankBags: bags in the
+-- bank's bag slots (Forever), not in the bag count; as last seen when the
+-- game can't say (the bank closed).
 local LAST_EQUIPPED_SLOT = 30 -- past the profession tool and gear slots
-local function EquippedItems()
-    local equipped = {}
+local function BagSlotItem(bag, into)
+    local ok, slot = pcall(C_Container.ContainerIDToInventoryID, bag)
+    if not (ok and type(slot) == "number") then return end
+    local ok2, itemID = pcall(GetInventoryItemID, "player", slot)
+    if ok2 and type(itemID) == "number" then into[itemID] = (into[itemID] or 0) + 1 return true end
+end
+
+local function EquippedItems(bankRead)
+    local equipped, bankBags = {}, {}
     for slot = 1, LAST_EQUIPPED_SLOT do
         local ok, itemID = pcall(GetInventoryItemID, "player", slot)
         if ok and type(itemID) == "number" then equipped[itemID] = (equipped[itemID] or 0) + 1 end
     end
-    return equipped
+    local worn = NUM_TOTAL_EQUIPPED_BAG_SLOTS or 5
+    for bag = 1, worn do BagSlotItem(bag, equipped) end
+    local found = false
+    for bag = worn + 1, worn + (NUM_BANKBAGSLOTS or 0) do
+        if BagSlotItem(bag, bankBags) then found = true end
+    end
+    if found or bankRead then
+        addon.char.bankBags = bankBags
+    else
+        bankBags = addon.char.bankBags or {}
+    end
+    return equipped, bankBags
 end
 
 -- The game reports the bank and warband bank even while they're closed
@@ -314,7 +338,7 @@ local function CountStock(job, budget)
     if not job.gearTiers then
         job.gearTiers, job.warbandTiers, job.bound, job.boundWarband, job.boundBags, job.bankRead =
             ScanGearTiers(job.set)
-        job.equipped = EquippedItems()
+        job.equipped, job.bankBags = EquippedItems(job.bankRead)
         -- Bound gear in the bank: as seen the last time it was open. A
         -- soulbound Apprentice Jeweler's Apron put in the bank was back on
         -- the Held board (user, 2026-10-29)
@@ -345,7 +369,7 @@ local function CountStock(job, budget)
             local bankCount = own - (C_Item.GetItemCount(itemID, false, false, true, false) or 0)
             boundHere = boundHere + math.min((addon.char.boundBank or {})[itemID] or 0, math.max(bankCount, 0))
         end
-        own = own - (equipped[itemID] or 0) - boundHere
+        own = own - (equipped[itemID] or 0) - (job.bankBags[itemID] or 0) - boundHere
         inWarband = inWarband - (boundWarband[itemID] or 0)
         if own > 0 then job.stock[itemID] = own end
         local bank = math.min(own, math.max(own - math.max(inBags, 0), 0))
@@ -551,6 +575,15 @@ end
 -- loaded, stock saved before tiers were kept) count toward every tier, to
 -- be safe.
 function addon:GetHeld(itemID, tier)
+    local stored, listed = addon:GetHeldParts(itemID, tier)
+    return stored + listed
+end
+
+-- The same, in two parts: in bags and banks (the warband bank too), and
+-- listed on the AH. Mail isn't in either (InMailCountFor, Shop.lua).
+-- where: a table to fill with where they are, one entry per character
+-- (and the warband bank) holding any: { key, name, stored, bank, listed }
+function addon:GetHeldParts(itemID, tier, where)
     local function Count(total, tiers)
         local byTier = tier and tiers and tiers[itemID]
         if not byTier or total == 0 then return total end
@@ -558,11 +591,20 @@ function addon:GetHeld(itemID, tier)
         for _, n in pairs(byTier) do known = known + n end
         return math.min((byTier[tier] or 0) + math.max(total - known, 0), total)
     end
-    local total = Count(GoldsmithDB.warbandStock[itemID] or 0, GoldsmithDB.warbandGearTiers)
-    for _, c in pairs(GoldsmithDB.characters) do
-        total = total + Count(c.stock[itemID] or 0, c.gearTiers) + Count(c.auctions[itemID] or 0, c.auctionTiers)
+    local stored = Count(GoldsmithDB.warbandStock[itemID] or 0, GoldsmithDB.warbandGearTiers)
+    if where and stored > 0 then
+        table.insert(where, { key = "warband", name = "Warband bank", stored = stored, bank = stored, listed = 0 })
     end
-    return total
+    local listed = 0
+    for key, c in pairs(GoldsmithDB.characters) do
+        local s, l = Count(c.stock[itemID] or 0, c.gearTiers), Count(c.auctions[itemID] or 0, c.auctionTiers)
+        stored, listed = stored + s, listed + l
+        if where and s + l > 0 then
+            table.insert(where, { key = key, name = c.name or key, stored = s, listed = l,
+                bank = c.stockBank and math.min(c.stockBank[itemID] or 0, s) or 0 })
+        end
+    end
+    return stored, listed
 end
 
 -- Goldmaking time

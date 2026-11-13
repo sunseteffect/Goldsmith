@@ -33,6 +33,10 @@ local COLUMNS = {
     -- Room for "978.66g" and "12,345g" (big amounts drop the silver)
     { key = "cost", label = "Cost", width = 64, justify = "RIGHT" },
     { key = "profit", label = "Profit", width = 76, justify = "RIGHT" },
+    -- Start hidden: right-click a column name (user, 2026-11-13)
+    { key = "roi", label = "ROI", width = 52, justify = "RIGHT", hidden = true },
+    { key = "revenue", label = "Sells for", width = 76, justify = "RIGHT", hidden = true },
+    { key = "toBuy", label = "To buy", width = 72, justify = "RIGHT", hidden = true },
     -- Wide enough for "Needs Scribe's Drafting Table" (user, 2026-10-16)
     { key = "next", label = "Next", width = 205, gap = 16 },
 }
@@ -176,6 +180,34 @@ local function FillRow(row, item)
         c.profit:SetText("-")
         c.profit:SetTextColor(addon:Color("dim"))
     end
+    -- The columns that start hidden
+    local function Dash(cell)
+        cell:SetText("-")
+        cell:SetTextColor(addon:Color("dim"))
+    end
+    local sells = plan and not plan.stock and plan.revenue
+    if sells and plan.profit and (plan.cost or 0) > 0 then
+        c.roi:SetText(string.format("%d%%", math.floor(plan.profit / plan.cost * 100 + 0.5)))
+        c.roi:SetTextColor(addon:Color("muted"))
+    else
+        Dash(c.roi)
+    end
+    if sells then
+        c.revenue:SetText(Money(sells))
+        c.revenue:SetTextColor(addon:Color("text"))
+    else
+        Dash(c.revenue)
+    end
+    -- What its materials still cost on the AH (after the crafts above it)
+    local toBuy = 0
+    for _, e in ipairs(plan and plan.buyAH or {}) do toBuy = toBuy + (e.quantity or 0) * (e.unit or 0) end
+    if toBuy > 0 then
+        c.toBuy:SetText(Money(toBuy))
+        c.toBuy:SetTextColor(addon:Color("muted"))
+    else
+        Dash(c.toBuy)
+    end
+
     local status, color = addon:QueueRowStatus(item, view.q)
     if view.next == item and item.state and item.state.enabled then color = "gold" end
     c.next:SetText(status)
@@ -307,6 +339,7 @@ local function Create(parent)
     view.who:SetPoint("RIGHT", view.clear, "LEFT", -8, 0)
 
     view.list = UI.List(parent, {
+        columnsKey = "queue",
         fill = FillRow,
         tooltip = RowTooltip,
         onClick = function(item, button)

@@ -37,7 +37,7 @@ bench.Check("a craft row", row ~= nil)
 if row then
     local cells = {}
     local holder = CreateFrame("Frame")
-    for _, key in ipairs({ "when", "kind", "item", "qty", "gold", "profit" }) do cells[key] = holder:CreateFontString() end
+    for _, key in ipairs({ "when", "kind", "character", "item", "qty", "gold", "each", "profit", "roi" }) do cells[key] = holder:CreateFontString() end
     addon.HistoryFillRow({ cells = cells }, row)
     bench.Has("its batch cost shows", cells.gold:GetText() or "", addon:FormatMoney(row.cost * row.qty), true)
     bench.HasNot("no minus: no gold moved", cells.gold:GetText() or "", "-", true)

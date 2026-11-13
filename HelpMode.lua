@@ -164,7 +164,7 @@ TAB_PARTS.crafts = function(list)
                 view.concSwitch)
         end
         Add(list, "Crafts",
-            "Every craft with its cost from your own crafting stats, AH price, profit and how well it sells. A grey line under a row says who makes it, or whether it uses concentration. Click one for its plan.",
+            "Every craft with its cost from your own crafting stats, AH price, profit, how many you have (AH listings too) and how well it sells. A grey line under a row says who makes it, or whether it uses concentration. Click one for its plan. Right-click a column name to hide or show columns, like Break-even, Vs usual (a price spike), Make and Batch (how many to make, and what that batch earns) or Listed.",
             view.list)
         Add(list, "Concentration to spend",
             "Your concentration and the best way to spend it right now. Hover it for the details.",

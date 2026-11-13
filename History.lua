@@ -43,13 +43,18 @@ local COST_LABELS = {
     reward = "Order counted it at",
 }
 
+-- Character, Each and ROI start hidden: right-click a column name (user,
+-- 2026-11-13)
 local COLUMNS = {
     { key = "when", label = "When", width = 96 },
     { key = "kind", label = "Type", width = 70 },
+    { key = "character", label = "Character", width = 96, hidden = true },
     { key = "item", label = "Item" },
     { key = "qty", label = "Qty", width = 50, justify = "RIGHT" },
     { key = "gold", label = "Gold", width = 96, justify = "RIGHT" },
+    { key = "each", label = "Each", width = 84, justify = "RIGHT", hidden = true },
     { key = "profit", label = "Profit", width = 96, justify = "RIGHT" },
+    { key = "roi", label = "ROI", width = 56, justify = "RIGHT", hidden = true },
 }
 
 -- The tier goes before the name, so a long name cut short never hides it
@@ -70,6 +75,9 @@ local function FillRow(r, row)
         c.qty:SetText(tostring(row.qty or ""))
         c.gold:SetText(row.gold and ((row.gold < 0 and "-" or "") .. Money(math.abs(row.gold))) or "-")
         c.profit:SetText("Undo")
+        c.character:SetText(row.character or "")
+        c.each:SetText("")
+        c.roi:SetText("")
         for _, cell in pairs(c) do cell:SetTextColor(addon:Color("dim")) end
         c.profit:SetTextColor(addon:Color("hint"))
         return
@@ -108,6 +116,40 @@ local function FillRow(r, row)
         c.profit:SetText((row.profitEstimated and "~" or "") .. (row.profit < 0 and "-" or "")
             .. Money(math.abs(row.profit)) .. (row.partial and "*" or ""))
         c.profit:SetTextColor(addon:Color(addon:MoneyColor(row.profit)))
+    end
+
+    -- The columns that start hidden
+    -- The name only: "Mysticmead-S..." with the realm (user, 2026-11-13)
+    c.character:SetText(row.character and (row.character:match("^[^%-]+") or row.character) or "-")
+    c.character:SetTextColor(addon:Color(row.character and "muted" or "dim"))
+    -- Each: the gold for one ("321g for 140" is hard to judge); a craft's
+    -- cost each, a gathered day's worth each, grey as their Gold is
+    local qty = tonumber(row.qty)
+    local each, eachColor
+    if qty and qty > 0 then
+        if row.gold then
+            each, eachColor = math.abs(row.gold) / qty, "text"
+        elseif row.kind == "Craft" and row.cost then
+            each, eachColor = row.cost, "muted"
+        elseif row.worth and row.worth > 0 then
+            each, eachColor = row.worth / qty, "muted"
+        end
+    end
+    if each then
+        c.each:SetText(Money(each))
+        c.each:SetTextColor(addon:Color(eachColor))
+    else
+        c.each:SetText("-")
+        c.each:SetTextColor(addon:Color("dim"))
+    end
+    -- ROI on a sale: its profit against what it cost (the gold less the profit)
+    local cost = row.profit and row.gold and row.gold > 0 and row.gold - row.profit
+    if cost and cost > 0 then
+        c.roi:SetText(string.format("%d%%", math.floor(row.profit / cost * 100 + 0.5)))
+        c.roi:SetTextColor(addon:Color("muted"))
+    else
+        c.roi:SetText("-")
+        c.roi:SetTextColor(addon:Color("dim"))
     end
 end
 
@@ -413,6 +455,7 @@ local function Create(parent)
     view.summary = UI.Text(parent, "small", "muted", "RIGHT")
 
     view.list = UI.List(parent, {
+        columnsKey = "history",
         fill = FillRow,
         tooltip = Tooltip,
         onClick = function(row, button)
@@ -435,6 +478,10 @@ local function Create(parent)
     -- 35 in: 40 left a gap (user, 2026-11-10: "5 pixels closer")
     view.footnote:SetPoint("BOTTOMLEFT", 35, 2)
     view.summary:SetPoint("BOTTOMRIGHT", -35, 2)
+    -- The notes end before the totals, cut with "...": with All, the
+    -- totals ran over them (user, 2026-11-13)
+    view.footnote:SetPoint("RIGHT", view.summary, "LEFT", -16, 0)
+    view.footnote:SetWordWrap(false)
     -- Deleted entries are kept to undo until you leave History (another
     -- tab, or the window closes)
     parent:HookScript("OnHide", function() wipe(deletedRows) end)

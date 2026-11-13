@@ -7,6 +7,16 @@ local addon = _G.Goldsmith or {}
 -- stays consistent and can be swapped in one place.
 
 local UI = {}
+-- Lists whose size changed while the window was being resized
+UI.resized = setmetatable({}, { __mode = "k" })
+function UI.BeginSizing() UI.sizing = true end
+function UI.EndSizing()
+    UI.sizing = nil
+    for list in pairs(UI.resized) do
+        UI.resized[list] = nil
+        list:Update()
+    end
+end
 addon.UI = UI
 
 -- World of Warcraft theme: a box inside the window edged like the
@@ -1427,11 +1437,21 @@ end
 --   onClick(item, mouseButton) (optional)
 --   onSort(key)                makes headers clickable (optional);
 --                              list:SetSort(key, descending) marks one
+--   columnsKey                 right-click a header to hide or show columns
+--                              (optional; a name, or a function giving one
+--                              for lists that switch column sets; saved in
+--                              GoldsmithDB.ui2.hiddenColumns). The first
+--                              column always shows; a column with
+--                              hidden = true starts hidden.
 --   empty                      text shown when there are no items
 local LIST_HEADER_HEIGHT = 24
 -- The AH's column tabs are lower, with smaller names (user, 2026-10-31)
 local GAME_HEADER_HEIGHT = 19
 local LIST_PAD = 10
+-- The least room the name column (the one without a width) keeps when you
+-- show more columns: with every one ticked, Crafts' names were an icon
+-- and one letter (user, 2026-11-13)
+local MIN_NAME_WIDTH = 150
 local LIST_GAP = 8
 local SCROLLBAR_WIDTH = 6
 
@@ -1465,6 +1485,7 @@ local function GameColumnTab(cell, sortable)
         if i == 1 then left = t elseif i == 2 then middle = t else right = t end
     end
     left:SetPoint("TOPLEFT", cell, "TOPLEFT", -half, 0)
+    cell.tabLeft = left
     right:SetPoint("TOPRIGHT", cell, "TOPRIGHT", half, 0)
     middle:SetPoint("TOPLEFT", left, "TOPRIGHT")
     middle:SetPoint("TOPRIGHT", right, "TOPLEFT")
@@ -1518,17 +1539,60 @@ function UI.List(parent, opts)
     scrollbar:SetObeyStepOnDrag(true)
     scrollbar:EnableMouseWheel(true)
 
-    -- x position and width of each column across the given width
-    local function Layout(width)
+    -- Columns you hid (right-click a header; user, 2026-11-13: "hide or
+    -- show which columns you want to see"). The first one always shows.
+    local function ColumnsKey()
+        local key = opts.columnsKey
+        if type(key) == "function" then return key() end
+        return key
+    end
+    -- Saved: true hidden, false shown, nil as the column starts
+    local function IsHidden(col)
+        local key = ColumnsKey()
+        local all = key and GoldsmithDB.ui2.hiddenColumns
+        local saved = all and all[key] and all[key][col.key]
+        if saved == nil then return col.hidden == true end
+        return saved
+    end
+    -- The width each column without one gets, across width (nil: none)
+    local function FlexWidth(columns, width)
         local fixed, flexCount = 0, 0
-        for _, col in ipairs(list.columns) do
+        for _, col in ipairs(columns) do
             if col.width then fixed = fixed + col.width else flexCount = flexCount + 1 end
             fixed = fixed + (col.gap or 0)
         end
-        local gaps = LIST_GAP * math.max(#list.columns - 1, 0)
-        local flex = flexCount > 0 and math.max((width - 2 * LIST_PAD - fixed - gaps) / flexCount, 40) or 0
+        if flexCount == 0 then return nil end
+        local gaps = LIST_GAP * math.max(#columns - 1, 0)
+        return (width - 2 * LIST_PAD - fixed - gaps) / flexCount
+    end
+    local function Fits(columns, width)
+        local flex = FlexWidth(columns, width)
+        return not flex or not width or width <= 0 or flex >= MIN_NAME_WIDTH
+    end
+    -- The columns shown. Ones that start hidden go first, from the right,
+    -- when the name would get too little room (Concentration's two columns
+    -- turned on after you picked yours).
+    local function Shown(width)
+        local shown = {}
+        for i, col in ipairs(list.columns) do
+            if i == 1 or not IsHidden(col) then table.insert(shown, col) end
+        end
+        while not Fits(shown, width) do
+            local dropped = false
+            for i = #shown, 2, -1 do
+                if shown[i].hidden then table.remove(shown, i) dropped = true break end
+            end
+            if not dropped then break end
+        end
+        return shown
+    end
+
+    -- x position and width of each column shown across the given width
+    local function Layout(width)
+        local columns = Shown(width)
+        local flex = math.max(FlexWidth(columns, width) or 0, 40)
         local x, layout = LIST_PAD, {}
-        for _, col in ipairs(list.columns) do
+        for _, col in ipairs(columns) do
             local w = col.width or flex
             -- col.gap: extra room before a column (left text after a
             -- right-aligned number read as one)
@@ -1539,7 +1603,9 @@ function UI.List(parent, opts)
         return layout
     end
 
-    -- Shows a cell per current column (made on first use) and hides the rest
+    -- Shows a cell per column shown and hides the rest. Every current
+    -- column has a cell (made on first use), hidden ones too, so fill code
+    -- can always set them.
     local function PlaceCells(frame, cells, layout, make)
         for _, cell in pairs(cells) do cell:Hide() end
         for _, col in ipairs(list.columns) do
@@ -1548,15 +1614,63 @@ function UI.List(parent, opts)
                 cell = make(col)
                 cells[col.key] = cell
             end
-            local l = layout[col.key]
-            cell:ClearAllPoints()
-            cell:SetPoint("LEFT", frame, "LEFT", l.x, 0)
-            cell:SetWidth(l.width)
-            local text = cell.text or cell
-            text:SetJustifyH(col.justify or "LEFT")
-            cell:Show()
+        end
+        for _, col in ipairs(list.columns) do
+            local cell, l = cells[col.key], layout[col.key]
+            if l then
+                cell:ClearAllPoints()
+                cell:SetPoint("LEFT", frame, "LEFT", l.x, 0)
+                cell:SetWidth(l.width)
+                local text = cell.text or cell
+                text:SetJustifyH(col.justify or "LEFT")
+                cell:Show()
+            end
         end
     end
+
+    local function ColumnMenu(owner)
+        if not (MenuUtil and MenuUtil.CreateContextMenu) then return end
+        local listKey = ColumnsKey()
+        local function Set(col, hide)
+            local ui = GoldsmithDB.ui2
+            ui.hiddenColumns = ui.hiddenColumns or {}
+            ui.hiddenColumns[listKey] = ui.hiddenColumns[listKey] or {}
+            -- As it starts: nothing saved
+            if hide == (col.hidden == true) then hide = nil end
+            ui.hiddenColumns[listKey][col.key] = hide
+            if not next(ui.hiddenColumns[listKey]) then ui.hiddenColumns[listKey] = nil end
+            list:Update()
+        end
+        MenuUtil.CreateContextMenu(owner, function(_, root)
+            root:CreateTitle("Columns")
+            local width = list.layoutWidth
+            local shown = Shown(width)
+            for i, col in ipairs(list.columns) do
+                if i > 1 then
+                    local on = false
+                    for _, c in ipairs(shown) do if c == col then on = true end end
+                    -- One more must leave the name its room
+                    local room = on
+                    if not on then
+                        local more = { unpack(shown) }
+                        table.insert(more, col)
+                        room = Fits(more, width)
+                    end
+                    local box = root:CreateCheckbox(col.label .. (room and "" or " (no room)"),
+                        function() return on end,
+                        function() if room then Set(col, on) end end)
+                    if not room and box and box.SetEnabled then box:SetEnabled(false) end
+                end
+            end
+            -- Not "Show all": every column at once leaves the names no room
+            root:CreateButton("Default columns", function()
+                local ui = GoldsmithDB.ui2
+                if ui.hiddenColumns then ui.hiddenColumns[listKey] = nil end
+                list:Update()
+            end)
+        end)
+    end
+    list.ColumnMenu = ColumnMenu -- for the bench
 
     local function HeaderCell(col)
         local cell = CreateFrame("Button", nil, header)
@@ -1564,11 +1678,27 @@ function UI.List(parent, opts)
         cell.text = UI.Text(cell, "label", "muted")
         cell.text:SetAllPoints()
         if game then GameColumnTab(cell, opts.onSort) end
-        if opts.onSort then
-            cell:SetScript("OnClick", function() opts.onSort(col.key) end)
-            cell:SetScript("OnEnter", function(self) self.text:SetTextColor(addon:Color(game and "gold" or "text")) end)
+        if opts.columnsKey then cell:RegisterForClicks("LeftButtonUp", "RightButtonUp") end
+        if opts.onSort or opts.columnsKey then
+            cell:SetScript("OnClick", function(self, button)
+                if button == "RightButton" and opts.columnsKey then
+                    ColumnMenu(self)
+                elseif opts.onSort then
+                    opts.onSort(col.key)
+                end
+            end)
+            cell:SetScript("OnEnter", function(self)
+                if opts.onSort then self.text:SetTextColor(addon:Color(game and "gold" or "text")) end
+                if opts.columnsKey then
+                    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                    if opts.onSort then GameTooltip:AddLine("Click: sort by it", 1, 1, 1) end
+                    GameTooltip:AddLine("Right-click: choose columns", 1, 1, 1)
+                    GameTooltip:Show()
+                end
+            end)
             cell:SetScript("OnLeave", function(self)
                 self.text:SetTextColor(addon:Color(HeaderColor(self.sorted)))
+                if opts.columnsKey then GameTooltip:Hide() end
             end)
         end
         return cell
@@ -1624,10 +1754,11 @@ function UI.List(parent, opts)
         local visible = math.max(math.floor((body:GetHeight() or 0) / list.rowHeight), 0)
         local maxOffset = math.max(#list.items - visible, 0)
         list.offset = math.min(math.max(list.offset, 0), maxOffset)
-        local layout = Layout(body:GetWidth() or 0)
+        list.layoutWidth = body:GetWidth() or 0
+        local layout = Layout(list.layoutWidth)
 
         PlaceCells(header, list.headerCells, layout, HeaderCell)
-        for _, col in ipairs(list.columns) do
+        for _, col in ipairs(Shown(list.layoutWidth)) do
             local cell = list.headerCells[col.key]
             local label = game and col.label or col.label:upper()
             cell.sorted = list.sortKey == col.key
@@ -1636,6 +1767,11 @@ function UI.List(parent, opts)
                 label = (col.justify == "RIGHT") and (arrow .. " " .. label) or (label .. " " .. arrow)
             end
             cell.text:SetText(label)
+            -- A column with extra room before it (col.gap): its tab reaches
+            -- back over it, or the tabs had gaps (Queue, Items; user, 2026-11-13)
+            if cell.tabLeft then
+                cell.tabLeft:SetPoint("TOPLEFT", cell, "TOPLEFT", -LIST_GAP / 2 - (col.gap or 0), 0)
+            end
             cell.text:SetTextColor(addon:Color(HeaderColor(cell.sorted)))
             if cell.arrow then
                 -- The game's sort arrow beside the name, pointing down for
@@ -1746,7 +1882,16 @@ function UI.List(parent, opts)
             list:Update()
         end
     end)
-    body:SetScript("OnSizeChanged", function() list:Update() end)
+    -- While the window is being dragged wider, once when you let go
+    -- (UI.EndSizing): every frame redrew every row, and the game lagged
+    -- (user, 2026-11-13)
+    body:SetScript("OnSizeChanged", function()
+        if UI.sizing then
+            UI.resized[list] = true
+        else
+            list:Update()
+        end
+    end)
     return list
 end
 

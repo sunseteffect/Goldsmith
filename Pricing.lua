@@ -279,6 +279,24 @@ end
 -- sees each item's lowest, so there fair = lowest. Used like an
 -- Auctionator scan: when it's the newest price there is (OwnScanIsNewest),
 -- or for items nothing else prices.
+-- How many of an item are listed on the AH: your last scan, else Goldsmith
+-- Data's region count (commodities). Returns the count and where it's
+-- from, or nil. For the Listed columns (Crafts, Items).
+function addon:FormatCount(n)
+    if n >= 10000 then return string.format("%.0fk", n / 1000) end
+    if n >= 1000 then return string.format("%.1fk", n / 1000) end
+    return tostring(n)
+end
+
+function addon:GetListedCount(itemID)
+    if not itemID then return nil end
+    local scan = not TourPrices() and addon:Setting("ahScan") and GoldsmithDB.ownScan
+    local entry = scan and scan.prices and scan.prices[itemID]
+    if entry and entry[3] and addon:PriceHoldsHere(scan.group, itemID) then return entry[3], "your last scan" end
+    local data = GoldsmithPriceData and GoldsmithPriceData.items and GoldsmithPriceData.items[itemID]
+    if data and data[4] then return data[4], "Goldsmith Data, the whole region" end
+end
+
 function addon:GetScanPrice(itemID)
     -- The scan turned off in Settings: its prices aren't used either
     local scan = not TourPrices() and addon:Setting("ahScan") and GoldsmithDB.ownScan
