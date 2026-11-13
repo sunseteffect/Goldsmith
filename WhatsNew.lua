@@ -11,8 +11,17 @@ local UI = addon.UI
 -- NEWS[1] is the latest. A release shows it only if its key changes, so a
 -- fix-only release keeps the same key and shows nothing. Seen keys go in
 -- GoldsmithDB.newsSeen. New players get the tour instead (Tour.lua) and
--- this is marked seen. /gsm news shows it again.
+-- this is marked seen. /gsm news shows it again. An item with forever =
+-- true shows only in WoW Forever.
 local NEWS = {
+    {
+        key = "2.9.1",
+        title = "What's new in Goldsmith 2.9.1",
+        items = {
+            { "Filling a Waylaid Crate", "Hover a Waylaid Crate: what filling it costs at today's prices, each material it takes, cheapest first.", forever = true },
+            { "Salvage on the right character", "Plans only mill or prospect on a character with that profession, and buy otherwise. Right-click a material to have another character do it." },
+        },
+    },
     {
         key = "2.9.0",
         title = "What's new in Goldsmith 2.9",
@@ -148,8 +157,12 @@ function addon:ShowNews()
     if not addon.window:IsShown() then addon.window:Show() end
     if not box then Build() end
     box.title:SetText(news.title)
+    local items = {}
+    for _, item in ipairs(news.items) do
+        if not item.forever or addon.isForever then table.insert(items, item) end
+    end
     local y = -48
-    for i, item in ipairs(news.items) do
+    for i, item in ipairs(items) do
         local line = Line(i)
         line.head:ClearAllPoints()
         line.head:SetPoint("TOPLEFT", 18, y)
@@ -161,7 +174,7 @@ function addon:ShowNews()
         line.body:Show()
         y = y - 18 - line.body:GetStringHeight() - 12
     end
-    for i = #news.items + 1, #box.lines do
+    for i = #items + 1, #box.lines do
         box.lines[i].head:Hide()
         box.lines[i].body:Hide()
     end

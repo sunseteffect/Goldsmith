@@ -132,7 +132,7 @@ TAB_PARTS.crafts = function(list)
             "Plans this quality with concentration, using the mix of material qualities that earns the most.",
             plan.useConc)
         Add(list, "Materials",
-            "Each material and where it comes from: your bags, a vendor, the AH, or crafting it first. Right-click one to change that, or to pick which item to salvage for it, for this plan and its queue entry.",
+            "Each material and where it comes from: your bags, a vendor, the AH, or crafting it first. Right-click one to change that, or to pick which item to salvage for it, for this plan and its queue entry. Salvaging on another character is only planned when you pick it here.",
             plan.list)
         Add(list, "Material qualities",
             "The mix of material qualities. Goldsmith picks the best one for this quality, or one that leaves concentration for your other crafts, and lists the top three to compare. Concentration is what a craft needs to start. Click one to use it instead (the queue follows), or click the bar to hide or show them.",

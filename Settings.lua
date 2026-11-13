@@ -1972,6 +1972,7 @@ local FOREVER_HELP = {
     ["In the game's windows"] = "Under the reagents in a profession window, Goldsmith shows what your materials cost and the profit, the same as on Crafts; hover it for the breakdown.",
     ["Sales outside the AH"] = "Items you sell to a player for gold in the trade window count as sales: in your profit, with no AH cut. Items you get in the trade count at their AH price. Trades with your own characters and enchants for a tip don't count. AH purchases you sell to a vendor count too, under From vendor flips in Stats.\n\nBuy to vendor lists items selling under vendor price for 5 minutes after a scan. Click one to load it, click again to buy it at the scan's price.\n\nItem auctions need whole silver: the AH drops a price with copper in it, and Goldsmith tells you.",
     ["If you already use TSM"] = "Not needed: Goldsmith scans the AH itself. If TSM works in Forever and is installed, Goldsmith uses its prices between your scans.",
+    ["Item tooltips"] = "Show your cost, profit and break-even price. Hold Shift for each material's cost. A Waylaid Crate's says what filling it costs at today's prices, each way cheapest first. Settings > Item tooltips makes them shorter or turns them off.",
 }
 
 -- The Help page in Settings: each section's heading and text, then the

@@ -15,6 +15,10 @@ end
 local db = bench.LoadSaved()
 db.setupDone = true
 db.queues = {}  -- nothing queued, so the plan says Add to queue
+-- The mix rows shown, whatever the saved data's last choice (Compare /
+-- Hide was folded on 2026-11-12, and there were no rows to check)
+db.ui2 = db.ui2 or {}
+db.ui2.planMixOpen = true
 local key
 for k in pairs(db.characters) do if k:match("^Mysticmead") then key = k end end
 for _, snap in pairs(db.characters[key].concentration or {}) do
