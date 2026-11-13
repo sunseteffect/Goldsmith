@@ -807,7 +807,20 @@ function addon:CheckAgainstMarket(itemID, price, source, age, buying)
         end
         return price, source, age, note or soldNote
     end
-    if price < market * UNDERCUT_RATIO and not SustainedLow(itemID, price) then
+    -- TSM's market value trails over days; its latest scan's value (DBRecent)
+    -- says whether the low price is today's market or one undercut.
+    -- Spidersilk Boots fell 130s, 106s, 97s, 93s, 85s, 70s over five days:
+    -- 84 were up from 65s, TSM's recent value was 93s, its market value
+    -- about 159s, and the boots were valued there and queued at a profit
+    -- (user, 2026-11-11). Falling every day, SustainedLow never saw them
+    -- hold low. Nor when what it sells for is well under the market value
+    -- (they sold for 88.77s), as for Goldsmith Data (GetBlizzardPrice).
+    local recent = GetTSMValue("DBRecent", itemID)
+    local soldFor = GetTSMValue("DBRegionSaleAvg", itemID)
+    local undercut = price < market * UNDERCUT_RATIO
+        and not (recent and price >= recent * UNDERCUT_RATIO)
+        and not (soldFor and soldFor < market * UNDERCUT_RATIO)
+    if undercut and not SustainedLow(itemID, price) then
         price, source, age = market, "TSM market", nil
         note = string.format("lowest listing %s looked like a small undercut", FormatGold(listed))
     elseif market and price > market * OUTLIER_HIGH_RATIO then
@@ -2972,7 +2985,12 @@ local SlotCost
 local slotCostCache = addon:NewCache()
 
 local function GetSlotCost(slot)
-    local store = slotCostCache:Get()
+    -- Per set of professions: salvaging is only counted for a character
+    -- who can (SalvageUnitCost)
+    local all = slotCostCache:Get()
+    local key = addon.SalvageKey and addon:SalvageKey() or ""
+    all[key] = all[key] or {}
+    local store = all[key]
     local cached = store[slot]
     if not cached then
         cached = { SlotCost(slot) }
@@ -3668,6 +3686,8 @@ local function AddTooltipLines(tooltip, data)
                 insight.regional and "region, 7 days" or (insight.days .. " days")),
             1, 1, 1, r, g, b)
     end
+    -- A Waylaid Crate (Forever): what filling it costs
+    addon:AddCrateTooltipLines(tooltip, name, short)
     if short then return end
 
     if recipe then

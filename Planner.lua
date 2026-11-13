@@ -36,6 +36,41 @@ local function KeyOf(c)
     end
 end
 
+-- Salvaging on another character (prospecting on your jewelcrafter for
+-- your enchanter) is never picked on its own: mailing the items over,
+-- switching, salvaging and mailing back isn't worth the margin, and the
+-- plan was a dead end on the enchanter ("This character can't prospect";
+-- TheShua, CurseForge, 2026-11-12; user: "probably not worth the time it
+-- takes to mail switch prospect mail switch"). Still a right-click choice,
+-- named for who'd do it. Returns nil when the plan's character has the
+-- profession (or it's unknown), else the key of a counted character who
+-- has it, or false when none does.
+local function SalvagerElsewhere(profession)
+    if not profession then return nil end
+    local c = addon:StatsChar()
+    if c and c.professions and c.professions[profession] then return nil end
+    for key, other in pairs(GoldsmithDB.characters) do
+        if other.professions and other.professions[profession] and addon:IsCharacterIncluded(key) then return key end
+    end
+    return false
+end
+
+-- What can be salvaged depends on the character, so the caches below keep
+-- an answer per set of professions (the plan's character)
+function addon:SalvageKey()
+    local c = addon:StatsChar()
+    local names = {}
+    for name in pairs(c and c.professions or {}) do names[#names + 1] = name end
+    table.sort(names)
+    return "p:" .. table.concat(names, ",")
+end
+local function KeyedStore(cache)
+    local store = cache:Get()
+    local key = addon:SalvageKey()
+    store[key] = store[key] or {}
+    return store[key]
+end
+
 local function GetOnHand(itemID)
     -- The tour's sample (Tour.lua): what its "you" holds, not your bags
     if addon:UsingTourData() then
@@ -381,6 +416,7 @@ GetOptions = function(itemID, name, depth, memo, visiting)
             if option.herbID == fromID then options.mill = option end
         end
     end
+    for _, option in ipairs(millList) do option.elsewhere = SalvagerElsewhere(option.profession) end
 
     -- Salvaging is work: it has to beat the rest by SALVAGE_MARGIN to be
     -- the cheapest way, not by a few silver
@@ -395,6 +431,8 @@ GetOptions = function(itemID, name, depth, memo, visiting)
     -- Vendor first, so it wins a tie with the AH
     for _, key in ipairs({ "vendor", "buy", "craft", "mill" }) do
         local option = options[key]
+        -- Salvaging on another character: only when you pick it
+        if key == "mill" and option and option.elsewhere ~= nil then option = nil end
         local unit = option and (key == "mill" and option.unit * (1 + SALVAGE_MARGIN) or option.compareUnit or option.unit)
         if unit and key == "craft" and craftHeld then unit = unit * (1 - HELD_CRAFT_PREFERENCE) end
         -- The best way that isn't salvaging, for BuildNode's held share
@@ -432,7 +470,7 @@ end
 local craftUnitCache = addon:NewCache()
 function addon:CraftUnitCost(itemID, name)
     if addon.craftUnitBusy or not itemID then return nil end
-    local store = craftUnitCache:Get()
+    local store = KeyedStore(craftUnitCache)
     local cached = store[itemID]
     if cached == nil then
         store.memo = store.memo or {}
@@ -466,7 +504,7 @@ end
 local salvageUnitBusy = {}
 function addon:SalvageUnitCost(itemID, name)
     if not itemID or salvageUnitBusy[itemID] then return nil end
-    local store = craftUnitCache:Get()
+    local store = KeyedStore(craftUnitCache)
     store.salvage = store.salvage or {}
     local cached = store.salvage[itemID]
     if cached == nil then
@@ -480,7 +518,7 @@ function addon:SalvageUnitCost(itemID, name)
         salvageUnitBusy[itemID] = nil
         addon.noYield = addon.noYield - 1
         local mill = options.mill
-        cached = mill and mill.unit and not mill.noPrice and mill.unit or false
+        cached = mill and mill.unit and not mill.noPrice and mill.elsewhere == nil and mill.unit or false
         store.salvage[itemID] = cached
     end
     if cached then return cached, SALVAGE_MARGIN end
@@ -526,7 +564,7 @@ end
 local planUnitBusy = {}
 function addon:CraftPlanUnit(itemID, name)
     if not itemID or planUnitBusy[itemID] then return nil end
-    local store = makeUnitCache:Get()
+    local store = KeyedStore(makeUnitCache)
     store.plans = store.plans or {}
     local cached = store.plans[itemID]
     if cached == nil then
@@ -542,7 +580,7 @@ end
 
 function addon:MakeUnitCost(itemID, name)
     if addon.craftUnitBusy or not itemID then return nil end
-    local store = makeUnitCache:Get()
+    local store = KeyedStore(makeUnitCache)
     local cached = store[itemID]
     if cached == nil then
         cached = false
@@ -555,7 +593,7 @@ function addon:MakeUnitCost(itemID, name)
         addon.craftUnitBusy = false
         addon.noYield = addon.noYield - 1
         local mill = options.mill
-        if mill and mill.unit then
+        if mill and mill.unit and mill.elsewhere == nil then
             local unit = mill.unit * (1 + SALVAGE_MARGIN)
             if not cached or unit < cached.unit then cached = { unit = unit, way = mill.verb or "Mill" } end
         end

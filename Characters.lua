@@ -116,13 +116,32 @@ end
 -- ipairs: GetProfessions() returns nil for a slot not learned.
 local function UpdateProfessions()
     local c = addon.char
+    local seen, any = {}, false
     for _, index in pairs({ GetProfessions() }) do
         local name, icon, skill, maxSkill, _, _, skillLine = GetProfessionInfo(index)
+        if name then any = true end
         if name and NON_CRAFTING_SKILL_LINES[skillLine] then
             GoldsmithDB.nonCrafting[name] = true
             c.professions[name] = nil
         elseif name then
             c.professions[name] = { icon = icon, skill = skill, maxSkill = maxSkill }
+            seen[name] = true
+        end
+    end
+    -- A profession you dropped goes, with its concentration and the
+    -- recipes it taught: the Characters tab kept showing it (TheShua,
+    -- CurseForge, 2026-11-12: "changed to a different secondary profession
+    -- and it is still showing my old"). Not when the game listed nothing:
+    -- right at login it can answer before it knows.
+    if not any then return end
+    for name in pairs(c.professions) do
+        if not seen[name] then
+            c.professions[name] = nil
+            if c.concentration then c.concentration[name] = nil end
+            for recipeID in pairs(c.knownRecipes or {}) do
+                local recipe = GoldsmithDB.recipes[recipeID]
+                if recipe and recipe.profession == name then c.knownRecipes[recipeID] = nil end
+            end
         end
     end
 end

@@ -825,6 +825,10 @@ local function FillPlanRow(row, node)
             table.insert(parts, addon:Colorize(string.format("a craft needs %d concentration", node.concNote.perCraft), "warning"))
         end
         if #parts > 0 then extra = addon:Colorize("  · ", "dim") .. addon:Colorize(table.concat(parts, ", "), "gold") end
+    elseif best and best.method == "Mill" and best.elsewhere ~= nil and node.toGet > 0 then
+        -- Your pick: salvaged on another character (Planner.lua)
+        extra = addon:Colorize("  · ", "dim") .. addon:Colorize("on " .. (best.elsewhere and CharName(best.elsewhere)
+            or "another character"), "gold")
     elseif node.concNote and node.toGet > 0 then
         -- Would be crafted, but its crafter is out of concentration now
         extra = addon:Colorize("  · ", "dim") .. addon:Colorize(string.format("%s has %s concentration, a craft needs %d",
@@ -944,6 +948,9 @@ local function PlanTooltip(tooltip, node)
     tooltip:AddLine("Ways to get it (each)", 1, 0.82, 0)
     -- The plan's own best when it held too few to salvage (node.cheapest)
     local cheapest = node.cheapest or o.cheapest
+    -- Salvaging on another character can be cheaper but isn't picked on
+    -- its own: the best here isn't "cheapest" next to it (2026-11-12)
+    local cheaperElsewhere = o.mill and o.mill.elsewhere ~= nil and cheapest and o.mill.unit < cheapest.unit
     local function Option(option, label, detail)
         if not option then return end
         local tags = {}
@@ -951,7 +958,7 @@ local function PlanTooltip(tooltip, node)
             -- Picked for the materials you hold, not price (Planner.lua)
             local held = ((o.craftHeld and option == o.craft) or (o.millHeld and option == o.mill))
                 and o.buy and o.buy.unit < option.unit
-            table.insert(tags, held and "you have the materials" or "cheapest")
+            table.insert(tags, held and "you have the materials" or (cheaperElsewhere and "cheapest here") or "cheapest")
         end
         if node.heldTooFew and option == o.mill then table.insert(tags, "you hold too few") end
         if o.override and node.best == option then table.insert(tags, "your choice") end
@@ -991,7 +998,11 @@ local function PlanTooltip(tooltip, node)
     if o.mill and o.mill.estimateFrom then
         millDetail = millDetail .. string.format("\nestimate: the yield of %s,\nuntil you've salvaged this one", o.mill.estimateFrom)
     end
-    Option(o.mill, (o.mill and o.mill.verb or "Mill") .. " it", millDetail)
+    local millLabel = (o.mill and o.mill.verb or "Mill") .. " it"
+    if o.mill and o.mill.elsewhere ~= nil then
+        millLabel = millLabel .. " on " .. (o.mill.elsewhere and CharName(o.mill.elsewhere) or "another character")
+    end
+    Option(o.mill, millLabel, millDetail)
     if not node.best then Note(tooltip, "  No price found. Scan the AH.", "loss") end
 
     -- Savings only on what can be made now: crafting held back by its
@@ -1055,14 +1066,20 @@ local function PlanMenu(node, screen)
         local cheapest = node.cheapest or o.cheapest
         local held = ((o.craftHeld and cheapest == o.craft) or (o.millHeld and cheapest == o.mill))
             and o.buy and o.buy.unit < cheapest.unit
+        local cheaperElsewhere = o.mill and o.mill.elsewhere ~= nil and cheapest and o.mill.unit < cheapest.unit
         for _, m in ipairs(METHOD_LABELS) do
             local option = o[m.key]
             if option then
                 local label = m.key == "mill" and ((option.verb or "Mill") .. " it") or m.label
+                -- Another character salvages it: only on your pick
+                if m.key == "mill" and option.elsewhere ~= nil then
+                    label = label .. " on " .. (option.elsewhere and CharName(option.elsewhere) or "another character")
+                end
                 local text = string.format("%s (%s each)", label, Money(option.unit))
                 local isCheapest = option == cheapest
                 if isCheapest then
-                    text = text .. (held and ", best: you have the materials" or ", cheapest")
+                    text = text .. (held and ", best: you have the materials"
+                        or (cheaperElsewhere and ", cheapest here") or ", cheapest")
                 end
                 root:CreateRadio(text,
                     function() return o.override == m.method or (o.override == nil and isCheapest) end,
@@ -1582,6 +1599,15 @@ local function MillStepState(node, state, totals)
     local lower = verb:lower()
     local record = GoldsmithDB.milling[herbID]
     local profession = node.best.profession or record and record.profession or "Inscription"
+    -- Your pick of salvaging on another character: done there
+    local elsewhere = node.best.elsewhere
+    if elsewhere ~= nil and elsewhere ~= addon.charKey and not addon.char.professions[profession] then
+        table.insert(state.blockers, string.format("Log in on %s to %s %s, then mail the %s here.",
+            elsewhere and CharName(elsewhere) or ("a character with " .. profession), lower, herbName,
+            node.name or "results"))
+        state.label, state.step = StepLabel(verb, math.ceil(toGet / math.max(node.best.perHerb, 0.01)), herbName)
+        return state
+    end
     if not ProfessionOpen({ profession = profession }) then
         table.insert(state.blockers, string.format("Open %s to %s %s first.", profession, lower, herbName))
         return state

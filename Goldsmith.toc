@@ -17,6 +17,7 @@ Report.lua
 Characters.lua
 Gathered.lua
 Pricing.lua
+Crates.lua
 Milling.lua
 Stock.lua
 Cooldowns.lua

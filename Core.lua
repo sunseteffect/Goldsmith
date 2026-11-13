@@ -424,21 +424,24 @@ local postWarned = {}
 -- market and every post of patron order bag loot warned (user,
 -- 2026-10-26). Here only the gold you spent counts; those are free.
 -- Returns the cost each, or nil.
+-- The ones you hold, as the tooltip's "yours cost you": crafts and
+-- purchases together. Crafts alone left bought ones out, so the posting
+-- screen said break-even 64c and the tooltip 74c (user, 2026-11-11:
+-- Coarse Weightstone, 29 crafted and the rest bought).
 function addon:PostCost(itemID, name, quantity)
     local cost, _, source = addon:GetUnitCostBasis(name, quantity, itemID)
     if not cost or cost <= 0 or (source ~= "crafted" and source ~= "paid") then return nil end
-    if source == "paid" then
-        local _, _, parts = addon:GetOwnCost(name, nil, itemID, true)
-        if parts then
-            local spent, units = 0, 0
-            for _, s in ipairs(parts) do
-                if s[1] ~= "gathered" and s[1] ~= "free" then spent = spent + s[2] * s[3] end
-                units = units + s[3]
-            end
-            cost = units > 0 and spent / units or cost
+    local _, _, parts = addon:GetOwnCost(name, nil, itemID, true)
+    if not parts then _, _, parts = addon:GetOwnCost(name, nil, nil, true) end
+    if parts then
+        local spent, units = 0, 0
+        for _, s in ipairs(parts) do
+            if s[1] ~= "gathered" and s[1] ~= "free" then spent = spent + s[2] * s[3] end
+            units = units + s[3]
         end
-        if cost <= 0 then return nil end
+        cost = units > 0 and spent / units or cost
     end
+    if cost <= 0 then return nil end
     return cost
 end
 
