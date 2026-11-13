@@ -623,17 +623,76 @@ end
 -- says it went through or when that exact gold leaves, whichever is first.
 local ITEM_BUY_TIMEOUT = 30
 local itemBuys = {}
-local searchedKey
+-- The last few items searched, newest first: only the newest was looked
+-- in, so a search for something else in between lost the buy
+local searchedKeys = {}
+local SEARCHED_KEPT = 8
 
 local function FindAuction(auctionID)
     local api = C_AuctionHouse
-    if not searchedKey or not api.GetNumItemSearchResults then return nil end
-    local ok, count = pcall(api.GetNumItemSearchResults, searchedKey)
-    for i = 1, ok and count or 0 do
-        local okR, r = pcall(api.GetItemSearchResultInfo, searchedKey, i)
-        if okR and type(r) == "table" and r.auctionID == auctionID then return r end
+    if not api.GetNumItemSearchResults then return nil end
+    for _, key in ipairs(searchedKeys) do
+        local ok, count = pcall(api.GetNumItemSearchResults, key)
+        for i = 1, ok and count or 0 do
+            local okR, r = pcall(api.GetItemSearchResultInfo, key, i)
+            if okR and type(r) == "table" and r.auctionID == auctionID then return r end
+        end
     end
     return nil
+end
+
+local function Searched(key)
+    if type(key) ~= "table" then return end
+    for i = #searchedKeys, 1, -1 do
+        local k = searchedKeys[i]
+        if k.itemID == key.itemID and (k.itemSuffix or 0) == (key.itemSuffix or 0)
+            and (k.itemLevel or 0) == (key.itemLevel or 0) then table.remove(searchedKeys, i) end
+    end
+    table.insert(searchedKeys, 1, key)
+    searchedKeys[SEARCHED_KEPT + 1] = nil
+end
+
+-- A buyout missed when it was made: its "Auction won" mail says what and
+-- for how much, so taking the item out records it then. A Beaded Orb of
+-- Arcane Wrath from Buy to vendor left no purchase, so no cost in its
+-- tooltip (user, Forever, 2026-11-13; why it was missed isn't known).
+-- A purchase of that item from the last 32 days (AH mail lasts 30) with
+-- some not yet matched to a mail (e.wonQty) means it was recorded already:
+-- the same amount first, else the oldest. A stack can come in several
+-- mails, so it's counted by quantity.
+local wonMailsTaken = {}
+
+local function OnTakeWonItem(index)
+    local invoiceType, invoiceName, _, bid, _, _, _, _, _, _, count = GetInboxInvoiceInfo(index)
+    if invoiceType ~= "buyer" or not invoiceName or type(bid) ~= "number" or bid <= 0 then return end
+    local daysLeft = select(7, GetInboxHeaderInfo(index))
+    count = count or 1
+    local key = table.concat({ invoiceName, bid, count, tostring(daysLeft) }, ":")
+    if wonMailsTaken[key] then return end
+    wonMailsTaken[key] = true
+    local _, itemID = GetInboxItem(index, 1)
+    local link = GetInboxItemLink(index, 1)
+    local name = type(link) == "string" and link:match("%[(.-)%]")
+    name = name and name:gsub("%s*|A.-|a", "") or invoiceName
+    local since, match = time() - 32 * 86400, nil
+    for _, e in ipairs(addon.ledger:getAll()) do
+        if e.type == "COST" and e.kind == "PURCHASE" and (e.timestamp or 0) >= since
+            and (e.item == name or e.item == invoiceName) and (e.wonQty or 0) < (e.quantity or 1) then
+            if e.totalCopper == bid then match = e break end
+            match = match or e
+        end
+    end
+    if match then
+        match.wonQty = math.min((match.wonQty or 0) + count, match.quantity or 1)
+        return
+    end
+    local prof = addon:GetProfessionForItemName(name) or "Unassigned"
+    -- When it arrived (bought then, give or take): the mail's 30 days
+    local arrived = daysLeft and daysLeft <= 30 and time() - math.floor((30 - daysLeft) * 86400) or time()
+    addon.ledger:addCost(prof, name, count, bid, "PURCHASE", type(itemID) == "number" and itemID or nil,
+        { timestamp = arrived, wonQty = count })
+    addon:Notify("money", "Bought %s for %s (from its AH mail)", name, ChatGold(bid))
+    if addon.Refresh then addon.Refresh() end
 end
 
 -- How many one auction sells. Forever's search rows can say more than the
@@ -786,6 +845,17 @@ local function OnUseContainerItem(bag, slot)
     if not sell or sell <= 0 then return end
     local units, cost, name = BoughtUnsold(itemID, info.stackCount or 1)
     if units == 0 then return end
+    -- Only what bought ones still make up of what you hold, newest first
+    -- (GetAcquiredCost): bought ones a craft used up aren't in your bags,
+    -- and newer skinned or looted ones go first. Skinned Light Leather was
+    -- called a flip at -36c against leather bought days before and used
+    -- (user, 2026-11-12)
+    local _, paidQty = addon:GetAcquiredCost(name, itemID)
+    paidQty = paidQty or 0
+    if paidQty < units then
+        if paidQty <= 0 then return end
+        cost, units = math.floor(cost * paidQty / units + 0.5), paidQty
+    end
     local total = sell * units
     local prof = addon:GetProfessionForItemName(name) or "Unassigned"
     addon.ledger:addRevenue(prof, name, units, total, cost, false, 0, "paid", itemID, { vendor = true })
@@ -962,7 +1032,7 @@ frame:SetScript("OnEvent", function(self, event, arg1)
         RecordItemBuy(arg1)
 
     elseif event == "ITEM_SEARCH_RESULTS_UPDATED" or event == "ITEM_SEARCH_RESULTS_ADDED" then
-        searchedKey = arg1
+        Searched(arg1)
 
     elseif event == "MERCHANT_SHOW" then
         merchantOpen = true
@@ -1064,6 +1134,8 @@ function addon:Initialize()
     hooksecurefunc("BuyMerchantItem", OnBuyMerchantItem)
     hooksecurefunc("TakeInboxMoney", OnTakeMailMoney)
     hooksecurefunc("AutoLootMailItem", OnTakeMailMoney)
+    hooksecurefunc("TakeInboxItem", OnTakeWonItem)
+    hooksecurefunc("AutoLootMailItem", OnTakeWonItem)
 end
 
 StaticPopupDialogs["GOLDSMITH_RESET"] = {
