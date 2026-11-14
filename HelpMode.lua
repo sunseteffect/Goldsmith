@@ -242,7 +242,7 @@ TAB_PARTS.history = function(list)
         chips[1], chips[#chips])
     Add(list, "Character", "Show one character's entries.", view.character)
     Add(list, "History",
-        "Everything Goldsmith recorded by itself. Right-click an entry to fix it, for example to mark a craft as a crafting order.",
+        "Everything Goldsmith recorded by itself; crafts stay 90 days. Right-click an entry to fix it, for example to mark a craft as a crafting order.",
         view.list)
 end
 

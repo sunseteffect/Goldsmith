@@ -15,6 +15,17 @@ local UI = addon.UI
 -- true shows only in WoW Forever.
 local NEWS = {
     {
+        key = "2.9.2",
+        title = "What's new in Goldsmith 2.9.2",
+        items = {
+            { "Craft it into", "Open an item's page: every recipe that uses it, with its profit. Sell it or craft it?" },
+            { "Your columns", "Right-click a column name to hide or show columns. Drag the window's bottom-right corner wider for more at once." },
+            { "How many you have", "The Crafts list's Have column: bags, banks, mail and AH listings on every character." },
+            { "Leave the bank alone", "Settings > Buy next > Use what's in the bank: off, that character's plans count only bags and mail." },
+            { "Crafts in History", "Every craft stays in History for 90 days." },
+        },
+    },
+    {
         key = "2.9.1",
         title = "What's new in Goldsmith 2.9.1",
         items = {
