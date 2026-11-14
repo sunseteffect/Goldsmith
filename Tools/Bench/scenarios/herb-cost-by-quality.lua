@@ -12,7 +12,9 @@ local gold = addon:GetHerbUnitCost(GOLD, "Argentleaf")
 bench.Log("Argentleaf silver %s, gold %s", addon:FormatMoney(silver or 0), addon:FormatMoney(gold or 0))
 bench.Check("silver Argentleaf costs what silver was bought for", silver and silver < bench.Gold(10),
     addon:FormatMoney(silver or 0))
-bench.Check("gold Argentleaf costs what gold was bought for", gold and gold > bench.Gold(20),
+-- Several times silver, not averaged with it (gold was ~40g then, 12.14g
+-- on 2026-11-13: a fixed 20g went stale)
+bench.Check("gold Argentleaf costs what gold was bought for", gold and silver and gold > silver * 3,
     addon:FormatMoney(gold or 0))
 
 local pigment = bench.ItemID("Argentleaf Pigment")
@@ -30,6 +32,8 @@ end
 bench.Check("Maddoxynn knows the Missive", recipe ~= nil)
 if recipe then
     local key = addon.charKey
+    -- Its price as on 2026-10-27 (none listed by 2026-11-13)
+    bench.PinPrices(addon, { [245781] = bench.Gold(43) })
     local p = { recipe = recipe, charKey = key, tier = 1, concentrate = false }
     local tierInfo = addon:WithCharacter(key, addon.FindTierInfo, p)
     tierInfo = tierInfo and addon:WithCharacter(key, addon.ChooseMix, addon, recipe, tierInfo, 1)

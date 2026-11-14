@@ -71,6 +71,30 @@ local function KeyedStore(cache)
     return store[key]
 end
 
+-- Whether a character's plans count its bank (and the warband bank):
+-- Settings > Buy next > Use what's in the bank, set for each character
+-- (user, 2026-11-13: "a setting to ignore items in bank for use in
+-- crafts"; per character, as a main keeps a reserve where an alt doesn't).
+-- Saved as GoldsmithDB.characters[key].leaveBank; on unless set.
+function addon:UsesBank(charKey)
+    local c = GoldsmithDB.characters[charKey or addon.charKey]
+    return not (c and c.leaveBank)
+end
+function addon:SetUsesBank(charKey, on)
+    local c = GoldsmithDB.characters[charKey or addon.charKey]
+    if c then c.leaveBank = (not on) or nil end
+end
+
+-- How many you hold to craft with: bags (and the reagent bag), plus the
+-- bank and warband bank unless this character leaves them out (above).
+-- warband false: the character's bank only.
+function addon:CraftCount(itemID, warband)
+    if not addon:UsesBank(addon.charKey) then
+        return C_Item.GetItemCount(itemID, false, false, true, false) or 0
+    end
+    return C_Item.GetItemCount(itemID, true, false, true, warband ~= false) or 0
+end
+
 local function GetOnHand(itemID)
     -- The tour's sample (Tour.lua): what its "you" holds, not your bags
     if addon:UsingTourData() then
@@ -85,7 +109,11 @@ local function GetOnHand(itemID)
     local c = addon:StatsChar()
     if c ~= addon.char then
         local key = KeyOf(c)
-        return (c.stock and c.stock[itemID] or 0) + (GoldsmithDB.warbandStock[itemID] or 0)
+        local held = (c.stock and c.stock[itemID] or 0) + (GoldsmithDB.warbandStock[itemID] or 0)
+        if key and not addon:UsesBank(key) then
+            held = math.max((c.stock and c.stock[itemID] or 0) - (c.stockBank and c.stockBank[itemID] or 0), 0)
+        end
+        return held
             + (key and addon.InMailCountFor and addon:InMailCountFor(key, itemID) or 0)
             + (key and addon.OnTheWayFor and addon:OnTheWayFor(key, itemID) or 0)
     end
@@ -93,7 +121,7 @@ local function GetOnHand(itemID)
     -- (Shop.lua), so it isn't bought again or swapped for something else.
     -- Less what you bought for another character's queue (it's theirs),
     -- plus what another character bought for yours.
-    local own = (C_Item.GetItemCount(itemID, true, false, true, true) or 0)
+    local own = addon:CraftCount(itemID)
         + (addon.InMailCount and addon:InMailCount(itemID) or 0)
         - (addon.ReservedCount and addon:ReservedCount(itemID) or 0)
     return math.max(own, 0) + (addon.OnTheWayFor and addon:OnTheWayFor(addon.charKey, itemID) or 0)
@@ -252,14 +280,6 @@ GetOptions = function(itemID, name, depth, memo, visiting)
     end
     if ahPrice then
         options.buy = { method = "Buy", unit = ahPrice, ageText = addon:AHPriceAgeText(itemID, true) }
-    end
-    if not vendorPrice and not ahPrice and name then
-        -- No prices at all: if you've bought it before it's likely a vendor
-        -- item you haven't opened the vendor for since
-        local paid = addon:GetAverageCost(name)
-        if paid then
-            options.vendor = { method = "Vendor", unit = paid, detail = "What you paid\nopen the vendor to record its price" }
-        end
     end
 
     -- Craft it
@@ -427,6 +447,17 @@ GetOptions = function(itemID, name, depth, memo, visiting)
     options.craftHeld = craftHeld or nil
     local millHeld = options.mill and GetOnHand(options.mill.herbID) >= math.max(options.mill.perCast or 1, 1)
     options.millHeld = millHeld or nil
+    -- No way to get it at all: if you've bought it before it's likely a
+    -- vendor item you haven't opened the vendor for since. Not for what you
+    -- can craft or mill: what you paid is by name, every rank together, and
+    -- gold Sienna Ink with no AH price was "bought from a vendor" at the
+    -- silver one's 20.46g against 81.52g to make (2026-11-13)
+    if not (options.vendor or options.buy or options.craft or options.mill) and name then
+        local paid = addon:GetAverageCost(name)
+        if paid then
+            options.vendor = { method = "Vendor", unit = paid, detail = "What you paid\nopen the vendor to record its price" }
+        end
+    end
     local cheapestUnit
     -- Vendor first, so it wins a tie with the AH
     for _, key in ipairs({ "vendor", "buy", "craft", "mill" }) do

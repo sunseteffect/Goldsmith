@@ -170,7 +170,7 @@ local function FillStockTile(tile, stock, prof)
         tile:Set("Gold in stock", Money(stock.value), "text",
             #stock.items > 0 and (scope .. ", all characters")
                 or next(GoldsmithDB.recipes) == nil and "open your professions to start tracking"
-                or "nothing tracked in your bags yet")
+                or "nothing in stock yet")
     end
     tile.tooltip = function(tooltip)
         tooltip:AddLine("Gold in stock", 1, 1, 1)

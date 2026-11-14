@@ -897,6 +897,36 @@ end
 -- old-expansion items are left out, but ones selling at a loss today stay.
 -- Returns { { recipe, charKey, profit (nil without a price), demand (sold
 -- per day), saleRate } }, most profit first.
+-- Every current recipe that uses a material, recommended or not, with its
+-- profit and why it isn't recommended (whyNot), most profit first: the
+-- item page's "Craft it into" (user, 2026-11-01: gold Mana Lily Pigment
+-- dropped, what to turn it into instead). Profit counts the material at
+-- its AH price, so above zero means crafting it beats selling it.
+function addon:GetRecipesUsingAll(itemID)
+    local list = {}
+    for recipeID, recipe in pairs(RecipesByMaterial()[itemID] or {}) do
+        addon:Yield()
+        local charKey = MakesCurrentItem(recipe) and CrafterFor(recipeID)
+        if charKey and addon:IsCharacterIncluded(charKey) then
+            local row = PlainRowFor(charKey, recipe)
+            if row then
+                local outputID = row.itemID or recipe.outputItemID
+                table.insert(list, {
+                    recipe = recipe, charKey = charKey, profit = row.profit, margin = row.margin,
+                    itemID = outputID, tier = row.tier, tierCount = row.tierCount, partial = row.partial,
+                    whyNot = addon:WhyNotRecommended(recipe, row),
+                })
+            end
+        end
+    end
+    table.sort(list, function(a, b)
+        if (a.profit ~= nil) ~= (b.profit ~= nil) then return a.profit ~= nil end
+        if a.profit and a.profit ~= b.profit then return a.profit > b.profit end
+        return a.recipe.outputName < b.recipe.outputName
+    end)
+    return list
+end
+
 function addon:GetRecipesUsing(itemID)
     local list = {}
     -- The index is never changed once built, so pairs() is safe while the
@@ -2191,17 +2221,19 @@ History = function(filters)
         end
     end
 
-    -- Crafts have no character, so they only show for all characters.
     -- One row a batch: crafts of the same item no more than CRAFT_BATCH_GAP
     -- apart (20 crafts of Harandar Celebration in a minute were 20 rows,
-    -- user 2026-11-01). Each craft is still saved on its own.
-    if not filters.character then
+    -- user 2026-11-01). Each craft is still saved on its own. Who crafted
+    -- it is kept since 2026-10-08; older ones show for All characters only.
+    local firstLot = {}
+    do
         for itemID, lots in pairs(GoldsmithDB.craftLots) do
+            firstLot[itemID] = lots[1] and lots[1].time
             local kept = {}
             for _, lot in ipairs(lots) do
                 local recipe = lot.name and addon:FindRecipeByOutput(lot.name)
                 local profession = recipe and recipe.profession or addon:GetProfessionForItemName(lot.name or "")
-                if lot.name and Keep("Craft", lot.time, lot.name, profession, nil, itemID) then
+                if lot.name and Keep("Craft", lot.time, lot.name, profession, lot.char, itemID) then
                     table.insert(kept, { lot = lot, profession = profession })
                 end
             end
@@ -2217,6 +2249,7 @@ History = function(filters)
                     batch = {
                         kind = "Craft", time = lot.time or 0, first = lot.time or 0, item = lot.name, itemID = itemID,
                         qty = 0, crafts = 0, profession = k.profession, lot = lot, lots = {},
+                        character = lot.char,
                     }
                     costed, costQty = 0, 0
                     table.insert(rows, batch)
@@ -2233,10 +2266,27 @@ History = function(filters)
             end
             Finish()
         end
+        -- Older batches from the craft log: those before the oldest craft
+        -- each item still keeps (Pricing.lua)
+        local log = addon:GetCraftLog()
+        for _, e in ipairs(log and log.entries or {}) do
+            local first = firstLot[e.itemID]
+            if e.name and (not first or e.last < first) then
+                local recipe = addon:FindRecipeByOutput(e.name)
+                local profession = recipe and recipe.profession or addon:GetProfessionForItemName(e.name)
+                if Keep("Craft", e.last, e.name, profession, e.char, e.itemID) then
+                    table.insert(rows, {
+                        kind = "Craft", time = e.last, first = e.time, item = e.name, itemID = e.itemID,
+                        qty = e.qty, crafts = e.crafts, profession = profession, character = e.char,
+                        cost = e.qty > 0 and e.cost / e.qty or 0, partial = e.partial, fromLog = true,
+                    })
+                end
+            end
+        end
         for _, lot in ipairs(GoldsmithDB.orderCrafts or {}) do
             local recipe = lot.name and addon:FindRecipeByOutput(lot.name)
             local profession = recipe and recipe.profession or addon:GetProfessionForItemName(lot.name or "")
-            if lot.name and Keep("Order", lot.time, lot.name, profession, nil, lot.itemID) then
+            if lot.name and Keep("Order", lot.time, lot.name, profession, lot.char, lot.itemID) then
                 -- The commission is gold in; profit adds the materials you
                 -- kept and sellable rewards, less your own materials
                 -- (orders saved before commissions were recorded have neither)
@@ -2244,7 +2294,7 @@ History = function(filters)
                 table.insert(rows, {
                     kind = "Order", time = lot.time, item = lot.name, itemID = lot.itemID, qty = lot.qty,
                     cost = lot.unitCost, partial = lot.partial, profession = profession, lot = lot,
-                    gold = commission,
+                    gold = commission, character = lot.char,
                     profit = commission and (commission + (lot.kept or 0) + addon:LotRewardsValue(lot)
                         - (lot.unitCost or 0) * (lot.qty or 0)),
                 })

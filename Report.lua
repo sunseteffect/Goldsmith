@@ -323,6 +323,35 @@ function addon:BuildBugReport()
         Count(GoldsmithDB.priceHistory), queued, memory)
 
     -- How long the patron order columns took (OrderList.lua), when they ran
+    -- The last finished craft: Goldsmith's own handling, its parts, and
+    -- the longest frame in the 3 s after it from anything
+    local ct = addon.lastCraftTiming
+    if ct then
+        local parts = {}
+        for _, k in ipairs({ "start", "queue", "stats", "cost", "notice" }) do
+            if ct.parts[k] then table.insert(parts, string.format("%s %.0f", k, ct.parts[k])) end
+        end
+        Add("Last craft (%s): Goldsmith %.0f ms (%s), longest frame after it %.0f ms", date("%H:%M", ct.time),
+            ct.handler, table.concat(parts, ", "), ct.longest)
+        if ct.mostMine or ct.addons then
+            Add("  after it: Goldsmith's most in a frame %s ms; in the longest frame, Goldsmith %s ms, all addons %s ms",
+                ct.mostMine and string.format("%.0f", ct.mostMine) or "?", ct.mine and string.format("%.0f", ct.mine) or "?",
+                ct.addons and string.format("%.0f", ct.addons) or "?")
+        end
+    end
+    -- Goldsmith's work spread over frames: the longest single frame each
+    -- kind took this session, and where it was when that frame ended (a
+    -- hitch's source; user, 2026-11-13)
+    local slow = {}
+    for label, ms in pairs(addon.workLongest or {}) do
+        if ms >= 20 then table.insert(slow, { label = label, ms = ms }) end
+    end
+    table.sort(slow, function(a, b) return a.ms > b.ms end)
+    for i = 1, math.min(#slow, 4) do
+        local s = slow[i]
+        local where = addon.workLongestWhere and addon.workLongestWhere[s.label] or ""
+        Add("Slowest frame, %s: %.0f ms%s", tostring(s.label), s.ms, where ~= "" and (" at " .. where) or "")
+    end
     local t = addon.orderListTiming
     if t then
         local function Recipe(id)

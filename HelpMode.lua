@@ -164,7 +164,7 @@ TAB_PARTS.crafts = function(list)
                 view.concSwitch)
         end
         Add(list, "Crafts",
-            "Every craft with its cost from your own crafting stats, AH price, profit, how many you have (AH listings too) and how well it sells. A grey line under a row says who makes it, or whether it uses concentration. Click one for its plan. Right-click a column name to hide or show columns, like Break-even, Vs usual (a price spike), Make and Batch (how many to make, and what that batch earns) or Listed.",
+            "Every craft with its cost from your own crafting stats, AH price, profit, how many you have (AH listings too) and how well it sells. A grey line under a row says who makes it, or whether it uses concentration. Click one for its plan. Right-click a column name to hide or show columns (drag the window's bottom-right corner wider for more), like Break-even, Vs usual (a price spike), Make and Batch (how many to make, and what that batch earns) or Listed.",
             view.list)
         Add(list, "Concentration to spend",
             "Your concentration and the best way to spend it right now. Hover it for the details.",
@@ -214,14 +214,14 @@ TAB_PARTS.items = function(list)
             "What it has sold for over the dates picked at the top. The band is its usual range. Hover a point for that day.",
             page.chartNote:GetParent())
         Add(list, "Your activity",
-            "Everything you've done with it, newest first: crafted, bought, posted and sold, with the gold each time. The link at the bottom opens it all in History.",
+            "Everything you've done with it, newest first: crafted, bought, posted and sold, with the gold each time. The link at the bottom opens it all in History. Craft it into, beside it: every recipe that uses it, with its profit. Above zero, crafting it beats selling it; click one to plan it.",
             page.earned:GetParent())
         Add(list, "Craft this", "Opens its plan on the Crafts tab.", page.craft)
         return
     end
     Add(list, "Find an item", "Search any item: its page has prices, costs and everything you've done with it.",
         view.searchBox)
-    Add(list, "In my bags", "Lists what you hold, on every character.", view.inBags)
+    Add(list, "In stock", "Lists what you hold, on every character, the same as the Overview's Gold in stock.", view.inBags)
     Add(list, "Cheap materials", "Materials well below their usual price right now, and how many of each your crafts use a week.", view.cheap)
     local boards = view.boards or {}
     if Shown(boards[1]) then

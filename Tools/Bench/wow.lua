@@ -170,6 +170,7 @@ function methods:SetFormattedText(fmt, ...) self._text = string.format(fmt, ...)
 function methods:GetText() return self._text end
 function methods:SetLabel(t) self._text = t end
 function methods:SetWidth(w) self._w = w end
+function methods:SetClipsChildren(v) self._clips = v and true or false end
 function methods:SetHeight(h) self._h = h end
 function methods:SetSize(w, h) self._w, self._h = w, h end
 function methods:GetWidth() return self._w or 100 end

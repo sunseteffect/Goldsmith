@@ -9,13 +9,40 @@ local addon = _G.Goldsmith or {}
 local UI = {}
 -- Lists whose size changed while the window was being resized
 UI.resized = setmetatable({}, { __mode = "k" })
-function UI.BeginSizing() UI.sizing = true end
+-- Every list, to check once the window is let go
+UI.lists = setmetatable({}, { __mode = "k" })
+-- While the window is dragged, each list is cut off at its own edge: its
+-- columns are laid out again only when you let go (every frame lagged), so
+-- dragged narrower they ran out past the window (user, 2026-11-13: "not
+-- polished"). Clipping costs nothing a frame.
+local function ClipLists(on)
+    for list in pairs(UI.lists) do
+        if list.SetClipsChildren then list:SetClipsChildren(on) end
+    end
+end
+function UI.BeginSizing()
+    UI.sizing = true
+    ClipLists(true)
+end
+-- The size can land after you let go: a list laid out then still had the
+-- wide width, and kept every column past the window's edge (user,
+-- 2026-11-13, dragged narrow with all columns ticked). A frame later,
+-- each shown list whose width isn't what it was laid out for is laid out
+-- again.
+local function RecheckLists()
+    for list in pairs(UI.lists) do
+        if list:WidthChanged() then list:Update() end
+    end
+end
 function UI.EndSizing()
     UI.sizing = nil
+    ClipLists(false)
     for list in pairs(UI.resized) do
         UI.resized[list] = nil
         list:Update()
     end
+    C_Timer.After(0, RecheckLists)
+    C_Timer.After(0.2, RecheckLists)
 end
 addon.UI = UI
 
@@ -1125,6 +1152,31 @@ end
 -- checkboxes): a track with a knob, gold when on, and On or Off beside it.
 -- toggle:SetOn(on) shows the state; toggle:SetUsable(false) greys it out
 -- and ignores clicks; onToggle(newState) runs when it's clicked.
+-- A pill button that stays picked: History's type filter, the item page's
+-- Your activity / Craft it into. chip:SetText changes its words and width.
+function UI.Chip(parent, text, onClick)
+    local chip = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    chip.label = UI.Text(chip, "small", "text", "CENTER")
+    chip.label:SetPoint("CENTER")
+    function chip:SetText(t)
+        chip.label:SetText(t)
+        chip:SetSize(chip.label:GetStringWidth() + 24, 24)
+    end
+    chip:SetText(text)
+    chip:SetScript("OnClick", onClick)
+    function chip:SetSelected(selected)
+        chip.selected = selected
+        UI.Style(chip, selected and "highlight" or "panelRaised", selected and "borderGold" or "borderStrong")
+        chip.label:SetTextColor(addon:Color(selected and "gold" or "text"))
+    end
+    chip:SetScript("OnEnter", function(self) self:SetBackdropBorderColor(addon:Color("gold")) end)
+    chip:SetScript("OnLeave", function(self)
+        self:SetBackdropBorderColor(addon:Color(self.selected and "borderGold" or "borderStrong"))
+    end)
+    chip:SetSelected(false)
+    return chip
+end
+
 function UI.Toggle(parent, onToggle)
     local toggle = CreateFrame("Button", nil, parent)
     toggle:SetSize(76, 24)
@@ -1641,25 +1693,44 @@ function UI.List(parent, opts)
             if not next(ui.hiddenColumns[listKey]) then ui.hiddenColumns[listKey] = nil end
             list:Update()
         end
-        MenuUtil.CreateContextMenu(owner, function(_, root)
-            root:CreateTitle("Columns")
+        -- Worked out live, each time it's asked: the menu stays open while
+        -- you tick, and one tick can leave no room for the next. Worked out
+        -- once as it opened, its ticks didn't change until it closed, and a
+        -- second tick with no room left did nothing (user, 2026-11-13).
+        local function State(col)
             local width = list.layoutWidth
             local shown = Shown(width)
+            for _, c in ipairs(shown) do if c == col then return true, true end end
+            -- One more must leave the name its room
+            local more = { unpack(shown) }
+            table.insert(more, col)
+            return false, Fits(more, width)
+        end
+        local function Label(col)
+            local _, room = State(col)
+            return col.label .. (room and "" or " (no room)")
+        end
+        MenuUtil.CreateContextMenu(owner, function(_, root)
+            root:CreateTitle("Columns")
             for i, col in ipairs(list.columns) do
                 if i > 1 then
-                    local on = false
-                    for _, c in ipairs(shown) do if c == col then on = true end end
-                    -- One more must leave the name its room
-                    local room = on
-                    if not on then
-                        local more = { unpack(shown) }
-                        table.insert(more, col)
-                        room = Fits(more, width)
+                    local box = root:CreateCheckbox(Label(col),
+                        function() return (State(col)) end,
+                        function()
+                            local on, room = State(col)
+                            if room then Set(col, on) end
+                            -- Ticks and "(no room)" drawn again, menu open
+                            return MenuResponse and MenuResponse.Refresh
+                        end)
+                    if box and box.AddInitializer then
+                        box:AddInitializer(function(button)
+                            local text = button.fontString
+                            if not text then return end
+                            local _, room = State(col)
+                            text:SetText(Label(col))
+                            if room then text:SetTextColor(1, 1, 1) else text:SetTextColor(0.5, 0.5, 0.5) end
+                        end)
                     end
-                    local box = root:CreateCheckbox(col.label .. (room and "" or " (no room)"),
-                        function() return on end,
-                        function() if room then Set(col, on) end end)
-                    if not room and box and box.SetEnabled then box:SetEnabled(false) end
                 end
             end
             -- Not "Show all": every column at once leaves the names no room
@@ -1668,6 +1739,11 @@ function UI.List(parent, opts)
                 if ui.hiddenColumns then ui.hiddenColumns[listKey] = nil end
                 list:Update()
             end)
+            -- Always there, so it's known before anything says "no room".
+            -- Two short lines: one long one widened the whole menu (user)
+            root:CreateDivider()
+            root:CreateTitle("Need more room?")
+            root:CreateTitle("Drag the window's corner")
         end)
     end
     list.ColumnMenu = ColumnMenu -- for the bench
@@ -1892,6 +1968,11 @@ function UI.List(parent, opts)
             list:Update()
         end
     end)
+    function list:WidthChanged()
+        return body:IsVisible() and list.layoutWidth ~= nil
+            and math.abs((body:GetWidth() or 0) - list.layoutWidth) > 0.5
+    end
+    UI.lists[list] = true
     return list
 end
 

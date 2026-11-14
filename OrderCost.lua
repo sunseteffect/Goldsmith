@@ -350,7 +350,7 @@ local function Update(page)
         -- Nothing to shop for when you hold all your part (user, 2026-10-23)
         local held = true
         for _, m in ipairs(page.preview.mats or {}) do
-            if (C_Item.GetItemCount(m.itemID, true, false, true, true) or 0) < (m.qty or 0) then held = false break end
+            if addon:CraftCount(m.itemID) < (m.qty or 0) then held = false break end
         end
         holder.queue:SetShown(queued ~= nil or not held)
         holder.queue:SetLabel(queued and "In the queue" or "Add to queue")

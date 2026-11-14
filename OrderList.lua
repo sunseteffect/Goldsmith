@@ -62,7 +62,7 @@ local function Held(itemID, recipeID)
     local ids = SlotIDs(itemID, recipeID)
     local have = 0
     for _, id in ipairs(ids) do
-        have = have + (C_Item.GetItemCount(id, true, false, true, true) or 0)
+        have = have + addon:CraftCount(id)
             + (addon.InMailCount and addon:InMailCount(id) or 0)
     end
     return have

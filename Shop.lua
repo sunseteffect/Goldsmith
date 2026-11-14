@@ -155,7 +155,7 @@ local function OwnStockNote(entry, unit)
         return string.format("Your %d %s %s too: mail %s to %s with these.",
             entry.fromBags, entry.name or "of these", one and "counts" or "count", one and "it" or "them", who)
     end
-    local have = (C_Item.GetItemCount(entry.itemID, true, false, true, false) or 0)
+    local have = addon:CraftCount(entry.itemID, false)
         - (addon.ReservedCount and addon:ReservedCount(entry.itemID) or 0)
     if have <= 0 then return nil end
     local send = math.min(have, entry.quantity)
@@ -610,7 +610,7 @@ function addon:MailJobs()
     local function Spare(itemID)
         if spare[itemID] == nil then
             spare[itemID] = OwnQueueUses(itemID) and 0
-                or math.max((C_Item.GetItemCount(itemID, true, false, true, false) or 0) - addon:ReservedCount(itemID), 0)
+                or math.max(addon:CraftCount(itemID, false) - addon:ReservedCount(itemID), 0)
         end
         return spare[itemID]
     end
@@ -734,7 +734,7 @@ local function UseOwnStock(plan)
         if not mine and not OwnQueueUses(e.itemID) then
             -- Bought and still in the mailbox counts: what's set aside for
             -- others is mostly there
-            spare = math.max((C_Item.GetItemCount(e.itemID, true, false, true, false) or 0)
+            spare = math.max(addon:CraftCount(e.itemID, false)
                 + addon:InMailCount(e.itemID) - addon:ReservedCount(e.itemID), 0)
         end
         if spare > 0 then e.fromBags = TakeOff(plan, i, spare) end

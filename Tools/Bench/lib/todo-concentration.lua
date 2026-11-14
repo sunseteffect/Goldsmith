@@ -14,7 +14,29 @@ return function(bench, who, oldWay)
     for _, snap in pairs(db.characters[key].concentration or {}) do
         snap.current, snap.time = math.max(snap.current or 0, 450), os.time()
     end
+    -- None held of what they craft: the to-do skips what you hold, and a
+    -- batch made that day left nothing to test (Maddoxynn's Soul Cipher and
+    -- inks, 2026-11-13)
+    local outputs = {}
+    for recipeID in pairs(db.characters[key].knownRecipes or {}) do
+        local r = db.recipes[recipeID]
+        if r and r.outputItemID then outputs[r.outputItemID] = true end
+        for _, out in pairs((db.characters[key].tierData[recipeID] or {}).outputs or {}) do
+            if out.itemID then outputs[out.itemID] = true end
+        end
+    end
+    for _, c in pairs(db.characters) do
+        for id in pairs(outputs) do
+            if c.stock then c.stock[id] = nil end
+            if c.auctions then c.auctions[id] = nil end
+        end
+    end
+    for id in pairs(outputs) do
+        if db.warbandStock then db.warbandStock[id] = nil end
+        for _, book in pairs(db.inMail or {}) do book[id] = nil end
+    end
     local addon = bench.Login(who, { db = db })
+    for id in pairs(outputs) do bench.world.bags[id], bench.world.bank[id] = nil, nil end
 
     local todo = addon:GetCharacterTodo("All")
     local mine = todo[key]

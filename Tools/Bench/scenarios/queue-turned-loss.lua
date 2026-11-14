@@ -31,7 +31,8 @@ local function Start(price)
     local Build = addon.BuildPlan
     function addon:BuildPlan(...)
         local plan = Build(self, ...)
-        if plan and plan.revenue then
+        -- With or without a price of its own (none listed by 2026-11-13)
+        if plan and plan.cost then
             plan.revenue = sellsFor * (plan.expectedOutput or 1)
             plan.profit = plan.revenue - plan.cost
         end

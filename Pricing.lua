@@ -2166,7 +2166,62 @@ local function FinishingCrafted(c, recipeID, recipe, reagents, extra)
     return false
 end
 
+-- How long a finished craft takes Goldsmith, for /gsm report: the handler
+-- (and its parts), and the longest frame in the CRAFT_WATCH seconds after
+-- it, whatever caused it (the window's refresh, the bags' recount, another
+-- addon). The user felt "a small hitch when i finish crafting" (2026-11-13).
+local CRAFT_WATCH = 3
+local craftTimer = { parts = {} }
+local function CraftMark(part)
+    local now = debugprofilestop()
+    craftTimer.parts[part] = now - (craftTimer.last or now)
+    craftTimer.last = now
+end
+-- The game's own meter of each addon's time in the last frame (retail):
+-- Goldsmith's, and every addon's together, so a long frame is placed on
+-- Goldsmith, another addon or the game itself. nil where it's missing.
+local function AddonFrameMs(name)
+    local p, metrics = C_AddOnProfiler, Enum and Enum.AddOnProfilerMetric
+    if not (p and metrics and metrics.LastTime) then return nil end
+    local ok, ms
+    if name then
+        ok, ms = pcall(p.GetAddOnMetric, name, metrics.LastTime)
+    else
+        ok, ms = pcall(p.GetOverallMetric, metrics.LastTime)
+    end
+    return ok and type(ms) == "number" and ms or nil
+end
+
+local watchFrame
+local function WatchAfterCraft(handlerMs)
+    local t = { time = time(), handler = handlerMs, parts = craftTimer.parts, longest = 0 }
+    addon.lastCraftTiming = t
+    watchFrame = watchFrame or CreateFrame("Frame")
+    local started, last = GetTime(), debugprofilestop()
+    watchFrame:SetScript("OnUpdate", function(self)
+        local now = debugprofilestop()
+        local frame = now - last
+        if frame > t.longest then
+            t.longest = frame
+            -- That frame's share: Goldsmith, and all addons
+            t.mine, t.addons = AddonFrameMs("Goldsmith"), AddonFrameMs(nil)
+        end
+        local mine = AddonFrameMs("Goldsmith")
+        if mine then t.mostMine = math.max(t.mostMine or 0, mine) end
+        last = now
+        if GetTime() - started > CRAFT_WATCH then self:SetScript("OnUpdate", nil) end
+    end)
+end
+
+local OnCraftResultInner
 local function OnCraftResult(resultData)
+    craftTimer.parts, craftTimer.last = {}, debugprofilestop()
+    local start = craftTimer.last
+    OnCraftResultInner(resultData)
+    WatchAfterCraft(debugprofilestop() - start)
+end
+
+OnCraftResultInner = function(resultData)
     if not currentCraftRecipeID or not resultData or not resultData.itemID then return end
     LogCraftResult(currentCraftRecipeID, resultData)
 
@@ -2184,9 +2239,11 @@ local function OnCraftResult(resultData)
     if not recipe then return end
     -- Ignore results that aren't this recipe's item (e.g. a different craft)
     if C_Item.GetItemNameByID(resultData.itemID) ~= recipe.outputName then return end
+    CraftMark("start")
     if not currentCraftIsOrder then
         addon:QueueCrafted(currentCraftRecipeID, resultData.quantity, resultData.itemID)
     end
+    CraftMark("queue")
 
     local stats = GoldsmithDB.craftStats[currentCraftRecipeID]
     if not stats then
@@ -2231,9 +2288,12 @@ local function OnCraftResult(resultData)
     end
 
     -- Order crafts still teach the proc sizes above; only the lot differs
+    CraftMark("stats")
     local lot, used = addon:RecordCraftLot(recipe, resultData, currentCraftReagents, currentCraftIsOrder, currentOrderTerms)
+    CraftMark("cost")
     -- The planner's "Craft complete" notice (CraftDone.lua)
     if not currentCraftIsOrder then addon:CraftBatchResult(currentCraftRecipeID, recipe, resultData, lot, used) end
+    CraftMark("notice")
 end
 
 -- Crafted lots
@@ -2250,6 +2310,67 @@ end
 -- crafts really made.
 local CRAFT_LOT_LIMIT = 30
 addon.CRAFT_LOT_LIMIT = CRAFT_LOT_LIMIT
+
+-- Craft batches, for History only (not GoldsmithDB.craftLog: that's the
+-- game's craft results, kept for checking the numbers): one entry a batch (crafts of an item no
+-- more than CRAFT_LOG_GAP apart), kept CRAFT_LOG_DAYS. craftLots keeps the
+-- last 30 crafts of each item for costs, so History showed 61 Harandar
+-- Celebration crafted against about 300 sold, read as lost crafts (Reddit
+-- tester; Idea Board "Craft log for History", 2026-11-01).
+--   GoldsmithDB.craftBatches = { since, entries = { { time (first), last,
+--     itemID, name, crafts, qty, cost (copper, all of them), partial, char } } }
+local CRAFT_LOG_GAP = 5 * 60
+local CRAFT_LOG_DAYS = 90
+local CRAFT_LOG_MAX = 5000
+
+local function CraftLog()
+    GoldsmithDB.craftBatches = GoldsmithDB.craftBatches or { since = time(), entries = {} }
+    return GoldsmithDB.craftBatches
+end
+
+local function LogCraft(itemID, lot)
+    local log = CraftLog()
+    local entries = log.entries
+    local now = lot.time or time()
+    local qty = lot.qty or 0
+    local cost = lot.unitCost and lot.unitCost * qty or 0
+    -- Joins the batch it's part of: the newest entry for this item, if close
+    local e
+    for i = #entries, math.max(#entries - 20, 1), -1 do
+        local x = entries[i]
+        if x.itemID == itemID and x.char == lot.char then
+            if now - x.last <= CRAFT_LOG_GAP then e = x end
+            break
+        end
+    end
+    if e then
+        e.last, e.crafts, e.qty, e.cost = now, e.crafts + 1, e.qty + qty, e.cost + cost
+        e.partial = e.partial or lot.partial or not lot.unitCost or nil
+    else
+        table.insert(entries, { time = now, last = now, itemID = itemID, name = lot.name, crafts = 1, qty = qty,
+            cost = cost, partial = (lot.partial or not lot.unitCost) or nil, char = lot.char })
+    end
+    -- Older than CRAFT_LOG_DAYS, or past the cap: the oldest go
+    local oldest = time() - CRAFT_LOG_DAYS * 86400
+    while entries[1] and (entries[1].last < oldest or #entries > CRAFT_LOG_MAX) do table.remove(entries, 1) end
+end
+
+-- A craft moved to Orders comes off its batch in the log too
+local function UnlogCraft(itemID, lot)
+    local log = GoldsmithDB.craftBatches
+    for i, e in ipairs(log and log.entries or {}) do
+        if e.itemID == itemID and lot.time and lot.time >= e.time and lot.time <= e.last then
+            local qty = lot.qty or 0
+            e.crafts, e.qty = e.crafts - 1, e.qty - qty
+            e.cost = math.max(e.cost - (lot.unitCost and lot.unitCost * qty or 0), 0)
+            if e.crafts <= 0 then table.remove(log.entries, i) end
+            return
+        end
+    end
+end
+
+-- History's crafts older than the lots each item keeps (Insights.lua)
+function addon:GetCraftLog() return GoldsmithDB.craftBatches end
 local ORDER_CRAFT_LIMIT = 100
 -- Bumped whenever craftLots changes (see GetCraftLotsByName)
 local craftLotsVersion = 0
@@ -2285,6 +2406,7 @@ function addon:MarkCraftAsOrder(itemID, lot)
             if #lots == 0 then GoldsmithDB.craftLots[itemID] = nil end
             lot.itemID = itemID
             AddOrderCraft(lot)
+            UnlogCraft(itemID, lot)
             break
         end
     end
@@ -2802,6 +2924,7 @@ function addon:RecordCraftLot(recipe, resultData, usedReagents, isOrder, orderTe
     while #lots > CRAFT_LOT_LIMIT do
         table.remove(lots, 1)
     end
+    LogCraft(resultData.itemID, lot)
     return lot, used
 end
 

@@ -316,7 +316,8 @@ local function Menu(row)
             return
         end
         root:CreateButton("Open the item's page", function() addon:OpenItem(row.item, row.itemID) end)
-        if row.kind == "Craft" then
+        -- Not for an older batch from the craft log: its crafts aren't kept
+        if row.kind == "Craft" and not row.fromLog then
             -- Worded as what it does: "This was a crafting order" read like
             -- a statement about a row already marked Craft (user, 2026-10-14)
             -- A batch moves as a whole
@@ -346,26 +347,8 @@ local function Menu(row)
     end)
 end
 
--- A pill button for the type filter
-local function Chip(parent, text, onClick)
-    local chip = CreateFrame("Button", nil, parent, "BackdropTemplate")
-    chip.label = UI.Text(chip, "small", "text", "CENTER")
-    chip.label:SetPoint("CENTER")
-    chip.label:SetText(text)
-    chip:SetSize(chip.label:GetStringWidth() + 24, 24)
-    chip:SetScript("OnClick", onClick)
-    function chip:SetSelected(selected)
-        chip.selected = selected
-        UI.Style(chip, selected and "highlight" or "panelRaised", selected and "borderGold" or "borderStrong")
-        chip.label:SetTextColor(addon:Color(selected and "gold" or "text"))
-    end
-    chip:SetScript("OnEnter", function(self) self:SetBackdropBorderColor(addon:Color("gold")) end)
-    chip:SetScript("OnLeave", function(self)
-        self:SetBackdropBorderColor(addon:Color(self.selected and "borderGold" or "borderStrong"))
-    end)
-    chip:SetSelected(false)
-    return chip
-end
+-- A pill button for the type filter (UI.Chip, Widgets.lua)
+local function Chip(parent, text, onClick) return UI.Chip(parent, text, onClick) end
 
 -- Links from other screens
 
@@ -560,13 +543,19 @@ local function Refresh(view, state)
     for _, row in ipairs(rows) do
         if row.partial and row.profit then table.insert(notes, "* some material costs unknown") break end
     end
-    if ui.historyCharacter then table.insert(notes, "crafts only show for All characters") end
-    -- Only the newest crafts of each item are kept (for costs), so 300 sold
-    -- against 61 crafted read as lost crafts (user, 2026-11-01)
-    for _, row in ipairs(rows) do
-        if row.kind == "Craft" then
-            table.insert(notes, string.format("crafts: your last %d of each item", addon.CRAFT_LOT_LIMIT))
-            break
+    -- Before the craft log started, only the newest crafts of each item
+    -- were kept (for costs), so 300 sold against 61 crafted read as lost
+    -- crafts (user, 2026-11-01). Said only when the dates reach back past it.
+    local log = addon:GetCraftLog()
+    local since = log and log.since or time()
+    local from = not view.item and state.since or nil
+    if not from or from < since then
+        for _, row in ipairs(rows) do
+            if row.kind == "Craft" then
+                table.insert(notes, string.format("crafts before %s: your last %d of each item",
+                    date("%b %d", since), addon.CRAFT_LOT_LIMIT))
+                break
+            end
         end
     end
     if view.item then table.insert(notes, "all dates and professions for this item") end

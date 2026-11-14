@@ -720,11 +720,18 @@ function addon:BuildQueue(charKey)
                     -- -4s 39c each, queued when they sold for 15s). A craft
                     -- queued at a loss on purpose (skill, knowledge) never
                     -- made gold here, so it isn't flagged.
+                    -- Judged on today's prices, as every decision is: on what
+                    -- your materials cost you, Soul Cipher said "now -28s"
+                    -- for inks made dearer than they sell for today, while
+                    -- crafting them still beat selling them (+4.24g each;
+                    -- user, 2026-11-13). The plan shows what yours cost.
                     if plan and plan.revenue and plan.profit and not e.orderID then
-                        if plan.profit > 0 and plan.complete then
+                        local today = plan.profit
+                        if plan.marketCost then today = plan.revenue - (plan.todayCost or plan.marketCost) end
+                        if today > 0 and plan.complete then
                             e.wasProfitable, e.lossOk = true, nil
-                        elseif plan.profit < 0 and e.wasProfitable then
-                            row.turnedLoss = plan.profit
+                        elseif today < 0 and e.wasProfitable then
+                            row.turnedLoss = today
                         end
                     end
                     if e.orderID and plan then
@@ -815,7 +822,8 @@ end
 -- { { itemID, name, quantity } } by name.
 function addon:QueueFromBank(q)
     local list = {}
-    if not (addon.isForever and q and q.mine and q.pool) then return list end
+    -- With the bank left out, nothing is counted from it to take out
+    if not (addon.isForever and q and q.mine and q.pool) or not addon:UsesBank(addon.charKey) then return list end
     for itemID, used in pairs(q.pool) do
         if used > 0 then
             local all = C_Item.GetItemCount(itemID, true, false, true, true) or 0

@@ -431,8 +431,9 @@ local function FillCraftRow(row, item)
         row.who:Hide()
     end
 
-    -- Forever: no material priced at all read "0c+" (stress test)
-    if addon.isForever and info.partial and (info.cost or 0) == 0 then
+    -- Forever: no material priced at all read "0c+" (stress test). No cost
+    -- at all: a mill with no AH price for its herb errored as it drew
+    if info.cost == nil or addon.isForever and info.partial and info.cost == 0 then
         cells.cost:SetText("?")
     else
         cells.cost:SetText(Money(info.cost) .. (info.partial and "+" or ""))
@@ -2314,7 +2315,9 @@ local function CreatePlanScreen(parent)
         screen.qty:SetText(tostring(left))
         if left > 0 then ui.planCrafts[recipeID] = left end
         screen.allMade = left == 0 or nil
-        screen:Update()
+        -- Spread over frames: done at once after every craft, it took 79 ms
+        -- and the game hitched as each craft finished (user, 2026-11-13)
+        addon:UpdatePlanAsWork()
     end
     screen.crafts = UI.Text(screen, "small", "muted")
     screen.crafts:SetPoint("LEFT", screen.qty, "RIGHT", 10, 0)
@@ -4576,6 +4579,30 @@ local craftEvents = CreateFrame("Frame")
 for _, event in ipairs({ "TRADE_SKILL_SHOW", "TRADE_SKILL_CLOSE", "BAG_UPDATE_DELAYED", "CURRENCY_DISPLAY_UPDATE" }) do
     craftEvents:RegisterEvent(event)
 end
+-- The plan or mill planner worked out again as work over frames, beside
+-- the window's own work (keep): worked out at once it took 60-80 ms, a
+-- hitch after each craft. One at a time; asked again while it runs, it
+-- runs once more after.
+local planWork = { running = false, again = false }
+function addon:UpdatePlanAsWork()
+    if not view then return end
+    if planWork.running then
+        planWork.again = true
+        return
+    end
+    planWork.running = true
+    -- From the next frame: the frame a craft ends in is the game's busiest
+    C_Timer.After(0, function()
+        addon:RunWork(function()
+            repeat
+                planWork.again = false
+                if view.plan:IsVisible() and view.plan.plan then view.plan:Update() end
+                if view.salvage:IsVisible() and view.salvage.target then view.salvage:Update() end
+            until not planWork.again
+        end, nil, function() planWork.running = false end, "plan", true)
+    end)
+end
+
 local craftUpdatePending = false
 craftEvents:SetScript("OnEvent", function()
     if craftUpdatePending or not view then return end
@@ -4585,8 +4612,7 @@ craftEvents:SetScript("OnEvent", function()
     craftUpdatePending = true
     C_Timer.After(0.3, function()
         craftUpdatePending = false
-        if view.plan:IsVisible() and view.plan.plan then view.plan:Update() end
-        if view.salvage:IsVisible() and view.salvage.target then view.salvage:Update() end
+        addon:UpdatePlanAsWork()
     end)
 end)
 

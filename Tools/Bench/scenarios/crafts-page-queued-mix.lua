@@ -38,6 +38,9 @@ db.characters[MADDOXYNN].stock[236776] = 200
 -- and Mana Lily (milled since, 2026-10-29)
 db.characters[MADDOXYNN].stock[236778] = 60
 local addon = bench.Login("Mysticmead", { db = db })
+-- Sienna Ink at prices, or the page has no mixes to compare (gold had
+-- none listed by 2026-11-13)
+bench.PinPrices(addon, { [245805] = bench.Gold(38), [245806] = bench.Gold(90) })
 
 addon:OpenCraftPlan(GoldsmithDB.recipes[SIENNA_INK], { tier = 2, concentrate = true }, MADDOXYNN, 6, "queue")
 bench.Advance(2)

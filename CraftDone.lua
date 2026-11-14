@@ -434,7 +434,10 @@ function addon:CraftBatchResult(recipeID, recipe, resultData, lot, used)
     -- 15", more vendor items) (user, 2026-11-03)
     if addon.PlanCraftsDone then addon.PlanCraftsDone(b.recipeID, made, 1) end
     if b.done >= b.crafts then
-        Finish()
+        -- The notice on the next frame: the frame the craft ends in is the
+        -- game's busiest (it redraws the profession window and bags), and
+        -- 27 ms more here was felt (user, 2026-11-13)
+        C_Timer.After(0, function() if batch == b then Finish() end end)
     else
         WaitForStop(STOP_WAIT)
     end

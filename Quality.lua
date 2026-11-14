@@ -643,8 +643,8 @@ function addon:GetCraftReagents(recipeID, scenario, held)
             local high = math.min(highUnits[i] or 0, s.quantity)
             local low = s.quantity - high
             if low > 0 and s.low ~= s.high and addon:MayUseHeldGold(s.low, s.high) then
-                local haveLow = C_Item.GetItemCount(base[i] or s.low, true, false, true, true) or 0
-                local spareHigh = (C_Item.GetItemCount(s.high, true, false, true, true) or 0) - high * n
+                local haveLow = addon:CraftCount(base[i] or s.low)
+                local spareHigh = addon:CraftCount(s.high) - high * n
                 if haveLow < low * n and spareHigh >= n then
                     -- Per craft: enough gold to cover the shortfall, as far
                     -- as the gold you hold goes
@@ -682,8 +682,8 @@ function addon:GetCraftReagents(recipeID, scenario, held)
             local high = math.min(highUnits[i] or 0, s.quantity)
             local low = s.quantity - high
             if high > 0 and s.low ~= s.high and addon:MayUseHeldSilver(s.low, s.high) then
-                local haveHigh = C_Item.GetItemCount(s.high, true, false, true, true) or 0
-                local spareLow = (C_Item.GetItemCount(s.low, true, false, true, true) or 0) - low * n
+                local haveHigh = addon:CraftCount(s.high)
+                local spareLow = addon:CraftCount(s.low) - low * n
                 if haveHigh < high * n and spareLow >= n then
                     local short = math.ceil((high * n - haveHigh) / n)
                     local units = math.min(short, math.floor(spareLow / n), high)

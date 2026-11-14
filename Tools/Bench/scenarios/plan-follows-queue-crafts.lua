@@ -14,9 +14,12 @@ local recipe = { recipeID = 999001, outputName = "Test Feast" }
 addon:StartCraftBatch(recipe, { crafts = 3 })
 bench.Check("following the crafts", addon:CraftBatchRunning())
 addon:CraftBatchResult(999001, recipe, { itemID = 1, quantity = 1 }, nil, {})
+bench.Advance(0.1) -- the notice comes a frame later
 bench.Equal("first craft off the box", crafts, 1)
 addon:CraftBatchResult(999001, recipe, { itemID = 1, quantity = 1 }, nil, {})
+bench.Advance(0.1) -- the notice comes a frame later
 addon:CraftBatchResult(999001, recipe, { itemID = 1, quantity = 1 }, nil, {})
+bench.Advance(0.1) -- the notice comes a frame later
 bench.Equal("all three off, none twice", crafts, 3)
 bench.Equal("for its recipe", calls[3], 999001)
 bench.Check("done following", not addon:CraftBatchRunning())

@@ -21,16 +21,20 @@ local function Menu(owner)
     list = owner or list
     list.ColumnMenu(list.headerCells.item or list)
     local boxes, buttons = {}, {}
-    local root = { CreateTitle = function() end, CreateDivider = function() end,
+    local titles = {}
+    local root = { CreateTitle = function(_, text) table.insert(titles, text) end, CreateDivider = function() end,
         CreateCheckbox = function(_, label, isOn, toggle) boxes[label] = { on = isOn, toggle = toggle } end,
         CreateButton = function(_, label, fn) buttons[label] = fn end }
     bench.world.lastMenu(nil, root)
+    buttons.titles = table.concat(titles, " | ")
     return boxes, buttons
 end
 local function Shown(l, key) local c = l.headerCells[key] return c ~= nil and c:IsShown() end
 
 local boxes, buttons = Menu()
 bench.Check("Sold/day in the menu", boxes["Sold/day"] ~= nil)
+-- How to get more room, before anything says "no room"
+bench.Has("says to drag the corner", buttons.titles, "Need more room? | Drag the window's corner")
 bench.Check("Item isn't (always shown)", boxes.Item == nil)
 bench.Check("Sold/day on", boxes["Sold/day"] and boxes["Sold/day"].on())
 
@@ -76,6 +80,11 @@ for _, key in ipairs({ "breakEven", "vsUsual", "make", "batch", "listed" }) do
 end
 boxes = Menu()
 bench.Check("Break-even off in the menu", boxes["Break-even"] and not boxes["Break-even"].on())
+boxes["Break-even"].toggle()
+-- The same open menu: ticked straight away, not when it opens again
+bench.Check("the open menu ticks it straight away", boxes["Break-even"].on())
+boxes["Break-even"].toggle()
+bench.Check("and unticks it", not boxes["Break-even"].on())
 boxes["Break-even"].toggle()
 Menu()["Listed"].toggle()
 Menu()["Make"].toggle()
@@ -153,13 +162,20 @@ for _, label in ipairs({ "ROI", "Sells for", "To buy" }) do
     bench.Check("Queue menu: " .. label .. " (off)", qBoxes[label] and not qBoxes[label].on())
 end
 qBoxes["To buy"].toggle()
+-- The same open menu: ROI had room as it opened, not now. Ticking it
+-- does nothing (shown, it was dropped at once: looked like a dead menu)
+qBoxes.ROI.toggle()
+bench.Check("Queue: ROI not saved with no room", not (ui.hiddenColumns.queue and ui.hiddenColumns.queue.roi == false))
+bench.Check("Queue: To buy still ticked", qBoxes["To buy"].on())
 -- At the normal width one more fits beside To buy at most: ROI says no room
 bench.Check("Queue: ROI no room beside it", Menu(queue)["ROI (no room)"] ~= nil)
 bench.Check("Queue: To buy shown", Shown(queue, "toBuy"))
 bench.Equal("no errors on the Queue", #bench.TakeErrors(), 0)
 
--- History: Character, Each and ROI start hidden
+-- History: Character, Each and ROI start hidden. Sales only, so one with
+-- gold and a quantity is on screen whatever was done last
 ui.hiddenColumns = nil
+ui.historyKind = "Sale"
 addon:ShowTab("history")
 bench.Advance(3)
 history = addon:GetTabScreen("history").view.list
@@ -180,6 +196,7 @@ if sale then
     bench.Has("its Each", sale.cells.each:GetText() or "", addon:FormatMoney(math.abs(sale.data.gold) / sale.data.qty), true)
 end
 bench.Equal("no errors on History", #bench.TakeErrors(), 0)
+ui.historyKind = nil
 
 -- Items, in stock: Break-even and Sell all; cheap materials: Listed
 local function ItemsList(bags, cheap)

@@ -5,7 +5,7 @@ local UI = addon.UI
 --
 -- "Tell me everything about this one item." Opens on four leaderboards
 -- (most profit earned, best ROI, fastest sellers, held too long). The search
--- box finds any item Goldsmith knows; "In my bags" lists everything you
+-- box finds any item Goldsmith knows; "In stock" lists everything you
 -- hold on every character (it replaces v1's Stock tab). Clicking an item
 -- opens its page: price now and usually, a 30-day price chart, sold per
 -- day, what it costs, break-even ("list above this"), stock and your
@@ -642,7 +642,7 @@ end
 
 -- Sorting, as on the Crafts tab: clicking a header sorts by it, clicking
 -- again reverses. Each column starts the most useful way round; rows with no
--- value go last. In my bags starts most valuable first; search results
+-- value go last. In stock starts most valuable first; search results
 -- start best match first (no column).
 local SORTS = {
     stock = {
@@ -960,16 +960,28 @@ local function CreatePage(parent)
     local activity = UI.Panel(page)
     activity:SetPoint("TOPLEFT", 2 * (panelWidth + GAP), panelTop)
     activity:SetPoint("BOTTOMRIGHT", 0, 0)
-    local activityTitle = UI.Text(activity, "heading")
-    activityTitle:SetPoint("TOPLEFT", 16, -14)
-    activityTitle:SetText("Your activity")
+    -- Two chips to switch between, like History's filters, so they read as
+    -- buttons (user, 2026-11-13: plain headings took a second to find):
+    -- Your activity, and Craft it into (N) when recipes use it
+    local function SetMode(into)
+        GoldsmithDB.ui2.itemPageInto = into or nil
+        page:ShowMode()
+    end
+    page.activityTab = UI.Chip(activity, "Your activity", function() SetMode(false) end)
+    page.activityTab:SetPoint("TOPLEFT", 12, -10)
+    page.intoTab = UI.Chip(activity, "Craft it into", function() SetMode(true) end)
+    page.intoTab:SetPoint("LEFT", page.activityTab, "RIGHT", 6, 0)
+    UI.SetTooltip(page.intoTab, function(tooltip)
+        tooltip:AddLine("Craft it into", 1, 1, 1)
+        tooltip:AddLine("Every recipe that uses it, with its profit. Above zero, crafting it beats selling it.", 0.8, 0.8, 0.8, true)
+    end)
     page.earned = UI.Text(activity, "small", "muted")
-    page.earned:SetPoint("TOPLEFT", 16, -36)
+    page.earned:SetPoint("TOPLEFT", 16, -42)
     page.earned:SetPoint("RIGHT", -16, 0)
     page.activityRows = {}
     local function AddActivityRow(i)
         local row = {}
-        local top = -58 - (i - 1) * 21
+        local top = -62 - (i - 1) * 21
         row.date = UI.Text(activity, "label", "dim")
         row.date:SetPoint("TOPLEFT", 16, top - 1)
         row.date:SetWidth(44)
@@ -983,7 +995,7 @@ local function CreatePage(parent)
     -- As many rows as fit above the History link, so the panel fills
     -- (user, 2026-11-03)
     local function ActivityRowCount()
-        local fit = math.floor((activity:GetHeight() - 58 - 14 - 34) / 21) + 1
+        local fit = math.floor((activity:GetHeight() - 62 - 14 - 34) / 21) + 1
         return math.max(ACTIVITY_ROWS, fit)
     end
     for i = 1, ACTIVITY_ROWS do AddActivityRow(i) end
@@ -998,6 +1010,107 @@ local function CreatePage(parent)
     end)
     page.moreButton:SetScript("OnEnter", function() page.more:SetTextColor(addon:Color("text")) end)
     page.moreButton:SetScript("OnLeave", function() page.more:SetTextColor(addon:Color("gold")) end)
+
+    -- Craft it into: one row per recipe, most profit first; click for its plan
+    local INTO_ROW = 22
+    page.into = CreateFrame("Frame", nil, activity)
+    page.into:SetPoint("TOPLEFT", 8, -42)
+    page.into:SetPoint("BOTTOMRIGHT", -8, 8)
+    page.intoNote = UI.Text(page.into, "small", "muted")
+    page.intoNote:SetPoint("TOPLEFT", 8, -2)
+    page.intoNote:SetPoint("RIGHT", -8, 0)
+    page.intoRows = {}
+    local function IntoRow(i)
+        if page.intoRows[i] then return page.intoRows[i] end
+        local row = CreateFrame("Button", nil, page.into)
+        row:SetHeight(INTO_ROW)
+        row:SetPoint("TOPLEFT", 0, -18 - (i - 1) * INTO_ROW)
+        row:SetPoint("RIGHT", page.into, "RIGHT", 0, 0)
+        local hover = row:CreateTexture(nil, "HIGHLIGHT")
+        hover:SetAllPoints()
+        hover:SetColorTexture(addon:Color("hover"))
+        row.value = UI.Text(row, "small", nil, "RIGHT")
+        row.value:SetPoint("RIGHT", -8, 0)
+        row.name = UI.Text(row, "small")
+        row.name:SetPoint("LEFT", 8, 0)
+        row.name:SetPoint("RIGHT", row.value, "LEFT", -8, 0)
+        row.name:SetWordWrap(false)
+        row:SetScript("OnClick", function(self)
+            if self.entry then addon:OpenCraftPlan(self.entry.recipe, nil, self.entry.charKey) end
+        end)
+        row:SetScript("OnEnter", function(self)
+            local e = self.entry
+            if not e then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:AddLine(e.recipe.outputName, 1, 1, 1)
+            local c = GoldsmithDB.characters[e.charKey]
+            GameTooltip:AddDoubleLine("Made by", c and c.name or e.charKey, 0.8, 0.8, 0.8, 1, 1, 1)
+            if e.profit then
+                local r, g, b = addon:Color(addon:MoneyColor(e.profit))
+                GameTooltip:AddDoubleLine("Profit each", Signed(e.profit) .. (e.partial and "*" or ""), 0.8, 0.8, 0.8, r, g, b)
+            end
+            if e.whyNot then GameTooltip:AddLine("Not recommended: " .. e.whyNot, 1, 0.6, 0.2, true) end
+            GameTooltip:AddLine("Its materials at today's AH prices, this one included, with the cheapest mix.", 0.6, 0.6, 0.6, true)
+            addon:ClickHint(GameTooltip, "Click to plan it.")
+            GameTooltip:Show()
+        end)
+        row:SetScript("OnLeave", GameTooltip_Hide)
+        page.intoRows[i] = row
+        return row
+    end
+
+    -- Which of the two shows (the choice is kept; Craft it into only when
+    -- something uses it)
+    function page:ShowMode()
+        local into = GoldsmithDB.ui2.itemPageInto and page.intoList and #page.intoList > 0
+        page.intoTab:SetShown(page.intoList ~= nil and #page.intoList > 0)
+        page.activityTab:SetSelected(not into)
+        page.intoTab:SetSelected(into)
+        page.into:SetShown(into)
+        page.earned:SetShown(not into)
+        for _, row in ipairs(page.activityRows) do
+            if into then row.date:Hide(); row.detail:Hide(); row.gold:Hide() end
+        end
+        if into then
+            page.moreButton:Hide()
+        elseif page.details then
+            page.moreButton:SetShown(#page.details.activity > 0)
+            -- Rows hidden for Craft it into come back
+            if page.activityShown then page.activityShown() end
+        end
+    end
+
+    function page:FillInto(list)
+        page.intoList = list
+        page.intoTab:SetText(string.format("Craft it into (%d)", #list))
+        local fit = math.max(math.floor(((page.into:GetHeight() or 300) - 20) / INTO_ROW), 1)
+        local made = 0
+        for _, e in ipairs(list) do if e.profit and e.profit > 0 then made = made + 1 end end
+        page.intoNote:SetText(string.format("%d recipe%s, %d make%s more than selling it", #list,
+            #list == 1 and "" or "s", made, made == 1 and "s" or ""))
+        for i = 1, math.max(#page.intoRows, math.min(#list, fit)) do
+            local e = i <= fit and list[i]
+            local row = (e or page.intoRows[i]) and IntoRow(i)
+            if row then
+                row.entry = e or nil
+                if e then
+                    local tier = e.tier and e.tierCount and (addon:TierIconText(e.tier, e.tierCount) .. " ") or ""
+                    row.name:SetText(addon:ProfessionIconText(e.recipe.profession) .. tier .. e.recipe.outputName)
+                    row.name:SetTextColor(addon:Color(e.whyNot and "muted" or "text"))
+                    if e.profit then
+                        row.value:SetText(Signed(e.profit) .. (e.partial and "*" or ""))
+                        row.value:SetTextColor(addon:Color(addon:MoneyColor(e.profit)))
+                    else
+                        row.value:SetText("-")
+                        row.value:SetTextColor(addon:Color("dim"))
+                    end
+                    row:Show()
+                else
+                    row:Hide()
+                end
+            end
+        end
+    end
 
     function page:Fill()
         local d = addon:GetItemDetails(page.item.name, page.item.itemID)
@@ -1345,6 +1458,18 @@ local function CreatePage(parent)
             and string.format("and %d older: see all in History  >", #d.activity - rowCount)
             or "See all in History  >")
         page.moreButton:SetShown(#d.activity > 0)
+        -- Showing the activity again after Craft it into: the rows as filled
+        local shown = {}
+        for i, row in ipairs(page.activityRows) do shown[i] = row.detail:IsShown() end
+        page.activityShown = function()
+            for i, row in ipairs(page.activityRows) do
+                if shown[i] then row.date:Show(); row.detail:Show(); row.gold:Show() end
+            end
+        end
+
+        -- Craft it into
+        page:FillInto(d.itemID and addon:GetRecipesUsingAll(d.itemID) or {})
+        page:ShowMode()
     end
 
     return page
@@ -1405,9 +1530,11 @@ local function Create(parent)
     end
     if ChatEdit_InsertLink then hooksecurefunc("ChatEdit_InsertLink", OnInsertLink) end
     if ChatFrameUtil and ChatFrameUtil.InsertLink then hooksecurefunc(ChatFrameUtil, "InsertLink", OnInsertLink) end
-    -- In my bags and Cheap materials are two lists; ticking one unticks
-    -- the other
-    view.inBags = UI.Checkbox(landing, "In my bags", function(checked)
+    -- In stock and Cheap materials are two lists; ticking one unticks the
+    -- other. In stock was "In my bags", though it lists every character,
+    -- bank and the warband bank, and the Overview's Gold in stock opens it
+    -- (user, 2026-11-13: "different terminology")
+    view.inBags = UI.Checkbox(landing, "In stock", function(checked)
         ui.itemsInBags = checked or nil
         if checked then ui.itemsCheap = nil end
         view.list:ScrollToTop()
@@ -1415,8 +1542,9 @@ local function Create(parent)
     end)
     view.inBags:SetPoint("LEFT", view.searchBox, "RIGHT", 16, 0)
     UI.SetTooltip(view.inBags, function(tooltip)
-        tooltip:AddLine("In my bags", 1, 1, 1)
-        addon:Explain(tooltip, "Everything you hold on every character and in the warband bank, with what it's worth and how long you've had it.", 0.6, 0.6, 0.6, true)
+        tooltip:AddLine("In stock", 1, 1, 1)
+        addon:Explain(tooltip, "Everything you hold on every character, in bags, " .. (addon.isForever and "banks" or "banks and the warband bank")
+            .. ", with what it's worth and how long you've had it. The Overview's Gold in stock is its total.", 0.6, 0.6, 0.6, true)
     end)
     view.cheap = UI.Checkbox(landing, "Cheap materials", function(checked)
         ui.itemsCheap = checked or nil
@@ -1597,7 +1725,7 @@ local function Refresh(v, state)
         v.list:SetSort(sort.key, sort.descending)
         v.list:SetEmptyText(search ~= "" and "Nothing you hold matches."
             or next(GoldsmithDB.recipes) == nil and "Nothing tracked yet. Open each of your professions once so Goldsmith knows your materials."
-            or "Nothing tracked in your bags yet.")
+            or "Nothing in stock yet.")
         v.list:SetColumnsAndItems(addon:AvailableColumns(STOCK_COLUMNS), items)
         v.footer:SetText(string.format("%s in %s, %s and the warband bank", Money(value), Plural(#items, "item"),
             WhoCounts()))
@@ -1619,7 +1747,7 @@ local function Refresh(v, state)
 end
 
 -- Clicking the Items tab again: back to the leaderboards, from an item's
--- page, a search or In my bags
+-- page, a search or In stock
 local function Reset(v)
     v.page.item = nil
     v.search = ""
@@ -1634,7 +1762,7 @@ end
 local function Filters(v)
     local ui, list = GoldsmithDB.ui2, {}
     if ui.itemsInBags then
-        table.insert(list, { label = "In my bags", clear = function() ui.itemsInBags = nil end })
+        table.insert(list, { label = "In stock", clear = function() ui.itemsInBags = nil end })
     elseif ui.itemsCheap then
         table.insert(list, { label = "Cheap materials", clear = function() ui.itemsCheap = nil end })
     end

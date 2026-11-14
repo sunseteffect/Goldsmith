@@ -441,6 +441,19 @@ function B.CloseProfession()
     B.Advance(1)
 end
 
+-- AH prices a test is written around, whatever the saved data has now:
+-- a scan with none listed leaves an item unpriced, and tests built on its
+-- price broke (2026-11-13: Azeroot Tea, the Missive, gold Sienna Ink).
+-- prices = { [itemID] = copper }
+function B.PinPrices(addon, prices)
+    local AHPrice = addon.GetAHPriceInfo
+    function addon:GetAHPriceInfo(itemID, buying)
+        if prices[itemID] then return prices[itemID], "Goldsmith scan", 0 end
+        return AHPrice(self, itemID, buying)
+    end
+    if addon.DataChanged then addon:DataChanged() end
+end
+
 -- The AH answers a commodity purchase started with StartCommoditiesPurchase
 function B.QuotePrice(itemID, unitPrice, quantity)
     B.Fire("COMMODITY_PRICE_UPDATED", unitPrice, unitPrice * quantity)

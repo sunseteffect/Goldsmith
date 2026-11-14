@@ -35,6 +35,8 @@ local UI = addon.UI
 --   buyFor      - whose queues Buy next shops for: "me" (the character
 --                 you're on) or "all" (every character's, for buying on a
 --                 bank alt; Shop.lua; user, 2026-10-24)
+-- Use what's in the bank (Buy next page) is kept for each character, not
+-- here: GoldsmithDB.characters[key].leaveBank (Planner.lua UsesBank).
 --   flipMin     - copper an item must make each to show in Buy to vendor
 --                 (Scan.lua, Forever only; user, 2026-11-05)
 --   auctionatorButton - Send to Auctionator on the queue and plans. Off by
@@ -92,6 +94,9 @@ function addon:ChangedSettings()
     local excluded = 0
     for _ in pairs(addon:Setting("excluded") or {}) do excluded = excluded + 1 end
     if excluded > 0 then table.insert(list, excluded .. " characters excluded") end
+    local leaveBank = 0
+    for _, c in pairs(GoldsmithDB.characters or {}) do if c.leaveBank then leaveBank = leaveBank + 1 end end
+    if leaveBank > 0 then table.insert(list, leaveBank .. " characters leave the bank out") end
     local ignored = #addon:GetIgnoredItems()
     if ignored > 0 then table.insert(list, ignored .. " items ignored") end
     local kept = #addon:GetKeptItems()
@@ -174,6 +179,15 @@ end
 --     nothing else sees half of one while the work is paused
 --   - loop over a list, not pairs() of a shared table (addon:Keys)
 local FRAME_BUDGET_MS = 6
+-- One budget for all of Goldsmith's work in a frame, not one each: after a
+-- craft, the window's refresh, the plan's update and other work each took
+-- their own 6 ms in the same frame, 38 ms in all (user, 2026-11-13)
+local frameStamp, frameUsed = nil, 0
+local function FrameLeft()
+    local now = GetTime()
+    if now ~= frameStamp then frameStamp, frameUsed = now, 0 end
+    return FRAME_BUDGET_MS - frameUsed
+end
 addon.noYield = 0
 local current            -- the newest work
 local works = setmetatable({}, { __mode = "k" }) -- coroutine -> its work
@@ -191,7 +205,7 @@ function addon:Yield()
     if not work then return end
     -- Replaced by newer work: stop here for good
     if not work.keep and work ~= current then coroutine.yield() end
-    if debugprofilestop() - work.sliceStart >= FRAME_BUDGET_MS then coroutine.yield() end
+    if debugprofilestop() - work.sliceStart >= (work.sliceBudget or FRAME_BUDGET_MS) then coroutine.yield() end
 end
 
 -- The longest single frame any work has taken this session, by label
@@ -230,6 +244,16 @@ function addon:RunWork(fn, onSlow, onDone, label, keep)
     local slow = false
     local function Step()
         if not work.keep and current ~= work then return end
+        -- This frame's budget used by other work: the next frame. Once only,
+        -- so no work can wait for good (a frame's clock that didn't move)
+        local left = FrameLeft()
+        if left <= 0 and not work.waited then
+            work.waited = true
+            C_Timer.After(0, Step)
+            return
+        end
+        work.waited = nil
+        work.sliceBudget = math.max(left, 1)
         work.sliceStart = debugprofilestop()
         -- The work's own stats while it runs (see the rules above)
         local outside, outsideChoices = addon.statsChar, addon.planChoices
@@ -242,6 +266,8 @@ function addon:RunWork(fn, onSlow, onDone, label, keep)
         -- would leave it counted, and no work would pause again
         if not ok then addon.noYield = noYield end
         local ms = debugprofilestop() - work.sliceStart
+        FrameLeft()
+        frameUsed = frameUsed + ms
         work.totalMs, work.frames = work.totalMs + ms, work.frames + 1
         work.longestMs = math.max(work.longestMs, ms)
         if label and ms > (addon.workLongest[label] or 0) then
@@ -975,6 +1001,12 @@ local HELP = {
         "Every character's queue: it also shops for your other characters' queues, so you can buy on a bank alt for your crafters. Each item says whose queue it's for. What's bought for another character is kept for them (neither queue buys it again) until you mail it; the mailbox reminds you what to send.",
         "Either way, Buy next's All queues box flips it for one shopping trip, then goes back to this.",
     },
+    useBank = {
+        "Use what's in the bank",
+        "Set for each character: this one's. On: its plans, queue and Buy next count materials in its bank (and the warband bank) as its own to craft with, so they aren't bought again.",
+        "Off: only its bags and mailbox count. What's in the bank is left alone, and Buy next buys the rest.",
+        "Log in on another character to set theirs. Items and Characters still show everything you own.",
+    },
     auctionatorButton = {
         "Send to Auctionator button",
         "On: the queue and plans get a Send to Auctionator button, which makes a shopping list in Auctionator's Shopping tab. Needs Auctionator.",
@@ -1035,7 +1067,7 @@ local PAGES = {
       rows = { "priceSource", "ahScan", "autoScan" } },
     { key = "buying", label = "Buy next",
       intro = "How Buy next shops at the AH.",
-      rows = { "buyFor", "buyOver", "auctionatorButton" } },
+      rows = { "buyFor", "useBank", "buyOver", "auctionatorButton" } },
     { group = "Interface" },
     { key = "display", label = "Display",
       intro = "Goldsmith's lines in the game's own windows, and its minimap button.",
@@ -1485,6 +1517,16 @@ function addon:CreateSettingsPanel(parent)
     rows.flipMin = ChoiceRow(content, panel, "flipMin", "Buy to vendor minimum", "What an item must make each to show in Buy to vendor.")
     rows.buyFor = ChoiceRow(content, panel, "buyFor", "Buy next for", "Whose queues Buy next shops for at the AH.")
     rows.buyOver = ChoiceRow(content, panel, "buyOver", "Buy without asking", "How much over the plan Buy next pays without a second click.")
+    -- This character's, not saved with the rest (no default)
+    local who = UnitName and UnitName("player") or "this character"
+    rows.useBank = ToggleRow(content, panel, "useBank", "Use what's in the bank",
+        "For " .. who .. ": count materials in the bank as yours to craft with.",
+        function(on)
+            addon:SetUsesBank(addon.charKey, on)
+            if addon.DataChanged then addon:DataChanged() end
+            if addon.RefreshWindow then addon.RefreshWindow() end
+        end)
+    function rows.useBank:Update() self.control:SetOn(addon:UsesBank(addon.charKey)) end
     rows.auctionatorButton = ToggleRow(content, panel, "auctionatorButton", "Send to Auctionator button",
         "A shopping list in Auctionator, on the queue and plans.",
         function() if addon.RefreshWindow then addon.RefreshWindow() end end)
@@ -1935,9 +1977,9 @@ local HELP_SECTIONS = {
     { "The tabs", table.concat({
         addon:Colorize("Overview", "text") .. ": what to do next on the character you're on (and what you hold that sells above break-even now), which of your other characters has the most waiting, and how you're doing across all of them. \"followed\" by Do this next adds up what the suggestions you crafted have made; Set a goal on the Total gold chart gives you a gold goal.",
         addon:Colorize("Characters", "text") .. ": a to-do list for each character, its craft cooldowns, and which characters count.",
-        addon:Colorize("Crafts", "text") .. ": what you can make, with its cost, profit, how many you have (bags, banks, mail and AH listings) and how well it sells. Show picks Recommended, All crafts or Not learned yet (recipes worth going to learn), and can hide gear. Search by name; cooldown lists every recipe with a cooldown. Right-click a column name to hide or show columns (here, in the Queue, History and Items). Crafts has more to show: Break-even, Vs usual (today's price against usual), Make and Batch (how many Do this next would make, and what that batch earns) and Listed (how many are on the AH). Click a craft to plan it: type how many crafts, and it shows what they make and what to buy. With concentration it plans only what yours covers now; Why this mix shows the material qualities compared, and clicking one uses it instead.",
+        addon:Colorize("Crafts", "text") .. ": what you can make, with its cost, profit, how many you have (bags, banks, mail and AH listings) and how well it sells. Show picks Recommended, All crafts or Not learned yet (recipes worth going to learn), and can hide gear. Search by name; cooldown lists every recipe with a cooldown. Right-click a column name to hide or show columns (here, in the Queue, History and Items); for more at once, drag the window's bottom-right corner wider. Crafts has more to show: Break-even, Vs usual (today's price against usual), Make and Batch (how many Do this next would make, and what that batch earns) and Listed (how many are on the AH). Click a craft to plan it: type how many crafts, and it shows what they make and what to buy. With concentration it plans only what yours covers now; Why this mix shows the material qualities compared, and clicking one uses it instead.",
         addon:Colorize("Queue", "text") .. ": crafts lined up to make, with one shopping list and a button that does the next step. A material several crafts need is made for all of them at once.",
-        addon:Colorize("Items", "text") .. ": any item's page, In my bags for everything you hold, Cheap materials (right-click one to stock up), and the Held board with what sells above break-even now first.",
+        addon:Colorize("Items", "text") .. ": any item's page (Craft it into: every recipe that uses it, with its profit), In stock for everything you hold (what Gold in stock on the Overview counts), Cheap materials (right-click one to stock up), and the Held board with what sells above break-even now first.",
         addon:Colorize("History", "text") .. ": every sale, purchase, deposit, craft, order, gathering and box opened. Search by item; right-click an entry to fix it.",
         addon:Colorize("Stats", "text") .. ": lifetime stats and your Goldsmith title; Share in chat to brag.",
       }, "\n") },

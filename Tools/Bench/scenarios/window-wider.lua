@@ -30,6 +30,26 @@ addon:ShowTab("items")
 bench.Advance(3)
 bench.Check("Items stretches", addon:GetTabScreen("items").frame:GetPoint(1) ~= "TOP")
 
+-- Dragged narrow with columns laid out wide: the list's own size can land
+-- after the grip is let go, with no size change after (user, 2026-11-13:
+-- every column stayed out past the window's edge). A frame later it's
+-- laid out again for the width it has.
+addon:ShowTab("crafts")
+bench.Advance(3)
+local list = addon:GetTabScreen("crafts").view.list
+list:Update()
+local wide = list.layoutWidth
+addon.UI.BeginSizing()
+bench.Check("cut off at its edge while dragged", list._clips == true)
+-- The new width, without a size change event (as in game)
+for _, child in ipairs({ list:GetChildren() }) do
+    if child:GetWidth() == wide then child._w = wide - 300 end
+end
+addon.UI.EndSizing()
+bench.Check("not once let go", not list._clips)
+bench.Advance(0.3)
+bench.Check("laid out again for the narrower width", list.layoutWidth and list.layoutWidth < wide,
+    tostring(wide) .. " -> " .. tostring(list.layoutWidth))
 
 -- The grip's double-click: back to normal, nothing saved
 if frame.resizeGrip then

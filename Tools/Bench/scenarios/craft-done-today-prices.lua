@@ -15,6 +15,7 @@ local recipe = { recipeID = 999100, outputName = "Silver Skeleton Key" }
 addon:StartCraftBatch(recipe, { crafts = 1 })
 bench.Chat()
 addon:CraftBatchResult(999100, recipe, { itemID = KEY, quantity = 2 }, { qty = 2, unitCost = 520 }, { [BAR] = 1 })
+bench.Advance(0.1) -- the notice comes a frame later
 local screen = table.concat(bench.Screen(), "\n")
 bench.Has("profit on what yours cost", screen, "Estimated profit: " .. addon:FormatSignedMoney(96.9 - 1040), true)
 bench.Has("and at today's prices", screen, "At today's prices: " .. addon:FormatSignedMoney(96.9 - 459) .. " (yours cost more)", true)
@@ -25,6 +26,7 @@ bench.HasNot("chat stays one line", chat, "today's", true)
 -- Close to today's prices: no second line
 addon:StartCraftBatch(recipe, { crafts = 1 })
 addon:CraftBatchResult(999100, recipe, { itemID = KEY, quantity = 2 }, { qty = 2, unitCost = 235 }, { [BAR] = 1 })
+bench.Advance(0.1) -- the notice comes a frame later
 bench.HasNot("no line when they're close", table.concat(bench.Screen(), "\n"), "At today's prices", true)
 -- Coin icons on: the chat line keeps the icons' |T codes (lowering the
 -- whole line broke them into text: "+4interface\moneyframe\ui-silvericon",
@@ -36,6 +38,7 @@ print = function(...) rawLine = table.concat({ ... }, " ") return benchPrint(...
 addon:StartCraftBatch(recipe, { crafts = 1 })
 bench.Chat()
 addon:CraftBatchResult(999100, recipe, { itemID = KEY, quantity = 2 }, { qty = 2, unitCost = 520 }, { [BAR] = 1 })
+bench.Advance(0.1) -- the notice comes a frame later
 print = benchPrint
 local last = rawLine or ""
 bench.Check("coin icon code intact in chat", last:find("|TInterface", 1, true) ~= nil and last:find("|t", 1, true) ~= nil, last)
