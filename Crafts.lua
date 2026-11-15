@@ -1634,6 +1634,10 @@ local function CheckMaterials(state, needs, crafts)
         if addon.isForever then
             local bags = C_Item.GetItemCount(itemID) or 0
             have, banked = bags, math.max(have - bags, 0)
+            -- Use what's in the bank off: the bank is left alone, so it
+            -- isn't where to get it. The button said "In the bank" for 9
+            -- Linen Cloth to buy (user, 2026-11-14)
+            if not addon:UsesBank(addon.charKey) then banked = 0 end
         end
         local possible = math.floor(have / per)
         if possible < crafts then
