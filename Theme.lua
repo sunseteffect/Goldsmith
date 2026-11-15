@@ -252,13 +252,30 @@ function addon:Colorize(text, name)
     return string.format("|cff%02x%02x%02x%s|r", r * 255, g * 255, b * 255, text)
 end
 
+-- Clients whose writing Friz Quadrata and Arial Narrow don't have: the
+-- game's own fonts for that language instead. Names from the game (至暗之夜,
+-- a profession) showed as boxes on a zhTW client (TCBeliever, GitHub,
+-- 2026-11-14). Friz → the game's standard font, Arial Narrow → its chat font.
+local OWN_SCRIPT = { zhTW = true, zhCN = true, koKR = true, ruRU = true }
+local function ClientFont(path)
+    if not OWN_SCRIPT[GetLocale()] then return path end
+    if path:find("FRIZQT__", 1, true) then
+        return STANDARD_TEXT_FONT or path
+    end
+    if path:find("ARIALN", 1, true) then
+        local chat = ChatFontNormal and ChatFontNormal:GetFont()
+        return chat or STANDARD_TEXT_FONT or path
+    end
+    return path
+end
+
 -- Font object for a theme font, created on first use
 local fontObjects = {}
 function addon:Font(name)
     if fontObjects[name] then return fontObjects[name] end
     local spec = addon.theme.fonts[name] or addon.theme.fonts.body
     local font = CreateFont("GoldsmithFont_" .. name)
-    font:SetFont(spec[1], spec[2], spec[3])
+    font:SetFont(ClientFont(spec[1]), spec[2], spec[3])
     font:SetTextColor(addon:Color(spec[4]))
     fontObjects[name] = font
     return font

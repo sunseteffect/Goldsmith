@@ -587,19 +587,23 @@ local function Refresh(v)
     -- leaves some over for tomorrow; counting on one leaves you stuck
     -- mid-queue (user, 2026-10-16: "1026 concentration looks wrong" with
     -- 1000). Rows past what the character has are marked (row.concShort).
-    local byProf, order, have = {}, {}, {}
+    -- Grouped by each recipe's own concentration: an older expansion's
+    -- version of a profession has its own (tflo, GitHub, 2026-11-14)
+    local byProf, order, have, profOf = {}, {}, {}, {}
     for _, row in ipairs(q.rows) do
         local full = RowConcentration(row)
         local prof = full and row.recipe and row.recipe.profession
         row.concShort = nil
         if prof then
-            if not byProf[prof] then
-                table.insert(order, prof)
-                have[prof] = (key == addon.charKey and addon:GetConcentration(prof))
-                    or addon:GetCharacterConcentration(key, prof)
+            local group = prof .. "|" .. tostring(addon:RecipeConcentrationCurrency(row.recipe.recipeID))
+            if not byProf[group] then
+                table.insert(order, group)
+                profOf[group] = prof
+                have[group] = (key == addon.charKey and addon:GetConcentration(prof, row.recipe))
+                    or addon:GetCharacterConcentration(key, prof, row.recipe)
             end
-            byProf[prof] = (byProf[prof] or 0) + full
-            if have[prof] and byProf[prof] > have[prof] then row.concShort = true end
+            byProf[group] = (byProf[group] or 0) + full
+            if have[group] and byProf[group] > have[group] then row.concShort = true end
         end
     end
     -- Rows whose profit differs from the to-do's because of what you
@@ -624,11 +628,11 @@ local function Refresh(v)
     local noTotals = empty or not crafts
     v.cost.value:SetText(noTotals and "-" or (Money(q.cost) .. (q.complete and "" or "+")))
     local parts, short = {}, false
-    for _, prof in ipairs(order) do
-        local over = have[prof] and byProf[prof] > have[prof]
+    for _, group in ipairs(order) do
+        local over = have[group] and byProf[group] > have[group]
         short = short or over
-        table.insert(parts, addon:ProfessionIconText(prof) .. string.format("%d", math.floor(byProf[prof] + 0.5))
-            .. (over and string.format(" (you have %d)", math.floor(have[prof])) or ""))
+        table.insert(parts, addon:ProfessionIconText(profOf[group]) .. string.format("%d", math.floor(byProf[group] + 0.5))
+            .. (over and string.format(" (you have %d)", math.floor(have[group])) or ""))
     end
     v.cost.note:SetText(#parts > 0 and ("needs " .. table.concat(parts, " + ") .. " concentration") or "")
     v.cost.note:SetTextColor(addon:Color(short and "warning" or "muted"))

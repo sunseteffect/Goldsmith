@@ -260,7 +260,12 @@ function methods:IsMouseOver() return false end
 function methods:IsMouseEnabled() return true end
 function methods:GetFrameLevel() return 1 end
 function methods:GetFrameStrata() return "MEDIUM" end
-function methods:GetFont() return "Fonts\\FRIZQT__.TTF", 12, "" end
+function methods:SetFont(path, size, flags) self._font = { path, size, flags } return true end
+function methods:GetFont()
+    local f = self._font
+    if f then return f[1], f[2], f[3] end
+    return "Fonts\\FRIZQT__.TTF", 12, ""
+end
 function methods:GetTextColor() return 1, 1, 1, 1 end
 function methods:GetVertexColor() return 1, 1, 1, 1 end
 function methods:GetTexture() return self._texture end

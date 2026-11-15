@@ -168,6 +168,26 @@ local function SnapshotConcentration()
             end
         end
     end
+    -- Older expansions' concentration too, by currency, for the recipes
+    -- known that spend it (GetCharacterConcentration with a recipe)
+    local byCurrency = {}
+    for recipeID, stats in pairs(c.recipeStats or {}) do
+        local id = stats.concentrationCurrencyID
+        if id and id > 0 and not byCurrency[id] and c.knownRecipes and c.knownRecipes[recipeID] then
+            local ok, info = pcall(C_CurrencyInfo.GetCurrencyInfo, id)
+            if ok and info then
+                byCurrency[id] = {
+                    currencyID = id,
+                    current = info.quantity or 0,
+                    max = info.maxQuantity or 0,
+                    cycleMS = info.rechargingCycleDurationMS,
+                    perCycle = info.rechargingAmountPerCycle,
+                    time = time(),
+                }
+            end
+        end
+    end
+    c.concentrationByCurrency = byCurrency
 end
 
 local function PruneDays(days)
@@ -811,9 +831,15 @@ end
 -- A character's concentration for a profession, worked out to now from its
 -- last saved amount and recharge rate. Returns current, max, minutes until
 -- full (nil if full or unknown) and when it was last saved, or nil.
-function addon:GetCharacterConcentration(charKey, profession)
+-- recipe: that recipe's own concentration (an older expansion's has its
+-- own, see GetConcentration), or nil if it hasn't been saved
+function addon:GetCharacterConcentration(charKey, profession, recipe)
     local c = GoldsmithDB.characters[charKey]
     local snap = c and c.concentration[profession]
+    local id = recipe and addon:RecipeConcentrationCurrency(recipe.recipeID)
+    if id and not (snap and snap.currencyID == id) then
+        snap = c and c.concentrationByCurrency and c.concentrationByCurrency[id]
+    end
     if not snap then return nil end
 
     local current = snap.current

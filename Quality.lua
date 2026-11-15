@@ -945,11 +945,33 @@ end
 -- Professions with no concentration at all (their recipes never use it)
 addon.NO_CONCENTRATION = { Cooking = true }
 --
+-- The concentration currency a recipe spends, from its stats (any
+-- character's: the currency is the same for everyone), or nil
+function addon:RecipeConcentrationCurrency(recipeID)
+    if not recipeID then return nil end
+    local function From(c)
+        local stats = c and c.recipeStats and c.recipeStats[recipeID]
+        local id = stats and stats.concentrationCurrencyID
+        if id and id > 0 then return id end
+    end
+    local id = From(addon:StatsChar()) or From(addon.char)
+    if id then return id end
+    for _, c in pairs(GoldsmithDB.characters or {}) do
+        id = From(c)
+        if id then return id end
+    end
+end
+
 -- Your current concentration for a profession, read from its currency.
 -- Returns current, max, and minutes until full (nil if unknown), or nil if
 -- the profession's concentration currency isn't known yet (open it once).
-function addon:GetConcentration(profession)
-    local currencyID = GoldsmithDB.concentrationCurrency and GoldsmithDB.concentrationCurrency[profession]
+-- recipe: that recipe's own concentration. Each expansion's version of a
+-- profession has its own, and the profession's is the current expansion's:
+-- a War Within craft was checked against Midnight's 138 while The War
+-- Within's was 1000 (tflo, GitHub, 2026-11-14).
+function addon:GetConcentration(profession, recipe)
+    local currencyID = recipe and addon:RecipeConcentrationCurrency(recipe.recipeID)
+        or GoldsmithDB.concentrationCurrency and GoldsmithDB.concentrationCurrency[profession]
     if not currencyID or currencyID == 0 then return nil end
     local ok, info = pcall(C_CurrencyInfo.GetCurrencyInfo, currencyID)
     if not ok or not info then return nil end

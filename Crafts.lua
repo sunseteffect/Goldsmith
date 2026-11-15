@@ -1946,7 +1946,7 @@ local function CraftStepState(node, state, totals)
         -- The full cost to start each craft, for every craft: ingenuity's
         -- refund is luck, not promised (planned 3 with 1000, only 2 started
         -- at 340 each; user 2026-10-16)
-        local current = addon:GetConcentration(recipe.profession) or 0
+        local current = addon:GetConcentration(recipe.profession, recipe) or 0
         local full = row.scenario.concentration or row.concentration or 0
         local expected = math.max(row.concentration or full, 1)
         local affordable = full > 0 and math.floor(current / full) or math.huge
@@ -2019,7 +2019,7 @@ local function CraftState(p, tierInfo, plan, totals)
     -- have opened it to say so (user, 2026-10-24). Concentration can be
     -- read with the profession closed.
     if tierInfo and tierInfo.concentrate == true and not ProfessionOpen(recipe) then
-        local current = addon:GetConcentration(recipe.profession)
+        local current = addon:GetConcentration(recipe.profession, recipe)
         local full = tierInfo.scenario and tierInfo.scenario.concentration or tierInfo.concentration
         if current and full and full > 0 and current < full then
             table.insert(state.blockers, string.format("Not enough concentration: %d to start, you have %d.",
@@ -2088,7 +2088,7 @@ local function CraftState(p, tierInfo, plan, totals)
     -- are the expected cost
     state.concentrate = tierInfo and tierInfo.concentrate == true
     if state.concentrate then
-        local current = addon:GetConcentration(recipe.profession) or 0
+        local current = addon:GetConcentration(recipe.profession, recipe) or 0
         local full = tierInfo.scenario and tierInfo.scenario.concentration or tierInfo.concentration
         local expected = math.max(tierInfo.concentration or full, 1)
         local affordable = full > 0 and math.floor(current / full) or math.huge
@@ -3033,8 +3033,8 @@ local function CreatePlanScreen(parent)
         local concLimit, leftover
         screen.concNow = nil
         if tierInfo and tierInfo.concentrate then
-            local current = p.charKey == addon.charKey and addon:GetConcentration(recipe.profession)
-                or addon:GetCharacterConcentration(p.charKey, recipe.profession)
+            local current = p.charKey == addon.charKey and addon:GetConcentration(recipe.profession, recipe)
+                or addon:GetCharacterConcentration(p.charKey, recipe.profession, recipe)
             local full = tierInfo.scenario and tierInfo.scenario.concentration or tierInfo.concentration
             if current and full then
                 local affordable = full > 0 and math.floor(current / full) or math.huge

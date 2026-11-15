@@ -726,12 +726,15 @@ end
 
 -- Concentration a character has now for a profession, less what this plan
 -- has already given out (ctx.conc). Unknown (never read) counts as no limit.
-local function ConcAvailable(ctx, key, profession)
-    local id = key .. "|" .. tostring(profession)
+-- recipe: its own expansion's concentration (each has its own), shared only
+-- with crafts that spend the same
+local function ConcAvailable(ctx, key, profession, recipe)
+    local currency = recipe and addon:RecipeConcentrationCurrency(recipe.recipeID)
+    local id = key .. "|" .. tostring(profession) .. "|" .. tostring(currency)
     if ctx.conc[id] == nil then
         local current
-        if key == addon.charKey then current = addon:GetConcentration(profession) end
-        if not current then current = addon:GetCharacterConcentration(key, profession) end
+        if key == addon.charKey then current = addon:GetConcentration(profession, recipe) end
+        if not current then current = addon:GetCharacterConcentration(key, profession, recipe) end
         ctx.conc[id] = current or math.huge
     end
     return ctx.conc[id], id
@@ -757,7 +760,7 @@ local function LimitByConcentration(node, ctx, outputQty)
     local row = best and best.method == "Craft" and best.tierRow
     if not (row and row.concentrate and row.concentration and row.concentration > 0) or node.toGet <= 0 then return end
     local key = best.crafterKey or StatsKey()
-    local available, id = ConcAvailable(ctx, key, best.recipe.profession)
+    local available, id = ConcAvailable(ctx, key, best.recipe.profession, best.recipe)
     local sure = SurePerCraft(best.recipe, outputQty)
     local wanted = WholeCrafts(node.toGet, sure)
     local full = row.scenario and row.scenario.concentration or row.concentration
@@ -1043,7 +1046,7 @@ function addon:BuildPlan(recipe, quantity, useOnHand, tier, pool)
     -- The craft's own concentration comes first from its crafter's
     -- (materials of the same profession on the same character share it)
     if tier and tier.concentrate and tier.concentration then
-        local available, id = ConcAvailable(ctx, StatsKey(), recipe.profession)
+        local available, id = ConcAvailable(ctx, StatsKey(), recipe.profession, recipe)
         -- At the full cost, like CraftsThatFit
         local full = tier.scenario and tier.scenario.concentration or tier.concentration
         if available ~= math.huge then ctx.conc[id] = available - full * crafts end
@@ -1427,12 +1430,13 @@ end
 local HELD_PICK_MIN_SAVING = 10000 -- 1g: not worth switching for less
 
 -- Concentration now for the character whose stats are in use
--- (WithCharacter): live for you, worked out to now for an alt
-local function ConcentrationNow(profession)
+-- (WithCharacter): live for you, worked out to now for an alt. recipe: its
+-- own expansion's concentration
+local function ConcentrationNow(profession, recipe)
     local char = addon:StatsChar()
-    if char == addon.char then return (addon:GetConcentration(profession)) end
+    if char == addon.char then return (addon:GetConcentration(profession, recipe)) end
     for key, c in pairs(GoldsmithDB.characters) do
-        if c == char then return (addon:GetCharacterConcentration(key, profession)) end
+        if c == char then return (addon:GetCharacterConcentration(key, profession, recipe)) end
     end
 end
 
@@ -1496,7 +1500,7 @@ function addon:PreferHeldMix(recipe, tierInfo, quantity)
     -- 2026-10-18). A mix that covers every craft keeps out one that
     -- doesn't, and one that can't is swapped for one that can when that
     -- earns more.
-    local current = tierInfo.concentrate and ConcentrationNow(recipe.profession)
+    local current = tierInfo.concentrate and ConcentrationNow(recipe.profession, recipe)
     local function Full(e) return e.scenario and e.scenario.concentration or e.concentration end
     local function Startable(e)
         local full = Full(e)

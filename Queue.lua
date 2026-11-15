@@ -680,7 +680,7 @@ function addon:BuildQueue(charKey)
                     if mine and plain and not plain.concentrate then
                         local want = { recipe = row.p.recipe, charKey = charKey, tier = row.p.tier, concentrate = true }
                         local conc = addon:WithCharacter(charKey, addon.FindTierInfo, want)
-                        local have = addon:GetConcentration(row.recipe.profession)
+                        local have = addon:GetConcentration(row.recipe.profession, row.recipe)
                         if conc and conc.concentrate and conc.cost and plain.cost and conc.cost < plain.cost
                             and have and have >= (conc.concentration or math.huge) then
                             row.tierInfo, row.p.concentrate = conc, true
