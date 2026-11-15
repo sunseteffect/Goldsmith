@@ -60,6 +60,12 @@ local filled = table.concat(Hover(CRATE), "\n")
 bench.Has("filled: crate 5s + fill 15s", filled, "cost filled " .. addon:FormatMoney(2000))
 bench.HasNot("filled: no break-even", filled, "break-even filled")
 addon.GetOwnCost = ownCost
+-- One you haven't bought: from the crate's AH price
+GoldsmithDB.ownScan.prices[CRATE] = { 700, 700, 50 }
+addon:DataChanged()
+bench.Has("filled, not yours: AH 7s + fill 15s", table.concat(Hover(CRATE), "\n"), "cost filled " .. addon:FormatMoney(2200))
+GoldsmithDB.ownScan.prices[CRATE] = nil
+addon:DataChanged()
 
 -- Short tooltips: the one line
 addon:SetSetting("tooltips", "short")
