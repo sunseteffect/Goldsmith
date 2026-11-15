@@ -52,13 +52,13 @@ bench.SetBags({ [2453] = 12 })
 bench.Equal("in bags: full cost", addon:CrateFillCosts("Waylaid Crate: Journeyman Herbs")[2].cost, 2000)
 bench.Has("in bags: says so", table.concat(Hover(CRATE), "\n"), "10 Bruiseweed (in bags)")
 
--- The crate filled: what it cost you plus the cheapest fill, and its
--- break-even after the 5% cut
+-- The crate filled: what it cost you plus the cheapest fill. No
+-- break-even: a filled crate can't go on the AH
 local ownCost = addon.GetOwnCost
 addon.GetOwnCost = function() return 500, "paid", {} end
 local filled = table.concat(Hover(CRATE), "\n")
 bench.Has("filled: crate 5s + fill 15s", filled, "cost filled " .. addon:FormatMoney(2000))
-bench.Has("filled: break-even", filled, "break-even filled")
+bench.HasNot("filled: no break-even", filled, "break-even filled")
 addon.GetOwnCost = ownCost
 
 -- Short tooltips: the one line

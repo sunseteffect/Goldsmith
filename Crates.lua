@@ -66,8 +66,6 @@ local CRATES = {
         { 6, 14343, "Small Brilliant Shard" }, { 2, 14344, "Large Brilliant Shard" } },
 }
 
-local AH_CUT = 0.05
-
 local function FormatGold(copper)
     if addon.isForever then return addon:FormatMoney(copper) end
     return string.format("%.2fg", copper / 10000)
@@ -109,10 +107,10 @@ function addon:CrateFillCosts(itemName)
 end
 
 -- "to fill" with the cheapest way, then every way one per line, then what
--- the crate costs filled and its break-even after the AH cut (user,
--- 2026-11-14: "i want to try and sell completed crate so i need to know my
--- total cost"). crateCost: what the crate itself cost you. short: the first
--- line only.
+-- the crate costs filled (user, 2026-11-14: "i want to try and sell
+-- completed crate so i need to know my total cost"). No break-even: a
+-- filled crate can't go on the AH, so there's no cut. crateCost: what the
+-- crate itself cost you. short: the first line only.
 function addon:AddCrateTooltipLines(tooltip, itemName, short, crateCost)
     local list = addon:CrateFillCosts(itemName)
     if not list then return end
@@ -135,8 +133,6 @@ function addon:AddCrateTooltipLines(tooltip, itemName, short, crateCost)
     end
     if best.cost and crateCost then
         local total = crateCost + best.cost
-        tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r cost filled", FormatGold(total), 1, 1, 1, 1, 1, 1)
-        tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r break-even filled", FormatGold(total / (1 - AH_CUT)),
-            1, 1, 1, 1, 0.82, 0)
+        tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r cost filled", FormatGold(total), 1, 1, 1, 1, 0.82, 0)
     end
 end
