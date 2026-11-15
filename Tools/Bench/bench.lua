@@ -133,6 +133,10 @@ local function LoadSaved()
     -- Scenarios compare money as text: coin icons (a display setting you
     -- may have on in game) start off; coin-icons.lua turns them on
     if saved and saved.settings then saved.settings.coinIcons = nil end
+    -- The header's expansion filter as you left it in game hid History's
+    -- sales from four scenarios (2026-11-14): scenarios start with every
+    -- expansion showing
+    if saved and saved.ui2 then saved.ui2.expansions = nil end
     return saved
 end
 B.LoadSaved = LoadSaved

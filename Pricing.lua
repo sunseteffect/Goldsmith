@@ -3828,7 +3828,7 @@ local function AddTooltipLines(tooltip, data)
             1, 1, 1, r, g, b)
     end
     -- A Waylaid Crate (Forever): what filling it costs
-    addon:AddCrateTooltipLines(tooltip, name, short)
+    addon:AddCrateTooltipLines(tooltip, name, short, own)
     if short then return end
 
     if recipe then

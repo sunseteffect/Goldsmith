@@ -3,7 +3,11 @@ local addon = _G.Goldsmith or {}
 -- Forever's Waylaid Crates: fill one with any one of its listed materials
 -- and hand it in for Merchant's Favor. The tooltip says what each way of
 -- filling it costs at today's prices, cheapest first (user, 2026-11-11:
--- "so i know how much it costs in materials to fill up"). The game doesn't
+-- "so i know how much it costs in materials to fill up"). The full cost:
+-- what's in your bags counts at today's price too, as it could be sold
+-- (10 Tin Ore held made Tin look cheaper than Copper, and the 16s 50c
+-- didn't match the AH's 33s; user, 2026-11-14: "show full cost"). The
+-- game doesn't
 -- give the list to addons; it's from method.gg's crate table (2026-11-03).
 -- IDs are checked against the name in game; a wrong one falls back to
 -- looking the name up.
@@ -62,6 +66,8 @@ local CRATES = {
         { 6, 14343, "Small Brilliant Shard" }, { 2, 14344, "Large Brilliant Shard" } },
 }
 
+local AH_CUT = 0.05
+
 local function FormatGold(copper)
     if addon.isForever then return addon:FormatMoney(copper) end
     return string.format("%.2fg", copper / 10000)
@@ -77,8 +83,8 @@ local function MaterialID(id, name)
 end
 
 -- The ways to fill a crate by its item name, cheapest first: { count, name,
--- itemID, cost of what you'd buy, have in bags }. cost is nil without a
--- price. Nil for anything that isn't a Waylaid Crate.
+-- itemID, cost of all of it at today's price, have in bags }. cost is nil
+-- without a price. Nil for anything that isn't a Waylaid Crate.
 function addon:CrateFillCosts(itemName)
     local kind = itemName and itemName:match("^Waylaid Crate: (.+)$")
     local options = kind and CRATES[kind]
@@ -90,8 +96,7 @@ function addon:CrateFillCosts(itemName)
         -- Bags only: the crate is filled from your bags
         local have = math.min(C_Item.GetItemCount(id, false) or 0, count)
         local price = addon:GetAHPrice(id, true)
-        local buy = count - have
-        local cost = (buy == 0 and 0) or (price and price * buy) or nil
+        local cost = price and price * count or nil
         table.insert(list, { count = count, name = name, itemID = id, cost = cost, have = have })
     end
     -- Cheapest first; no price last
@@ -103,19 +108,22 @@ function addon:CrateFillCosts(itemName)
     return list
 end
 
--- "to fill" with the cheapest way, then every way one per line. short: the
--- first line only.
-function addon:AddCrateTooltipLines(tooltip, itemName, short)
+-- "to fill" with the cheapest way, then every way one per line, then what
+-- the crate costs filled and its break-even after the AH cut (user,
+-- 2026-11-14: "i want to try and sell completed crate so i need to know my
+-- total cost"). crateCost: what the crate itself cost you. short: the first
+-- line only.
+function addon:AddCrateTooltipLines(tooltip, itemName, short, crateCost)
     local list = addon:CrateFillCosts(itemName)
     if not list then return end
     local best = list[1]
     local function Label(o)
-        if o.have > 0 then return string.format("%d %s (have %d)", o.count, o.name, o.have) end
+        if o.have >= o.count then return string.format("%d %s (in bags)", o.count, o.name) end
+        if o.have > 0 then return string.format("%d %s (buy %d)", o.count, o.name, o.count - o.have) end
         return string.format("%d %s", o.count, o.name)
     end
     local function Cost(o)
         if not o.cost then return "no price" end
-        if o.cost == 0 then return "in bags" end
         return FormatGold(o.cost)
     end
     tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r cost to fill",
@@ -124,5 +132,11 @@ function addon:AddCrateTooltipLines(tooltip, itemName, short)
     for i, o in ipairs(list) do
         local c = i == 1 and 1 or 0.8
         tooltip:AddDoubleLine("  " .. Label(o), Cost(o), c, c, c, c, c, c)
+    end
+    if best.cost and crateCost then
+        local total = crateCost + best.cost
+        tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r cost filled", FormatGold(total), 1, 1, 1, 1, 1, 1)
+        tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r break-even filled", FormatGold(total / (1 - AH_CUT)),
+            1, 1, 1, 1, 0.82, 0)
     end
 end

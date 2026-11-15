@@ -1,6 +1,7 @@
--- A Waylaid Crate's tooltip says what filling it costs, cheapest way first,
--- counting what's already in your bags (user, 2026-11-11: "so i know how
--- much it costs in materials to fill up").
+-- A Waylaid Crate's tooltip says what filling it costs, cheapest way first
+-- (user, 2026-11-11: "so i know how much it costs in materials to fill
+-- up"), at the full cost: what's in your bags counts at today's price too
+-- (user, 2026-11-14: "show full cost"). Then the crate's cost filled.
 local bench = dofile(BENCH_DIR .. "bench.lua")
 local callbacks = {}
 TooltipDataProcessor.AddTooltipPostCall = function(_, fn) table.insert(callbacks, fn) end
@@ -38,16 +39,27 @@ local count = 0
 for _, l in ipairs(shown) do if l:find("^  10 ") then count = count + 1 end end
 bench.Equal("every way one per line", count, 5)
 
--- 6 Bruiseweed in bags: only 4 to buy, now the cheapest
+-- 6 Bruiseweed in bags: still the full cost, so Wild Steelbloom stays cheapest
 bench.SetBags({ [2453] = 6 })
 list = addon:CrateFillCosts("Waylaid Crate: Journeyman Herbs")
-bench.Equal("bags count: cheapest now", list[1].name, "Bruiseweed")
-bench.Equal("bags count: 4 to buy", list[1].cost, 800)
-bench.Equal("bags count: have 6", list[1].have, 6)
+bench.Equal("bags: cheapest unchanged", list[1].name, "Wild Steelbloom")
+bench.Equal("bags: full cost, 10 at 2s", list[2].cost, 2000)
+bench.Equal("bags: have 6", list[2].have, 6)
+bench.Has("bags: says how many to buy", table.concat(Hover(CRATE), "\n"), "10 Bruiseweed (buy 4)")
 
--- Enough in bags: costs nothing more
+-- Enough in bags: still its price, marked in bags
 bench.SetBags({ [2453] = 12 })
-bench.Equal("in bags: nothing to buy", addon:CrateFillCosts("Waylaid Crate: Journeyman Herbs")[1].cost, 0)
+bench.Equal("in bags: full cost", addon:CrateFillCosts("Waylaid Crate: Journeyman Herbs")[2].cost, 2000)
+bench.Has("in bags: says so", table.concat(Hover(CRATE), "\n"), "10 Bruiseweed (in bags)")
+
+-- The crate filled: what it cost you plus the cheapest fill, and its
+-- break-even after the 5% cut
+local ownCost = addon.GetOwnCost
+addon.GetOwnCost = function() return 500, "paid", {} end
+local filled = table.concat(Hover(CRATE), "\n")
+bench.Has("filled: crate 5s + fill 15s", filled, "cost filled " .. addon:FormatMoney(2000))
+bench.Has("filled: break-even", filled, "break-even filled")
+addon.GetOwnCost = ownCost
 
 -- Short tooltips: the one line
 addon:SetSetting("tooltips", "short")
