@@ -334,7 +334,7 @@ local function PostedLately()
     for i = #all, 1, -1 do
         local e = all[i]
         if e.timestamp and e.timestamp >= since and e.type == "COST" and e.kind == "DEPOSIT" and e.item then
-            local c = e.character and GoldsmithDB.characters[e.character .. "-" .. (e.realm or "")]
+            local c = e.character and GoldsmithDB.characters[addon:CharKeyFor(e.character, e.realm or "")]
             if not (c and c.auctionsTime and c.auctionsTime >= e.timestamp + POST_SEEN_AFTER) then
                 names[e.item] = true
             end
@@ -2193,7 +2193,7 @@ History = function(filters)
     for i, e in ipairs(addon.ledger:getAll()) do
         if i % 64 == 0 then addon:Yield() end
         local kind = e.type == "REVENUE" and "Sale" or (e.kind == "DEPOSIT" and "Deposit" or "Purchase")
-        local character = e.character and e.realm and (e.character .. "-" .. e.realm)
+        local character = e.character and e.realm and addon:CharKeyFor(e.character, e.realm)
         if Keep(kind, e.timestamp, e.item, e.profession, character, e.itemID) then
             local row = {
                 kind = kind, time = e.timestamp, item = e.item, itemID = e.itemID, qty = e.quantity,
@@ -2310,7 +2310,7 @@ History = function(filters)
     local days = {}
     for i, e in ipairs(GoldsmithDB.gathered or {}) do
         if i % 64 == 0 then addon:Yield() end
-        local character = e.character and e.realm and (e.character .. "-" .. e.realm)
+        local character = e.character and e.realm and addon:CharKeyFor(e.character, e.realm)
         local profession = addon:GetProfessionForItemName(e.name) or "Unassigned"
         -- What came out of a box you crafted: an "Opened" row a day per box,
         -- with what the box cost (user, 2026-10-11: they weren't free)
@@ -2393,10 +2393,11 @@ function addon:GetHistoryCharacters()
     local seen, list = {}, {}
     for _, e in ipairs(addon.ledger:getAll()) do
         if e.character and e.realm then
-            local key = e.character .. "-" .. e.realm
+            local key = addon:CharKeyFor(e.character, e.realm)
             if not seen[key] then
                 seen[key] = true
-                table.insert(list, { key = key, name = e.character })
+                local c = GoldsmithDB.characters[key]
+                table.insert(list, { key = key, name = c and c.name or e.character })
             end
         end
     end

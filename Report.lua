@@ -248,8 +248,9 @@ local function Anonymize(text)
         if name and name ~= "" then names[name] = true end
         if realm and realm ~= "" then realms[realm] = true end
     end
-    local me = UnitName and UnitName("player")
+    local me, first = addon:PlayerName()
     if me then names[me] = true end
+    if first then names[first] = true end
     local realm = GetRealmName and GetRealmName()
     if realm then realms[realm] = true; realms[realm:gsub("%s", "")] = true end
     local function ReplaceAll(set, with)

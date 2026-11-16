@@ -68,7 +68,7 @@ function addon:CreateLedger(store)
                 quantity = qty,
                 totalCopper = totalCopper,
                 timestamp = time(),
-                character = UnitName("player"),
+                character = addon:PlayerName(),
                 realm = GetRealmName(),
             }
             for k, v in pairs(extra or {}) do e[k] = v end
@@ -98,7 +98,7 @@ function addon:CreateLedger(store)
                 quantity = qty,
                 totalCopper = totalCopper,
                 timestamp = time(),
-                character = UnitName("player"),
+                character = addon:PlayerName(),
                 realm = GetRealmName(),
             }
             for k, v in pairs(extra or {}) do e[k] = v end

@@ -230,7 +230,7 @@ local function Crafting()
 end
 
 local function Note(text, result)
-    table.insert(recent, { time = time(), text = text, result = result, character = UnitName("player") })
+    table.insert(recent, { time = time(), text = text, result = result, character = addon:PlayerName() })
     if #recent > RECENT_LIMIT then table.remove(recent, 1) end
 end
 
@@ -274,7 +274,7 @@ function addon:RecordGathered(itemID, qty, link, box, payout)
     if not name or qty <= 0 or not IsMaterial(itemID, name) then return false end
     local now = time()
     local day = date("%Y-%m-%d", now)
-    local character, realm = UnitName("player"), GetRealmName()
+    local character, realm = addon:PlayerName(), GetRealmName()
     local key = Key(day, character, realm, itemID, box, payout)
     local e = lookup[key]
     if not e then
@@ -355,7 +355,7 @@ function addon:ListGathered()
     print("  Latest loot messages:")
     for _, r in ipairs(recent) do
         print(string.format("    %s  %s%s: %s", date("%m-%d %H:%M:%S", r.time),
-            r.character and r.character ~= UnitName("player") and (r.character .. ", ") or "", r.text, r.result))
+            r.character and r.character ~= addon:PlayerName() and (r.character .. ", ") or "", r.text, r.result))
     end
 end
 

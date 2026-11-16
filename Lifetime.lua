@@ -101,7 +101,7 @@ local function Accumulate(agg, e, estimateCost)
     if not agg.first or t < agg.first then agg.first = t end
     local day = date("%Y-%m-%d", t)
     local prof = Group(agg.byProf, e.profession or "Unassigned")
-    local char = Group(agg.byChar, (e.character and e.realm) and (e.character .. "-" .. e.realm) or "?")
+    local char = Group(agg.byChar, (e.character and e.realm) and addon:CharKeyFor(e.character, e.realm) or "?")
     local qty, gold = e.quantity or 0, e.totalCopper or 0
     if e.type == "REVENUE" then
         agg.sales, agg.units, agg.revenue = agg.sales + 1, agg.units + qty, agg.revenue + gold

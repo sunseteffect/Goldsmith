@@ -94,7 +94,7 @@ end
 local function Prepare(data)
     local seconds = time() - data.made
     local days = math.floor((Noon(time()) - Noon(data.made)) / 86400 + 0.5)
-    local name, realm = UnitName("player") or "You", GetRealmName() or ""
+    local name, realm = addon:PlayerName() or "You", GetRealmName() or ""
     local function Text(s)
         local y, m, d = s:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
         if y then

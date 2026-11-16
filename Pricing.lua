@@ -3453,15 +3453,15 @@ end
 -- 1.32g, all gathered by the seller).
 local function SellerCost(itemName, units, itemID)
     if not itemID then return nil end
-    local me, realm = UnitName("player"), GetRealmName()
+    local realm = GetRealmName()
     local list = {}
     for _, e in ipairs(addon.ledger:index().purchases[itemName] or {}) do
-        if e.itemID == itemID and e.character == me and (not e.realm or e.realm == realm) and (e.quantity or 0) > 0 then
+        if e.itemID == itemID and addon:IsMyEntry(e) and (e.quantity or 0) > 0 then
             list[#list + 1] = { time = e.timestamp or 0, qty = e.quantity, each = (e.totalCopper or 0) / e.quantity }
         end
     end
     for _, e in ipairs(addon.GatheredIndex and addon:GatheredIndex()[itemName] or {}) do
-        if e.itemID == itemID and e.character == me and e.realm == realm and (e.qty or 0) > 0 then
+        if e.itemID == itemID and e.realm == realm and addon:IsMyEntry(e) and (e.qty or 0) > 0 then
             local each, free = 0, true
             if e.box then
                 each, free = (e.cost and (e.costQty or 0) > 0) and e.cost / e.costQty or 0, false

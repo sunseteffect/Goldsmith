@@ -458,8 +458,9 @@ end
 -- (2026-10-19).
 -- Mailed to another of your characters: in their mailbox until they log in
 -- and take it (Forever has no warband bank, so cloth mailed to an alt
--- vanished from Goldsmith's count; user, 2026-10-21). Forever names can
--- have a surname ("Namo Dormammu"), so the first word is matched too.
+-- vanished from Goldsmith's count; user, 2026-10-21). Forever names have
+-- a surname ("Namo Dormammu"): FindOwnCharacter matches the full name, or
+-- the first name when only one of yours has it.
 local sendSnapshot = {}
 local function ReadSendItems()
     local items = {}
@@ -474,14 +475,7 @@ mailWatch:RegisterEvent("MAIL_SEND_INFO_UPDATE")
 mailWatch:SetScript("OnEvent", function() sendSnapshot = ReadSendItems() end)
 hooksecurefunc("SendMail", function(recipient)
     if type(recipient) ~= "string" or recipient == "" then return end
-    local who = (strsplit("-", recipient)):lower()
-    local first = who:match("^(%S+)")
-    local realm = GetRealmName()
-    local key
-    for k, c in pairs(GoldsmithDB.characters or {}) do
-        local name = c.name and c.name:lower()
-        if name and (name == who or name == first) and (not c.realm or c.realm == realm) then key = k end
-    end
+    local key = addon:FindOwnCharacter((strsplit("-", recipient)), GetRealmName())
     if not key or key == addon.charKey then return end
     local items = ReadSendItems()
     if #items == 0 then items = sendSnapshot end

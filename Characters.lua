@@ -40,8 +40,140 @@ end
 
 local GOLD_HISTORY_DAYS = 365
 
+-- Forever characters have a surname, and two of yours can share a first
+-- name: both were saved as one character (GitHub #6, 2026-11-16). The
+-- surname is UnitName's second result there; the unmodified name, so hiding
+-- surnames in the game's settings doesn't change who you are.
+function addon:HasSurnames()
+    return RegionalUniqueNamesEnabled ~= nil and RegionalUniqueNamesEnabled() == true
+end
+
+-- A unit's name, with the surname where the game has them. Second result:
+-- the first name alone.
+function addon:FullName(unit)
+    local first, surname = (UnitNameUnmodified or UnitName)(unit)
+    if not first then return nil end
+    if not addon:HasSurnames() or type(surname) ~= "string" or surname == "" then return first, first end
+    local consts = Constants and Constants.CharacterNameSeparatorConsts
+    local sep = consts and consts.CHARACTERNAME_SURNAME_SEPARATOR
+    if type(sep) ~= "string" or sep == "" then sep = " " end
+    if first:sub(-#(sep .. surname)) == sep .. surname then
+        return first, first:sub(1, #first - #(sep .. surname))
+    end
+    return first .. sep .. surname, first
+end
+
+function addon:PlayerName()
+    return addon:FullName("player")
+end
+
+-- False while the game hasn't given the surname yet (login waits for it)
+function addon:PlayerNameReady()
+    if not addon:HasSurnames() then return true end
+    local _, surname = (UnitNameUnmodified or UnitName)("player")
+    return type(surname) == "string" and surname ~= ""
+end
+
 function addon:CharKey()
-    return (UnitName("player") or "Unknown") .. "-" .. (GetRealmName() or "Unknown")
+    return (addon:PlayerName() or "Unknown") .. "-" .. (GetRealmName() or "Unknown")
+end
+
+-- The first word of a name: the first name of "Namo Dormammu"
+local function FirstName(name)
+    return name and name:match("^(%S+)") or name
+end
+
+-- The character a saved name belongs to. Records from before surnames hold
+-- the first name alone: they count for your one character with that first
+-- name. With two namesakes nobody can tell whose they were, so they stay
+-- under the first name (still in account totals).
+local keyFor = {}
+function addon:CharKeyFor(name, realm)
+    local key = name .. "-" .. realm
+    if not addon:HasSurnames() or GoldsmithDB.characters[key] then return key end
+    if keyFor[key] == nil then
+        local found, count = nil, 0
+        if not name:find("%s") then
+            for k, c in pairs(GoldsmithDB.characters) do
+                if c.realm == realm and c.name and c.name ~= name and FirstName(c.name) == name then
+                    found, count = k, count + 1
+                end
+            end
+        end
+        keyFor[key] = count == 1 and found or false
+    end
+    return keyFor[key] or key
+end
+
+-- Whether a ledger or gathering entry is the logged-in character's
+function addon:IsMyEntry(e)
+    return e.character ~= nil and addon:CharKeyFor(e.character, e.realm or GetRealmName()) == addon.charKey
+end
+
+-- Which of your characters a typed or shown name means (mail, trades), or
+-- nil. The full name wins; a first name alone counts only when exactly one
+-- of yours has it.
+function addon:FindOwnCharacter(name, realm)
+    if type(name) ~= "string" or name == "" then return nil end
+    local who = name:lower()
+    local first = FirstName(who)
+    local found, count = nil, 0
+    for k, c in pairs(GoldsmithDB.characters or {}) do
+        local theirs = c.name and c.name:lower()
+        if theirs and (not realm or not c.realm or c.realm == realm) then
+            if theirs == who then return k end
+            -- Saved before surnames, or typed without one
+            if (not theirs:find("%s") and theirs == first) or (not who:find("%s") and FirstName(theirs) == who) then
+                found, count = k, count + 1
+            end
+        end
+    end
+    return count == 1 and found or nil
+end
+
+-- Every saved mention of a character's key becomes the new key: queues,
+-- mail, learners, lots, settings. Also "key:..." (a key with more after it).
+local function RenameKey(old, new)
+    local seen, prefix = {}, old .. ":"
+    local function Fix(s)
+        if s == old then return new end
+        if type(s) == "string" and s:sub(1, #prefix) == prefix then return new .. s:sub(#old + 1) end
+        return s
+    end
+    local function Walk(t)
+        if seen[t] then return end
+        seen[t] = true
+        local moved
+        for k, v in pairs(t) do
+            if type(v) == "table" then
+                Walk(v)
+            elseif type(v) == "string" then
+                local fixed = Fix(v)
+                if fixed ~= v then t[k] = fixed end
+            end
+            if type(k) == "string" and Fix(k) ~= k then
+                moved = moved or {}
+                table.insert(moved, k)
+            end
+        end
+        for _, k in ipairs(moved or {}) do
+            local to = Fix(k)
+            if t[to] == nil then t[to] = t[k] end
+            t[k] = nil
+        end
+    end
+    Walk(GoldsmithDB)
+end
+
+-- The record saved under the first name alone becomes this character's.
+-- With two namesakes the first to log in takes it and the other starts
+-- fresh: professions, gold and stock are read again at every login.
+local function ClaimFirstNameRecord(key, name, first, realm)
+    local old = first .. "-" .. realm
+    local c = GoldsmithDB.characters[old]
+    if old == key or not c or (c.name and c.name ~= first) then return end
+    RenameKey(old, key)
+    c.name = name
 end
 
 local function NewCharacter(name, realm)
@@ -884,6 +1016,7 @@ end
 function addon:RemoveCharacter(charKey)
     if charKey == addon.charKey then return end
     GoldsmithDB.characters[charKey] = nil
+    keyFor = {}
     GoldsmithDB.settings = GoldsmithDB.settings or {}
     GoldsmithDB.settings.excluded = GoldsmithDB.settings.excluded or {}
     GoldsmithDB.settings.excluded[charKey] = true
@@ -973,9 +1106,14 @@ function addon:InitializeCharacters()
     GoldsmithDB.warbandGold = GoldsmithDB.warbandGold or {}
     GoldsmithDB.warbandStock = GoldsmithDB.warbandStock or {}
     local key = addon:CharKey()
+    local name, first = addon:PlayerName()
+    if not GoldsmithDB.characters[key] and name and name ~= first then
+        ClaimFirstNameRecord(key, name, first, GetRealmName())
+    end
+    keyFor = {}
     local c = GoldsmithDB.characters[key]
     if not c then
-        c = NewCharacter(UnitName("player"), GetRealmName())
+        c = NewCharacter(name, GetRealmName())
         GoldsmithDB.characters[key] = c
     end
     EnsureFields(c)

@@ -900,7 +900,7 @@ local tradeSeen
 
 local function ReadTrade()
     local seen = { gold = (GetTargetTradeMoney() or 0) - (GetPlayerTradeMoney() or 0), items = {}, got = {},
-        partner = UnitName("NPC") }
+        partner = addon:FullName("NPC") }
     local function Add(list, name, count, link)
         local itemID = link and C_Item.GetItemInfoInstant(link)
         if not itemID then
@@ -925,10 +925,7 @@ local function ReadTrade()
 end
 
 local function IsOwnCharacter(name)
-    for _, c in pairs(GoldsmithDB.characters) do
-        if c.name == name then return true end
-    end
-    return false
+    return addon:FindOwnCharacter(name) ~= nil
 end
 
 -- What an item in a trade is worth now: the AH, else a vendor, else nil
@@ -1009,12 +1006,19 @@ frame:RegisterEvent("MERCHANT_SHOW")
 frame:RegisterEvent("MERCHANT_CLOSED")
 
 frame:SetScript("OnEvent", function(self, event, arg1)
-    if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
+    if (event == "ADDON_LOADED" and arg1 == ADDON_NAME) or event == "PLAYER_LOGIN" then
+        self:UnregisterEvent("ADDON_LOADED")
+        -- Forever: no surname yet, so no telling which character this is.
+        -- Wait for login rather than save under the first name (GitHub #6).
+        if event == "ADDON_LOADED" and not addon:PlayerNameReady() then
+            self:RegisterEvent("PLAYER_LOGIN")
+            return
+        end
+        self:UnregisterEvent("PLAYER_LOGIN")
         -- Timed for /gsm perf
         local start = debugprofilestop()
         addon:Initialize()
         addon.initMs = debugprofilestop() - start
-        self:UnregisterEvent("ADDON_LOADED")
 
     elseif event == "COMMODITY_PURCHASE_SUCCEEDED" then
         if not pending then return end

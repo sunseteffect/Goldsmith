@@ -809,7 +809,7 @@ function addon:DumpSalvageStats()
     local okC, childInfo = pcall(C_TradeSkillUI.GetChildProfessionInfo)
     local dump = {
         time = time(),
-        character = UnitName("player"),
+        character = addon:PlayerName(),
         profession = okP and profInfo and CopyTable(profInfo) or nil,
         expansion = okC and childInfo and CopyTable(childInfo) or nil,
         hasSalvagableAPI = C_TradeSkillUI.GetSalvagableItemIDs ~= nil,
