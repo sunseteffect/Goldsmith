@@ -738,6 +738,25 @@ function addon:RepairAidProfession()
     GoldsmithDB.aidRepaired = true
 end
 
+-- Forever has no Inscription, but Silverleaf and Earthroot are on the
+-- built-in Inscription list, so buying or posting them there was saved
+-- as Inscription (user, 2026-11-15: "Inscription -1s" in Profit by
+-- profession). Real Forever only, not the /gsm forever test on retail.
+function addon:RepairForeverInscription()
+    if addon.foreverTest or not addon.isForever or GoldsmithDB.foreverInscriptionRepaired then return end
+    for _, e in ipairs(addon.ledger:getAll()) do
+        if e.profession == "Inscription" then
+            e.profession = addon:GetProfessionForItemName(e.item) or "Unassigned"
+        end
+    end
+    for _, map in ipairs({ GoldsmithDB.reagents or {}, GoldsmithDB.products or {} }) do
+        for name, prof in pairs(map) do
+            if prof == "Inscription" then map[name] = nil end
+        end
+    end
+    GoldsmithDB.foreverInscriptionRepaired = true
+end
+
 -- Purchases recorded before AuctionQuantity with more than the item stacks
 -- to (Forever, 2.8.0-beta): one each. An item the game hasn't loaded waits
 -- for the next login.
@@ -1108,6 +1127,8 @@ function addon:Initialize()
     addon:RepairAuctionQuantities()
     -- Forever's launch-week "Aid" back to First Aid (once)
     addon:RepairAidProfession()
+    -- Forever purchases saved as Inscription (once)
+    addon:RepairForeverInscription()
     -- A one-off repair of the developer's own Missive lots, done and removed
     GoldsmithDB.harmoniousLotsRepaired = nil
     -- Keep history for (Settings); after login settles, like the other chores

@@ -33,6 +33,9 @@ function addon:GetProfessionForItemName(itemName)
             end
         end
     end
+    -- Forever has no Inscription: Silverleaf and Earthroot bought there
+    -- showed as Inscription -1s in Profit by profession (user, 2026-11-15)
+    if addon.isForever then return nil end
     for _, itemData in pairs(INSCRIPTION_ITEMS) do
         if itemData.name == itemName then
             return "Inscription"
