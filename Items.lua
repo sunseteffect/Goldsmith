@@ -1036,7 +1036,14 @@ local function CreatePage(parent)
         row.name:SetPoint("RIGHT", row.value, "LEFT", -8, 0)
         row.name:SetWordWrap(false)
         row:SetScript("OnClick", function(self)
-            if self.entry then addon:OpenCraftPlan(self.entry.recipe, nil, self.entry.charKey) end
+            local e = self.entry
+            if not e then return end
+            -- Not learned: its item's page, as on the Crafts tab
+            if e.unlearned then
+                addon:OpenItem(e.recipe.outputName, e.itemID)
+            else
+                addon:OpenCraftPlan(e.recipe, nil, e.charKey)
+            end
         end)
         row:SetScript("OnEnter", function(self)
             local e = self.entry
@@ -1044,14 +1051,19 @@ local function CreatePage(parent)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:AddLine(e.recipe.outputName, 1, 1, 1)
             local c = GoldsmithDB.characters[e.charKey]
-            GameTooltip:AddDoubleLine("Made by", c and c.name or e.charKey, 0.8, 0.8, 0.8, 1, 1, 1)
+            GameTooltip:AddDoubleLine(e.unlearned and "Could learn it" or "Made by", c and c.name or e.charKey,
+                0.8, 0.8, 0.8, 1, 1, 1)
             if e.profit then
                 local r, g, b = addon:Color(addon:MoneyColor(e.profit))
                 GameTooltip:AddDoubleLine("Profit each", Signed(e.profit) .. (e.partial and "*" or ""), 0.8, 0.8, 0.8, r, g, b)
             end
-            if e.whyNot then GameTooltip:AddLine("Not recommended: " .. e.whyNot, 1, 0.6, 0.2, true) end
+            if e.unlearned then
+                GameTooltip:AddLine("Not learned yet: profit if you learned it.", 1, 0.6, 0.2, true)
+            elseif e.whyNot then
+                GameTooltip:AddLine("Not recommended: " .. e.whyNot, 1, 0.6, 0.2, true)
+            end
             GameTooltip:AddLine("Its materials at today's AH prices, this one included, with the cheapest mix.", 0.6, 0.6, 0.6, true)
-            addon:ClickHint(GameTooltip, "Click to plan it.")
+            addon:ClickHint(GameTooltip, e.unlearned and "Click to open its page." or "Click to plan it.")
             GameTooltip:Show()
         end)
         row:SetScript("OnLeave", GameTooltip_Hide)
@@ -1084,10 +1096,19 @@ local function CreatePage(parent)
         page.intoList = list
         page.intoTab:SetText(string.format("Craft it into (%d)", #list))
         local fit = math.max(math.floor(((page.into:GetHeight() or 300) - 20) / INTO_ROW), 1)
-        local made = 0
-        for _, e in ipairs(list) do if e.profit and e.profit > 0 then made = made + 1 end end
-        page.intoNote:SetText(string.format("%d recipe%s, %d make%s more than selling it", #list,
-            #list == 1 and "" or "s", made, made == 1 and "s" or ""))
+        local made, notLearned = 0, 0
+        for _, e in ipairs(list) do
+            if e.profit and e.profit > 0 then made = made + 1 end
+            if e.unlearned then notLearned = notLearned + 1 end
+        end
+        -- Short: "(1 not learned)" on the end was cut off (user, 2026-11-17)
+        if notLearned > 0 then
+            page.intoNote:SetText(string.format("%d recipe%s, %d beat selling it, %d not learned", #list,
+                #list == 1 and "" or "s", made, notLearned))
+        else
+            page.intoNote:SetText(string.format("%d recipe%s, %d make%s more than selling it", #list,
+                #list == 1 and "" or "s", made, made == 1 and "s" or ""))
+        end
         for i = 1, math.max(#page.intoRows, math.min(#list, fit)) do
             local e = i <= fit and list[i]
             local row = (e or page.intoRows[i]) and IntoRow(i)
@@ -1095,7 +1116,8 @@ local function CreatePage(parent)
                 row.entry = e or nil
                 if e then
                     local tier = e.tier and e.tierCount and (addon:TierIconText(e.tier, e.tierCount) .. " ") or ""
-                    row.name:SetText(addon:ProfessionIconText(e.recipe.profession) .. tier .. e.recipe.outputName)
+                    row.name:SetText(addon:ProfessionIconText(e.recipe.profession) .. tier .. e.recipe.outputName
+                        .. (e.unlearned and addon:Colorize(" (not learned)", "dim") or ""))
                     row.name:SetTextColor(addon:Color(e.whyNot and "muted" or "text"))
                     if e.profit then
                         row.value:SetText(Signed(e.profit) .. (e.partial and "*" or ""))
@@ -1118,7 +1140,9 @@ local function CreatePage(parent)
         page.item.itemID = d.itemID
         -- Any item's chart fills in from the first time its page opens
         -- (user, 2026-10-27)
-        if d.itemID and #d.history == 0 then addon:WatchItemPrice(d.itemID) end
+        -- One a scan saved days for keeps them, tracked from now on
+        local market = GoldsmithDB.marketHistory
+        if d.itemID and (#d.history == 0 or (market and market[d.itemID])) then addon:WatchItemPrice(d.itemID) end
 
         -- Header
         page.icon:SetTexture(d.itemID and C_Item.GetItemIconByID(d.itemID) or 134400)
@@ -1167,16 +1191,33 @@ local function CreatePage(parent)
         end
 
         local insight = d.insight
+        local region = d.region
         if insight then
             local pct = insight.diff * 100
             local note = math.abs(pct) < 1 and "about usual right now"
                 or string.format("now %.0f%% %s usual", math.abs(pct), pct > 0 and "above" or "below")
             t[2]:Set("Usual price", Money(insight.usual), "text", note)
+        elseif region and (region.sold or region.long or region.listed) then
+            -- Not 5 days of your own yet: TSM's region price, what it sold
+            -- for first
+            t[2]:Set("Usual price", Money(region.sold or region.long or region.listed), "text",
+                region.sold and "region sales (TSM)" or "region listings (TSM)")
         else
             t[2]:Set("Usual price", "-", "dim", string.format("needs 5 days (%d so far)", d.historyDays or 0))
         end
         t[2].tooltip = function(tooltip)
             tooltip:AddLine("Usual price", 1, 1, 1)
+            if region then
+                if region.sold then tooltip:AddDoubleLine("Sells for (region)", Money(region.sold), 0.8, 0.8, 0.8, 1, 1, 1) end
+                if region.listed then tooltip:AddDoubleLine("Listed at (region)", Money(region.listed), 0.8, 0.8, 0.8, 1, 1, 1) end
+                if region.long then tooltip:AddDoubleLine("Listed at, long run", Money(region.long), 0.8, 0.8, 0.8, 1, 1, 1) end
+                addon:Explain(tooltip, "From TSM, the whole region. Listings often sit above what sells.", 0.6, 0.6, 0.6, true)
+                if not insight then
+                    tooltip:AddLine(string.format("Your own usual price needs 5 days (%d so far).", d.historyDays or 0), 0.6, 0.6, 0.6, true)
+                    return
+                end
+                tooltip:AddLine(" ")
+            end
             if insight and insight.regional then
                 addon:Explain(tooltip, string.format("Goldsmith Data's price for your region over the last 7 days, until you have %d days of your own (%d so far).",
                     5, d.historyDays or 0), 0.6, 0.6, 0.6, true)
@@ -1452,6 +1493,10 @@ local function CreatePage(parent)
             -- "No purchases, crafts or sales recorded." (2026-10-14)
             page.activityRows[1].detail:SetText("Nothing recorded yet.")
             page.activityRows[1].detail:SetTextColor(addon:Color("muted"))
+            -- Or the row comes back with the last item's date and gold
+            -- (user, 2026-11-16: "Nov 16 ... +5s 70c" on an item never touched)
+            page.activityRows[1].date:SetText("")
+            page.activityRows[1].gold:SetText("")
             page.activityRows[1].detail:Show()
         end
         page.more:SetText(#d.activity > rowCount
@@ -1737,7 +1782,7 @@ local function Refresh(v, state)
         SortItems(results, "search")
         local sort = GetSort("search")
         v.list:SetSort(sort and sort.key, sort and sort.descending)
-        v.list:SetEmptyText("No items match. Goldsmith knows your recipes, their materials and what you've bought or sold. Shift-click any item to open its page.")
+        v.list:SetEmptyText((addon.isForever and "No items match. Goldsmith knows your recipes, their materials, what you've bought or sold, and what your last AH scan saw. Shift-click any item to open its page." or "No items match. Goldsmith knows your recipes, their materials and what you've bought or sold. Shift-click any item to open its page."))
         v.list:SetColumnsAndItems(addon:AvailableColumns(SEARCH_COLUMNS), results)
         v.footer:SetText(#results >= SEARCH_LIMIT and string.format("First %d matches. Type more to narrow it down.", SEARCH_LIMIT)
             or (#results == 1 and "1 match" or (#results .. " matches")))

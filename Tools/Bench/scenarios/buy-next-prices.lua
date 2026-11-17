@@ -55,6 +55,9 @@ addon:QueueEntryChanged()
 bench.OpenAH()
 bench.Click("Buy 8 Azeroot")
 bench.Fire("COMMODITY_PRICE_UNAVAILABLE")
+-- No status from the game here, so it's tried as gear: the AH answers
+-- with commodity listings, so not enough listed after all
+bench.Fire("COMMODITY_SEARCH_RESULTS_UPDATED", 236774)
 bench.Advance(1)
 bench.Has("unavailable is skipped", bench.Screen(), "skipped")
 bench.CloseAH()

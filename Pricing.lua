@@ -129,6 +129,19 @@ local function GetTSMValue(source, itemID)
     end
 end
 
+-- TSM's region prices, for an item's page: what it sold for, what it's
+-- listed at, and listings over the long run. Listings sit above what sells
+-- (Frost Tiger Blade: listed 2.40g, sold 1.18g; user, 2026-11-16). nil
+-- without TSM or its data.
+function addon:GetRegionPrices(itemID)
+    if not itemID then return nil end
+    local sold = GetTSMValue("DBRegionSaleAvg", itemID)
+    local listed = GetTSMValue("DBRegionMarketAvg", itemID)
+    local long = GetTSMValue("DBRegionHistorical", itemID)
+    if not (sold or listed or long) then return nil end
+    return { sold = sold, listed = listed, long = long }
+end
+
 -- Live order books
 --
 -- When an AH search shows a commodity's listings (e.g. clicking an item in
@@ -215,15 +228,37 @@ end
 -- the floor kept the safer half out and let the riskier half in.
 local SEARCH_MAX_DROP = 0.10
 
+-- Gear with a random suffix (Forever): every suffix is its own row with
+-- the same item ID, so the last row's price stood for all of them. A
+-- search for Northern Shortsword priced it at a dear suffix's 1g 28s, and
+-- the tooltip said "+1101%" against its usual 10s 69c (user, 2026-11-17).
+-- The cheapest row of each item in the search counts, with all their
+-- quantities.
 local function RecordSearchResults(results)
     GoldsmithDB.searchPrices = GoldsmithDB.searchPrices or {}
     local now, recorded = time(), false
+    local batch = {}
     for _, r in ipairs(results or {}) do
         local key = r.itemKey
         local itemID = key and key.itemID
         if itemID and (key.battlePetSpeciesID or 0) == 0 and type(r.minPrice) == "number" and r.minPrice > 0 then
-            GoldsmithDB.searchPrices[itemID] = { time = now, price = r.minPrice, quantity = r.totalQuantity,
-                                                 group = addon:RealmGroup() }
+            -- More rows of the same search can come a moment later
+            -- (BROWSE_RESULTS_ADDED): those join it too
+            local e = batch[itemID]
+            local last = GoldsmithDB.searchPrices[itemID]
+            if not e and last and last.searching and now - last.time <= 5 then
+                e = last
+                batch[itemID] = e
+            end
+            if not e then
+                e = { time = now, price = r.minPrice, quantity = r.totalQuantity, group = addon:RealmGroup(),
+                      searching = true }
+                batch[itemID] = e
+                GoldsmithDB.searchPrices[itemID] = e
+            else
+                e.price = math.min(e.price, r.minPrice)
+                if r.totalQuantity then e.quantity = (e.quantity or 0) + r.totalQuantity end
+            end
             recorded = true
         end
     end
@@ -3718,6 +3753,19 @@ local function Detail(tooltip, text)
     end
 end
 
+-- Whether Auctionator's tooltip already shows the AH price, so Goldsmith
+-- needn't. Installed isn't enough: with its auction tooltips turned off,
+-- nothing showed a price (Mercenary Blade of the Hierophant, user,
+-- 2026-11-17). TSM's lines are its own values (market value, sale
+-- average), not the price Goldsmith uses, so they don't count.
+function addon:OtherTooltipHasPrice()
+    if not addon:HasAuctionator() then return false end
+    local config = Auctionator and Auctionator.Config
+    if not (config and config.Get and config.Options and config.Options.AUCTION_TOOLTIPS) then return true end
+    local ok, on = pcall(config.Get, config.Options.AUCTION_TOOLTIPS)
+    return not ok or on == true
+end
+
 local function AddTooltipLines(tooltip, data)
     if tooltip ~= GameTooltip and tooltip ~= ItemRefTooltip then return end
     if not addon.ledger or not data or not data.id then return end
@@ -3804,7 +3852,7 @@ local function AddTooltipLines(tooltip, data)
     end
     -- Today's AH price, for things you don't craft (crafted items show it
     -- under their profit), when Auctionator or TSM aren't there to show it
-    if not recipe and not addon:HasAuctionator() and not addon:HasTSM() then
+    if not recipe and not addon:OtherTooltipHasPrice() then
         local price = addon:GetAHPrice(data.id)
         if price then
             tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r AH price",
@@ -3890,7 +3938,7 @@ function addon:AddRecipeTooltipLines(tooltip, recipe, itemID, showBreakdown, sho
         -- its own, not a Ctrl detail: the profit is that price less the
         -- cost (user, 2026-10-11: "can it show the AH price?")
         if not short then
-            if addon:HasAuctionator() or addon:HasTSM() then
+            if addon:OtherTooltipHasPrice() then
                 Detail(tooltip, "AH price " .. info.priceAgeText)
             else
                 tooltip:AddDoubleLine("|cFF00FF00Goldsmith|r AH price",

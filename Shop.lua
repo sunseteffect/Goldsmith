@@ -214,8 +214,68 @@ local function NextEntry()
 end
 
 local function Cancel()
-    if quote or asking then pcall(C_AuctionHouse.CancelCommoditiesPurchase) end
+    if (quote and not quote.auctionID) or (asking and not asking.gear) then pcall(C_AuctionHouse.CancelCommoditiesPurchase) end
     quote, asking = nil, nil
+end
+
+-- Gear and other items sold one listing at a time (not stacked): the AH
+-- won't quote them as a commodity, so Buy next said "Not enough listed"
+-- for Green Leather Armor with 26 listed (Green Iron Hauberk, user,
+-- 2026-11-17). They're bought as Buy to vendor buys: search the item,
+-- take the cheapest buyout, and a second click buys that listing (one a
+-- click; usually one item each).
+local function IsGear(itemID)
+    return addon.IsItemAuction ~= nil and addon:IsItemAuction(itemID)
+end
+
+local function AskGear(entry)
+    local ok, key = pcall(C_AuctionHouse.MakeItemKey, entry.itemID)
+    if not ok or not key then
+        skipped[entry.itemID] = "The AH wouldn't sell it here"
+        return
+    end
+    asking = { itemID = entry.itemID, quantity = entry.quantity, name = ItemName(entry), planCost = entry.cost,
+               unitPlan = entry.cost and entry.quantity > 0 and entry.cost / entry.quantity,
+               sent = GetTime(), parts = entry.parts, gear = true }
+    C_AuctionHouse.SendSearchQuery(key, { { sortOrder = Enum.AuctionHouseSortOrder.Price, reverseSort = false } }, true)
+end
+
+-- The item's search results are in: its cheapest buyout is the price
+local function GearResults(key)
+    if not (asking and asking.gear) then return end
+    if type(key) == "table" and key.itemID ~= asking.itemID then return end
+    local listing, why = addon:CheapestAuction(asking.itemID)
+    if not listing then
+        skipped[asking.itemID] = why == "bid" and "Bid only" or why == "own" and "Only yours"
+            or asking.triedGear and "Not enough listed" or "None listed"
+        asking = nil
+        Update()
+        return
+    end
+    local quantity = math.max(math.floor(listing.price / listing.unit + 0.5), 1)
+    quote = { itemID = asking.itemID, quantity = quantity, name = asking.name, total = listing.price,
+              unit = listing.unit, auctionID = listing.auctionID, parts = asking.parts, at = GetTime(),
+              planCost = asking.unitPlan and asking.unitPlan * quantity }
+    asking = nil
+    Update()
+end
+
+-- Second click: buy that listing, if it's still the cheapest at that price
+local function BuyGear(qt)
+    local listing = addon:CheapestAuction(qt.itemID)
+    if not listing or listing.auctionID ~= qt.auctionID or listing.price ~= qt.total then
+        quote = nil
+        addon:Notify("info", "%s changed just now. Press Buy next to check it again.", qt.name)
+    elseif GetMoney() < qt.total then
+        addon:Notify("info", "Not enough gold for %s.", qt.name)
+    else
+        buying, quote = qt, nil
+        buying.sent = GetTime()
+        addon.buyNextPlanned = { itemID = qt.itemID, quantity = qt.quantity, cost = qt.planCost }
+        -- Core.lua records it and says so in chat
+        C_AuctionHouse.PlaceBid(qt.auctionID, qt.total)
+    end
+    Update()
 end
 
 -- The queue's profit if this item costs total. The queue is planned again
@@ -262,9 +322,24 @@ local LOSS_WORSE = 0.10
 -- now 32g, made a Kaleidoscopic Prism that earns 251g today show -57g,
 -- and the check would have stopped for it (user, 2026-10-24).
 local function NowCost(plan) return plan.marketCost or plan.cost or 0 end
-local function NowProfit(plan)
+-- qt: the price the AH just quoted for one of its materials. That is
+-- today's price for it, not the plan's price with quantity behind it: 10
+-- Stag Meat quoted at 18s were counted at 5s 77c each, the price once the
+-- 18 cheap ones are gone, and Lean Venison making 21s "loses 17s" (user,
+-- 2026-11-16).
+local function NowProfit(plan, qt)
     if not plan.revenue then return nil end
-    return plan.revenue - NowCost(plan)
+    local cost = NowCost(plan)
+    if qt and qt.total and (qt.quantity or 0) > 0 then
+        for _, b in ipairs(plan.buyAH or {}) do
+            if b.itemID == qt.itemID and b.unit then
+                -- Only a cheaper quote: one over the plan is Gap's to say
+                cost = cost + math.min(qt.total / qt.quantity - b.unit, 0) * b.quantity
+                break
+            end
+        end
+    end
+    return plan.revenue - cost
 end
 
 local function LossNeedsAsking(qt)
@@ -272,7 +347,7 @@ local function LossNeedsAsking(qt)
     local ask = {}
     for _, row in ipairs(q and q.rows or {}) do
         local plan, e = row.plan, row.entry
-        local now = plan and not plan.stock and not e.orderID and NowProfit(plan)
+        local now = plan and not plan.stock and not e.orderID and NowProfit(plan, qt)
         if now and now < 0 then
             for _, b in ipairs(plan.buyAH or {}) do
                 if b.itemID == qt.itemID then
@@ -288,12 +363,12 @@ local function LossNeedsAsking(qt)
     return #ask > 0 and ask or nil
 end
 
-local function LossNote(rows)
+local function LossNote(rows, qt)
     local row = rows[1]
     local more = #rows > 1 and string.format(" (and %d more queued craft%s)", #rows - 1, #rows == 2 and "" or "s") or ""
     local whose = row.charKey and (" (" .. addon.QueueCharName(row.charKey) .. "'s queue)") or ""
     return string.format("%s%s loses %s now%s. Click again to buy anyway.",
-        addon:QueueRowName(row), whose, Money(-NowProfit(row.plan)), more)
+        addon:QueueRowName(row), whose, Money(-NowProfit(row.plan, qt)), more)
 end
 
 -- A price the player has said to buy without asking: at or under the
@@ -825,7 +900,11 @@ function addon:BuyNext()
     if quote and GetTime() - quote.at < QUOTE_LIFE then
         local entry = NextEntry()
         if entry and entry.itemID == quote.itemID then
-            for _, row in ipairs(LossNeedsAsking(quote) or {}) do lossAccepted[row.entry] = -NowProfit(row.plan) end
+            for _, row in ipairs(LossNeedsAsking(quote) or {}) do lossAccepted[row.entry] = -NowProfit(row.plan, quote) end
+            if quote.auctionID then
+                BuyGear(quote)
+                return
+            end
             if GetTime() - quote.at < FRESH then
                 Confirm(quote)
                 return
@@ -849,6 +928,11 @@ function addon:BuyNext()
     if not entry then
         addon:Notify("info", #(q.buyAH or {}) > 0 and "Everything else was skipped this visit."
             or OtherQueueNote() or "Nothing to buy for the queue.")
+        Update()
+        return
+    end
+    if IsGear(entry.itemID) then
+        AskGear(entry)
         Update()
         return
     end
@@ -1098,7 +1182,13 @@ function addon.UpdateShopSection()
             end
             color = sinks and "loss" or "warning"
         elseif LossNeedsAsking(quote) then
-            note, color = LossNote(LossNeedsAsking(quote)), "loss"
+            note, color = LossNote(LossNeedsAsking(quote), quote), "loss"
+        end
+        -- Gear always waits for the click that buys it
+        if not note and quote.auctionID then
+            note = quote.quantity < nextEntry.quantity
+                and string.format("Click again to buy this one (%d of %d).", quote.quantity, nextEntry.quantity)
+                or "Click again to buy it."
         end
     elseif nextEntry.short then
         note, color = "The AH may not have all of it right now.", "warning"
@@ -1221,7 +1311,8 @@ for _, event in ipairs({ "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED", "COMMODIT
     "COMMODITY_PRICE_UNAVAILABLE", "COMMODITY_PURCHASE_SUCCEEDED", "COMMODITY_PURCHASE_FAILED",
     "BAG_UPDATE_DELAYED", "AUCTION_HOUSE_THROTTLED_SYSTEM_READY",
     "COMMODITY_SEARCH_RESULTS_UPDATED", "COMMODITY_SEARCH_RESULTS_RECEIVED",
-    "ITEM_KEY_ITEM_INFO_RECEIVED", "GET_ITEM_INFO_RECEIVED", "MAIL_SHOW" }) do
+    "ITEM_KEY_ITEM_INFO_RECEIVED", "GET_ITEM_INFO_RECEIVED", "MAIL_SHOW",
+    "ITEM_SEARCH_RESULTS_UPDATED", "AUCTION_HOUSE_PURCHASE_COMPLETED" }) do
     events:RegisterEvent(event)
 end
 events:SetScript("OnEvent", function(_, event, unit, total)
@@ -1264,7 +1355,7 @@ events:SetScript("OnEvent", function(_, event, unit, total)
             -- The losing craft first: it names the cause
             if losers then
                 addon:Alert("loss", string.format("%s loses %s at current prices.",
-                    addon:QueueRowName(losers[1]), Money(-NowProfit(losers[1].plan))))
+                    addon:QueueRowName(losers[1]), Money(-NowProfit(losers[1].plan, quote))))
             elseif sinks then
                 addon:Alert("loss", string.format("buying %s puts the queue at %s.", quote.name,
                     addon:FormatSignedMoney(profitThen)))
@@ -1274,6 +1365,14 @@ events:SetScript("OnEvent", function(_, event, unit, total)
             Update()
         end
     elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "COMMODITY_SEARCH_RESULTS_RECEIVED" then
+        -- The retry as gear came back as a commodity after all: not enough listed
+        if asking and asking.triedGear and unit == asking.itemID then
+            addon:Notify("info", "%s: the AH can't sell %d right now, so it's skipped.", asking.name, asking.quantity)
+            skipped[asking.itemID] = "Not enough listed"
+            asking = nil
+            Update()
+            return
+        end
         -- After the AH window's own handling of the same event
         if listingQty and (unit == nil or unit == listingQty.itemID) then C_Timer.After(0, FillQuantity) end
     elseif event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
@@ -1285,22 +1384,45 @@ events:SetScript("OnEvent", function(_, event, unit, total)
         end
     elseif event == "COMMODITY_PRICE_UNAVAILABLE" then
         if not asking then return end
+        -- Maybe it's sold one listing at a time after all: try it that way
+        -- once before calling it not listed
+        if not asking.gear and not asking.triedGear and not asking.accepted
+            and not (addon.IsCommodityForSure and addon:IsCommodityForSure(asking.itemID)) then
+            local entry = NextEntry()
+            if entry and entry.itemID == asking.itemID then
+                asking = nil
+                AskGear(entry)
+                if asking then asking.triedGear = true end
+                Update()
+                return
+            end
+        end
         addon:Notify("info", "%s: the AH can't sell %d right now, so it's skipped.", asking.name, asking.quantity)
         skipped[asking.itemID] = "Not enough listed"
         asking = nil
         Update()
-    elseif event == "COMMODITY_PURCHASE_SUCCEEDED" then
+    elseif event == "ITEM_SEARCH_RESULTS_UPDATED" then
+        GearResults(unit)
+        return
+    elseif event == "COMMODITY_PURCHASE_SUCCEEDED" or event == "AUCTION_HOUSE_PURCHASE_COMPLETED" then
         if not buying then return end
+        -- Gear: only the listing Buy next bought (unit is its auction ID)
+        if (event == "AUCTION_HOUSE_PURCHASE_COMPLETED") ~= (buying.auctionID ~= nil) then return end
+        if buying.auctionID and unit ~= buying.auctionID then return end
         -- All of it is in your mailbox; what's for others is set aside
         MailBought(buying.itemID, buying.quantity)
         if override ~= nil then overrideBought = true end
+        -- Gear may buy less than the whole list: shared out in order
+        local left = buying.quantity
         for _, part in ipairs(buying.parts or {}) do
-            if part.key ~= addon.charKey and part.quantity > 0 then
-                BoughtFor(part.key, buying.itemID, part.quantity)
+            local got = math.min(part.quantity, left)
+            left = left - got
+            if part.key ~= addon.charKey and got > 0 then
+                BoughtFor(part.key, buying.itemID, got)
                 -- After Core.lua's "Bought ..." line, which waits for your
                 -- gold to drop (it came first and read backwards; user,
                 -- 2026-10-24)
-                local itemID, quantity, who = buying.itemID, part.quantity, addon.QueueCharName(part.key)
+                local itemID, quantity, who = buying.itemID, got, addon.QueueCharName(part.key)
                 C_Timer.After(2, function()
                     addon:Notify("info", "Mail %d %s to %s.", quantity,
                         C_Item.GetItemNameByID(itemID) or "of these", who)

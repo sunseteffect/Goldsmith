@@ -758,6 +758,34 @@ local function CheapestListing(e)
     return best, why
 end
 
+-- For Buy next's gear (Shop.lua), from the item's search results
+function addon:CheapestAuction(itemID)
+    return CheapestListing({ itemID = itemID })
+end
+-- The game says it's a commodity (stacks sold by the unit)
+function addon:IsCommodityForSure(itemID)
+    local kinds = Enum.ItemCommodityStatus
+    local ok, status = pcall(C_AuctionHouse.GetItemCommodityStatus, itemID)
+    return ok and kinds ~= nil and kinds.Commodity ~= nil and status == kinds.Commodity or false
+end
+
+-- Sold one listing at a time (gear). The game's own status first; in
+-- Forever it didn't say Item for Green Leather Armor (user, 2026-11-17),
+-- so the AH's item details, then an item that doesn't stack.
+function addon:IsItemAuction(itemID)
+    local kinds = Enum.ItemCommodityStatus
+    local ok, status = pcall(C_AuctionHouse.GetItemCommodityStatus, itemID)
+    if ok and kinds and status ~= nil then
+        if status == kinds.Item then return true end
+        if status == kinds.Commodity then return false end
+    end
+    local okK, key = pcall(C_AuctionHouse.MakeItemKey, itemID)
+    local okI, info = okK and key and pcall(C_AuctionHouse.GetItemKeyInfo, key)
+    if okI and type(info) == "table" and info.isCommodity ~= nil then return info.isCommodity == false end
+    local okS, stack = pcall(C_Item.GetItemMaxStackSizeByID, itemID)
+    return okS and stack == 1 or false
+end
+
 -- Bid-only listings: the scan shows their bid as the price, and they can't
 -- be bought out, so Buy to vendor listed Spiked Chain Gauntlets of Power at
 -- 7s, then said it wasn't available (user, 2026-11-08). Kept off the list

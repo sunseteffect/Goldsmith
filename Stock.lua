@@ -116,13 +116,175 @@ local function AddReading(history, itemID, today, price)
     history[itemID][today] = Median(list)
 end
 
+-- Every other item
+--
+-- Any item's page can be opened, and "where does it normally sit" needs
+-- days of prices from before you first looked (user, 2026-11-16: was Frost
+-- Tiger Blade worth learning?). So each scan of Goldsmith's own also saves
+-- a price for every item it saw that isn't in priceHistory. Thousands of
+-- items you'll mostly never open, so they're kept small: MARKET_DAYS days,
+-- one string each, the day's last scan:
+--   GoldsmithDB.marketHistory[itemID] = "320:11900,11800,,12000"
+-- the first price's day (days since 2026-01-01), then a price a day in
+-- copper, empty for a day without one. An item that becomes one Goldsmith
+-- tracks (its page opened, a recipe learned) moves to priceHistory.
+-- Forever only for now: retail scans see several times the items.
+local MARKET_DAYS = 30
+local MARKET_CHUNK = 1000
+local DAY_ANCHOR = time({ year = 2026, month = 1, day = 1, hour = 12 })
+
+local function DayNumber(t)
+    local d = date("*t", t)
+    local noon = time({ year = d.year, month = d.month, day = d.day, hour = 12 })
+    return math.floor((noon - DAY_ANCHOR) / 86400 + 0.5)
+end
+
+local function DayString(n)
+    return date("%Y-%m-%d", DAY_ANCHOR + n * 86400)
+end
+
+local function SplitMarket(s)
+    local start, body = s:match("^(%-?%d+):(.*)$")
+    return tonumber(start), body
+end
+
+local function LastMarketDay(start, body)
+    local _, commas = body:gsub(",", ",")
+    return start + commas
+end
+
+-- As priceHistory has it: { ["YYYY-MM-DD"] = price }
+local function DecodeMarket(s)
+    local days = {}
+    local n, body = SplitMarket(s)
+    if not n then return days end
+    for field in (body .. ","):gmatch("([^,]*),") do
+        if field ~= "" then days[DayString(n)] = tonumber(field) end
+        n = n + 1
+    end
+    return days
+end
+
+local function AddMarketPrice(market, itemID, today, price)
+    price = string.format("%d", price + 0.5)
+    local start, body
+    if market[itemID] then start, body = SplitMarket(market[itemID]) end
+    local last = start and LastMarketDay(start, body)
+    if not start or today - last >= MARKET_DAYS then
+        market[itemID] = today .. ":" .. price
+        return
+    end
+    if last > today then return end
+    if last == today then
+        body = (body:match("^(.*,)") or "") .. price
+    else
+        body = body .. string.rep(",", today - last) .. price
+    end
+    -- Days past MARKET_DAYS go, and the empty days after them
+    for _ = 1, today - MARKET_DAYS + 1 - start do
+        body = body:match("^[^,]*,(.*)$")
+        start = start + 1
+    end
+    while body:sub(1, 1) == "," do
+        body = body:sub(2)
+        start = start + 1
+    end
+    market[itemID] = start .. ":" .. body
+end
+
+-- An item Goldsmith tracks from now on: its saved days join priceHistory
+local function PromoteMarket(itemID)
+    local market = GoldsmithDB.marketHistory
+    local s = market and market[itemID]
+    if not s then return end
+    local history = GoldsmithDB.priceHistory
+    local days = history[itemID] or {}
+    for day, price in pairs(DecodeMarket(s)) do
+        if not days[day] then days[day] = price end
+    end
+    if next(days) then history[itemID] = days end
+    market[itemID] = nil
+end
+
+-- Items not seen for MARKET_DAYS, once a day
+local function PruneMarket(market, today)
+    if GoldsmithDB.marketPruned == today then return end
+    GoldsmithDB.marketPruned = today
+    for itemID, s in pairs(market) do
+        local start, body = SplitMarket(s)
+        if not start or (start <= today - MARKET_DAYS and LastMarketDay(start, body) <= today - MARKET_DAYS) then
+            market[itemID] = nil
+        end
+    end
+end
+
+-- After a scan, MARKET_CHUNK items a frame. tracked: HistoryItems().
+local function RecordMarketHistory(tracked)
+    local market = GoldsmithDB.marketHistory
+    local scan = GoldsmithDB.ownScan
+    if not (addon.isForever and market and scan and scan.prices) then return end
+    local prices = scan.prices
+    local today = DayNumber(time())
+    local ids = addon:Keys(prices)
+    local at = 0
+    local function Step()
+        -- A newer scan started its own pass, or the sample data is showing
+        if GoldsmithDB.marketHistory ~= market or not GoldsmithDB.ownScan or GoldsmithDB.ownScan.prices ~= prices then
+            return
+        end
+        local stop = math.min(at + MARKET_CHUNK, #ids)
+        while at < stop do
+            at = at + 1
+            local itemID = ids[at]
+            local price = prices[itemID] and prices[itemID][1]
+            if type(itemID) == "number" and price and price > 0 then
+                if tracked[itemID] then
+                    if market[itemID] then PromoteMarket(itemID) end
+                else
+                    AddMarketPrice(market, itemID, today, price)
+                end
+            end
+        end
+        if at < #ids then
+            C_Timer.After(0, Step)
+        else
+            PruneMarket(market, today)
+        end
+    end
+    Step()
+end
+
+-- An item's saved daily prices { ["YYYY-MM-DD"] = price }, or nil: its
+-- own history, else what scans saved for every item
+function addon:GetDayPrices(itemID)
+    local days = GoldsmithDB.priceHistory[itemID]
+    if days then return days end
+    local s = GoldsmithDB.marketHistory and GoldsmithDB.marketHistory[itemID]
+    return s and DecodeMarket(s) or nil
+end
+
+-- How many items have scan-saved history, and how many prices (/gsm perf)
+function addon:MarketHistorySize()
+    local items, points = 0, 0
+    for _, s in pairs(GoldsmithDB.marketHistory or {}) do
+        items = items + 1
+        local start, body = SplitMarket(s)
+        if start then points = points + select(2, body:gsub("%d+", "")) end
+    end
+    return items, points
+end
+
 -- Items whose page you opened, so their chart fills in from then on:
 -- GoldsmithDB.viewedItems[itemID] = when last opened (dropped after
 -- HISTORY_DAYS). Today's price is saved at once, the chart's first point.
 function addon:WatchItemPrice(itemID)
     if type(itemID) ~= "number" then return end
     GoldsmithDB.viewedItems = GoldsmithDB.viewedItems or {}
+    local first = GoldsmithDB.viewedItems[itemID] == nil
     GoldsmithDB.viewedItems[itemID] = time()
+    -- Not counted before: what you hold of it is counted now
+    if first and addon.RecountStock and not addon:GetTrackedMaterials()[itemID] then addon:RecountStock() end
+    PromoteMarket(itemID)
     local history = GoldsmithDB.priceHistory
     local today = date("%Y-%m-%d")
     if history[itemID] and history[itemID][today] then return end
@@ -147,6 +309,13 @@ local function HistoryItems()
     end
     for _, recipe in pairs(GoldsmithDB.recipes) do
         items[recipe.outputItemID] = recipe.outputName
+    end
+    -- Recipes not learned yet (Forever): their usual price says whether
+    -- one is worth buying (user, 2026-11-16: Frost Tiger Blade had none)
+    for _, recipe in pairs(GoldsmithDB.unlearned or {}) do
+        if recipe.outputItemID and not items[recipe.outputItemID] then
+            items[recipe.outputItemID] = recipe.outputName or true
+        end
     end
     -- Each quality tier of a crafted item is its own item (gold Draught of
     -- Rampant Abandon isn't the silver one), known from any character's
@@ -246,7 +415,8 @@ function addon:RecordScanHistory()
     local history = GoldsmithDB.priceHistory
     local today = date("%Y-%m-%d")
     local added = 0
-    for itemID in pairs(HistoryItems()) do
+    local tracked = HistoryItems()
+    for itemID in pairs(tracked) do
         local price = type(itemID) == "number" and addon:GetScanPrice(itemID)
         if price and price > 0 then
             AddReading(history, itemID, today, price)
@@ -254,6 +424,7 @@ function addon:RecordScanHistory()
         end
     end
     PruneHistory(history)
+    RecordMarketHistory(tracked)
     if added > 0 then addon:DataChanged() end
     return added
 end
@@ -293,7 +464,7 @@ local function RegionalInsight(itemID, ownDays)
 end
 
 function addon:GetPriceInsight(itemID)
-    local days = GoldsmithDB.priceHistory[itemID]
+    local days = addon:GetDayPrices(itemID)
     if not days then return RegionalInsight(itemID, 0) end
     local today = date("%Y-%m-%d")
     local shortFrom = date("%Y-%m-%d", time() - SHORT_DAYS * 86400)
@@ -333,7 +504,7 @@ end
 -- Saved daily prices over the last `days` (today too), oldest first: for
 -- the Cheap materials trend line
 function addon:GetPriceSeries(itemID, days)
-    local saved = GoldsmithDB.priceHistory[itemID]
+    local saved = addon:GetDayPrices(itemID)
     if not saved then return {} end
     local from = date("%Y-%m-%d", time() - (days or LONG_DAYS) * 86400)
     local list = {}
@@ -561,6 +732,7 @@ end
 function addon:InitializeStock()
     GoldsmithDB.priceHistory = GoldsmithDB.priceHistory or {}
     GoldsmithDB.priceSeen = GoldsmithDB.priceSeen or {}
+    GoldsmithDB.marketHistory = GoldsmithDB.marketHistory or {}
     SeedMaterialUse()
     -- After login settles (recipes and tier data are in by then)
     C_Timer.After(20, function() addon:RecordDailyHistory() end)

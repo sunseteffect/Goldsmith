@@ -507,7 +507,10 @@ end
 -- Professions Goldsmith knows about, from saved recipes, tracked items and
 -- the log, sorted by name. Unassigned isn't included.
 function addon:GetProfessions()
-    local seen = { Inscription = true }
+    -- Inscription always (the addon began as an Inscription tool), except
+    -- in Forever, which has none yet: it sat in the profession filter with
+    -- nothing under it (user, 2026-11-17)
+    local seen = { Inscription = not addon.isForever or nil }
     local function add(prof)
         if type(prof) == "string" and prof ~= "Unassigned" and addon:IsCraftingProfession(prof) then
             seen[prof] = true

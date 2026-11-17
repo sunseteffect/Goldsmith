@@ -50,6 +50,9 @@ local function Report(run)
     local d = run.data
     print(string.format("  Data: %d characters, %d recipes, %d transactions, %d price history points",
         d.characters, d.recipes, d.entries, d.priceHistory))
+    if (d.marketItems or 0) > 0 then
+        print(string.format("  Every-item history: %d items, %d prices", d.marketItems, d.marketPoints))
+    end
     print(string.format("  Memory: %s   Loading at login: %s",
         run.memoryKB and string.format("%.1f MB", run.memoryKB / 1024) or "unknown",
         run.loginMs and string.format("%d ms", run.loginMs) or "unknown"))
@@ -137,9 +140,11 @@ local function Run()
                 for k, v in pairs(addon.lastRecipeScan) do s[k] = v end
                 run.recipeScan = s
             end
+            local marketItems, marketPoints = addon:MarketHistorySize()
             run.data = {
                 characters = Count(GoldsmithDB.characters), recipes = Count(GoldsmithDB.recipes),
                 entries = #(GoldsmithDB.entries or {}), priceHistory = points,
+                marketItems = marketItems, marketPoints = marketPoints,
             }
             running = false
             Report(run)

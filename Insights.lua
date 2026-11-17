@@ -919,7 +919,42 @@ function addon:GetRecipesUsingAll(itemID)
             end
         end
     end
+    -- Recipes not learned yet, after the ones you know: Raw Slitherskin
+    -- Mackerel's page had nothing, its one recipe not learned (user,
+    -- 2026-11-17). Costed as the Crafts tab's Not learned yet: with whoever
+    -- could learn it, you first.
+    for _, recipeID in ipairs(addon:Keys(GoldsmithDB.unlearned or {})) do
+        local recipe = GoldsmithDB.unlearned[recipeID]
+        if recipe and not GoldsmithDB.recipes[recipeID] and recipe.outputItemID then
+            local uses = false
+            for _, slot in ipairs(recipe.reagents or {}) do
+                for _, id in ipairs(slot.itemIDs or {}) do
+                    if id == itemID then uses = true end
+                end
+            end
+            local learners = uses and (recipe.learners or {}) or {}
+            local charKey = learners[addon.charKey] and addon.charKey
+            if uses and not charKey then
+                for _, key in ipairs(addon:Keys(learners)) do
+                    if GoldsmithDB.characters[key] and addon:IsCharacterIncluded(key) then
+                        charKey = key
+                        break
+                    end
+                end
+            end
+            if charKey then
+                addon:Yield()
+                local row = PlainRowFor(charKey, recipe)
+                table.insert(list, {
+                    recipe = recipe, charKey = charKey, profit = row and row.profit, margin = row and row.margin,
+                    itemID = row and row.itemID or recipe.outputItemID, partial = row and row.partial,
+                    unlearned = true, whyNot = "Not learned yet",
+                })
+            end
+        end
+    end
     table.sort(list, function(a, b)
+        if (a.unlearned == true) ~= (b.unlearned == true) then return not a.unlearned end
         if (a.profit ~= nil) ~= (b.profit ~= nil) then return a.profit ~= nil end
         if a.profit and a.profit ~= b.profit then return a.profit > b.profit end
         return a.recipe.outputName < b.recipe.outputName
@@ -1634,8 +1669,8 @@ local MIN_SALES_FOR_ROI = 2    -- sales before an item's ROI is ranked
 local PRICE_DAYS = 30
 
 -- Every item Goldsmith knows: recipe outputs (each tier, from any
--- character's tier data), materials (each quality) and anything you've
--- bought. Returns byID[itemID] = { itemID, name, recipe, tier, tierCount,
+-- character's tier data), materials (each quality), anything you've
+-- bought, recipes not learned yet, and (Forever) what your last scan saw. Returns byID[itemID] = { itemID, name, recipe, tier, tierCount,
 -- profession, material } and byName[name] = { itemID, ... } (lowest tier
 -- first).
 local function BuildItemIndex()
@@ -1711,6 +1746,29 @@ local function BuildItemIndex()
     end
     for herbID, record in pairs(GoldsmithDB.milling) do
         Add(herbID, record.name, { material = true, profession = GoldsmithDB.reagents[record.name] })
+    end
+    -- Recipes not learned yet: is one worth learning? Shadow Crescent Axe
+    -- couldn't be found, only its Plans (user, 2026-11-17)
+    for n, recipeID in ipairs(addon:Keys(GoldsmithDB.unlearned or {})) do
+        if n % 64 == 0 then addon:Yield() end
+        local recipe = GoldsmithDB.unlearned[recipeID]
+        if recipe and recipe.outputItemID then
+            Add(recipe.outputItemID, recipe.outputName or recipe.name, { profession = recipe.profession })
+        end
+    end
+    -- Forever: anything your last scan saw, so any item on the AH has a
+    -- page (its price history: Stock.lua's every-item history). Names the
+    -- game hasn't loaded yet are skipped; they come in as it loads them.
+    local scan = addon.isForever and GoldsmithDB.ownScan
+    local nameOf = C_Item.GetItemNameByID
+    if scan and scan.prices and nameOf then
+        for n, itemID in ipairs(addon:Keys(scan.prices)) do
+            if n % 256 == 0 then addon:Yield() end
+            if type(itemID) == "number" and not byID[itemID] then
+                local name = nameOf(itemID)
+                if name and name ~= "" then Add(itemID, name, {}) end
+            end
+        end
     end
     -- What you've bought, sold or posted: Mentor's Helpful Handiwork, sold
     -- 19 times, wasn't found (user, 2026-10-27). Sales and deposits often
@@ -1959,7 +2017,7 @@ end
 -- price skipped) and the usual range: the middle half of those prices
 -- (25th to 75th percentile). Returns points { day, value }, low, high.
 local function PriceSeries(itemID, days)
-    local history = GoldsmithDB.priceHistory[itemID] or {}
+    local history = addon:GetDayPrices(itemID) or {}
     local points, values = {}, {}
     for i = days - 1, 0, -1 do
         local day = date("%Y-%m-%d", time() - i * 86400)
@@ -2020,6 +2078,7 @@ function addon:GetItemDetails(name, itemID)
         d.history, d.bandLow, d.bandHigh = PriceSeries(itemID, PRICE_DAYS)
         d.demand, d.demandSource = addon:GetDemand(itemID, name)
         d.saleRate = addon:GetSaleRate(itemID)
+        d.region = addon:GetRegionPrices(itemID)
         d.have, d.byCharacter = addon:GetStock(itemID)
         d.heldSince = d.have > 0 and IsForSale(itemID, name) and HeldSince(itemID, d.have) or nil
     else
@@ -2093,13 +2152,38 @@ function addon:GetItemDetails(name, itemID)
     d.activity = {}
     local own = {}
     for _, id in ipairs(ids) do own[id] = true end
+    -- Gear with a random suffix is saved by its full name ("Northern
+    -- Shortsword of the Boar"): its page showed the sales below "Nothing
+    -- sold yet." (user, 2026-11-17). Only for an item that doesn't stack.
+    local okS, stack = pcall(C_Item.GetItemMaxStackSizeByID, itemID or 0)
+    local suffixed = itemID and okS and stack == 1 and (name .. " of ")
+    local extra = { units = 0, sales = 0, cost = 0, costedSales = 0, deposits = 0 }
     for i, e in ipairs(addon.ledger:getAll()) do
         if i % 64 == 0 then addon:Yield() end
-        if e.item == name or (e.itemID and own[e.itemID]) then
+        local other = e.item ~= name and suffixed and e.item and e.item:sub(1, #suffixed) == suffixed
+        if e.item == name or (e.itemID and own[e.itemID]) or other then
             local kind = e.type == "REVENUE" and "Sold" or (e.kind == "DEPOSIT" and "Posted" or "Bought")
             table.insert(d.activity, { time = e.timestamp, kind = kind, qty = e.quantity,
                 gold = e.type == "REVENUE" and e.totalCopper or -e.totalCopper })
+            -- What SalesByItem counted under another name
+            if e.item ~= name and e.item then
+                if e.type == "REVENUE" then
+                    extra.units = extra.units + (e.quantity or 0)
+                    extra.sales = extra.sales + (e.totalCopper or 0)
+                    if e.costBasis then
+                        extra.cost = extra.cost + e.costBasis
+                        extra.costedSales = extra.costedSales + (e.totalCopper or 0)
+                    end
+                elseif e.kind == "DEPOSIT" then
+                    extra.deposits = extra.deposits + (e.totalCopper or 0)
+                end
+            end
         end
+    end
+    if extra.units > 0 then
+        local earned = d.earned or { units = 0, sales = 0, profit = 0 }
+        d.earned = { units = earned.units + extra.units, sales = earned.sales + extra.sales,
+            profit = earned.profit + extra.costedSales - extra.cost - extra.deposits }
     end
     for _, id in ipairs(ids) do
         for _, lot in ipairs(GoldsmithDB.craftLots[id] or {}) do

@@ -369,6 +369,11 @@ local function GetStockItemIDs()
     for _, recipe in pairs(GoldsmithDB.recipes) do
         if recipe.outputItemID then ids[recipe.outputItemID] = true end
     end
+    -- Items whose page you opened: one in your bank read "none on any
+    -- character" (Raw Slitherskin Mackerel, user 2026-11-17)
+    for itemID in pairs(GoldsmithDB.viewedItems or {}) do
+        if type(itemID) == "number" then ids[itemID] = true end
+    end
     for _, c in pairs(GoldsmithDB.characters) do
         for _, td in pairs(c.tierData) do
             for _, out in pairs(td.outputs or {}) do
@@ -830,6 +835,12 @@ local stockStale = true -- nothing counted since login
 
 local function StockInUse()
     return IsGoldmaking() or (addon.window ~= nil and addon.window:IsShown())
+end
+
+-- Counted again now (a page opened for an item not counted before)
+function addon:RecountStock()
+    stockStale = true
+    addon:CountStockIfStale()
 end
 
 function addon:CountStockIfStale()
