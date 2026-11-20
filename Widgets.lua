@@ -268,8 +268,44 @@ function addon:Explain(tooltip, text, r, g, b)
     end
 end
 
+-- The game's own tooltip for an item, beside Goldsmith's hover (like the
+-- game's compare tooltip): its armor, stats and level, which Goldsmith's
+-- hover leaves out (user, 2026-11-18: Gray Woolen Robe on the Crafts list).
+-- Asked for from inside a hover (UI.ItemBeside); shown once that hover is.
+local besideTip
+local function ShowBeside(owner)
+    local itemID = tip.beside
+    if not (itemID and owner and owner:IsShown()) then
+        if besideTip then besideTip:Hide() end
+        return
+    end
+    if not besideTip then
+        besideTip = CreateFrame("GameTooltip", "GoldsmithItemBesideTip", UIParent, "GameTooltipTemplate")
+        owner:HookScript("OnHide", function() besideTip:Hide() end)
+    end
+    besideTip:SetOwner(UIParent, "ANCHOR_NONE")
+    if not pcall(besideTip.SetItemByID, besideTip, itemID) or besideTip:NumLines() == 0 then
+        besideTip:Hide()
+        return
+    end
+    besideTip:ClearAllPoints()
+    -- Left of the hover when it fits there, else right
+    local left = owner:GetLeft()
+    if left and left > (besideTip:GetWidth() or 0) + 4 then
+        besideTip:SetPoint("TOPRIGHT", owner, "TOPLEFT", -2, 0)
+    else
+        besideTip:SetPoint("TOPLEFT", owner, "TOPRIGHT", 2, 0)
+    end
+    besideTip:Show()
+end
+
+function UI.ItemBeside(itemID)
+    if type(itemID) == "number" then tip.beside = itemID end
+end
+
 function UI.BeginTooltip(owner, redraw)
     tip.owner, tip.redraw, tip.hidden, tip.explained = owner, redraw, false, false
+    tip.beside = nil
     tip.ctrl = IsControlKeyDown()
     modifierWatch:Show()
 end
@@ -520,6 +556,7 @@ function UI.SetTooltip(frame, fill, anchor)
         else
             GameTooltip:Hide()
         end
+        ShowBeside(GameTooltip)
     end
     frame:HookScript("OnEnter", Draw)
     frame:HookScript("OnLeave", GameTooltip_Hide)
@@ -1494,7 +1531,9 @@ end
 --                              for lists that switch column sets; saved in
 --                              GoldsmithDB.ui2.hiddenColumns). The first
 --                              column always shows; a column with
---                              hidden = true starts hidden.
+--                              hidden = true starts hidden; spare = true
+--                              starts shown but goes first, with the
+--                              hidden ones, when the name needs the room.
 --   empty                      text shown when there are no items
 local LIST_HEADER_HEIGHT = 24
 -- The AH's column tabs are lower, with smaller names (user, 2026-10-31)
@@ -1621,7 +1660,7 @@ function UI.List(parent, opts)
         local flex = FlexWidth(columns, width)
         return not flex or not width or width <= 0 or flex >= MIN_NAME_WIDTH
     end
-    -- The columns shown. Ones that start hidden go first, from the right,
+    -- The columns shown. Ones that start hidden (or spare) go first, from the right,
     -- when the name would get too little room (Concentration's two columns
     -- turned on after you picked yours).
     local function Shown(width)
@@ -1632,7 +1671,7 @@ function UI.List(parent, opts)
         while not Fits(shown, width) do
             local dropped = false
             for i = #shown, 2, -1 do
-                if shown[i].hidden then table.remove(shown, i) dropped = true break end
+                if shown[i].hidden or shown[i].spare then table.remove(shown, i) dropped = true break end
             end
             if not dropped then break end
         end
@@ -1819,6 +1858,7 @@ function UI.List(parent, opts)
             opts.tooltip(GameTooltip, self.data)
             UI.EndTooltip(GameTooltip)
             if GameTooltip:NumLines() > 0 then GameTooltip:Show() else GameTooltip:Hide() end
+            ShowBeside(GameTooltip)
         end
         row:SetScript("OnEnter", Draw)
         row:SetScript("OnLeave", GameTooltip_Hide)

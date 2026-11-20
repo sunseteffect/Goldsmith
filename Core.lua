@@ -4,6 +4,13 @@ local addon = _G.Goldsmith or {}
 -- concentration, prices mostly silver and copper
 addon.isForever = WOW_PROJECT_ID == (WOW_PROJECT_CAMELOT or 18)
 
+-- " and the warband bank", or nothing on Forever, which has none (user,
+-- 2026-11-18: the gold chart said "all characters and warband bank")
+function addon:AndWarband(text)
+    if addon.isForever then return "" end
+    return text or " and the warband bank"
+end
+
 -- Purchase in flight: { itemID, quantity, moneyBefore }
 local pending = nil
 local awaitingMoney = false
@@ -221,9 +228,16 @@ local function RecordSale(sale)
     -- shift later as material prices change
     local unitCost, partial, costSource = addon:GetUnitCostBasis(sale.itemName, sale.count, itemID)
     local costBasis = unitCost and math.floor(unitCost * sale.count + 0.5)
+    -- Forever: the pending sale's time is when it really sold. The mail's
+    -- days left can read a full 30 when opened hours later (a Heavy
+    -- Weightstone sold 17:06 was saved as 00:45; user, 2026-11-19).
+    local soldAt = sale.soldAt
+    local pendingAt, offAH = addon:ClearPendingSale(sale.itemName, sale.count, sale.soldAt)
+    if pendingAt and (not soldAt or pendingAt < soldAt) then soldAt = pendingAt end
     addon.ledger:addRevenue(prof, sale.itemName, sale.count, sale.net, costBasis, partial, sale.depositRefund,
-        costBasis and costSource, itemID, { soldAt = sale.soldAt })
-    addon:AuctionSold(sale.itemName, sale.count, itemID)
+        costBasis and costSource, itemID, { soldAt = soldAt })
+    -- Less what came off the AH count when it sold (pending, offAH)
+    if sale.count - offAH > 0 then addon:AuctionSold(sale.itemName, sale.count - offAH, itemID) end
 
     -- One line: the item and the gold it brought in (user, 2026-10-27:
     -- "its too much text"). Its profit is in History, which explains it
@@ -994,6 +1008,87 @@ tradeEvents:SetScript("OnEvent", function(_, event, arg1, arg2)
     elseif arg2 == ERR_TRADE_CANCELLED then
         tradeSeen = nil
     end
+end)
+
+-- Forever: "A buyer has been found for your auction of X." comes the
+-- moment it sells; the gold reaches the mailbox an hour later and counts
+-- only once taken. Until then the sale is pending (GoldsmithDB.
+-- ahSoldPending = { { item, time, qty } }), so batch sizes see how fast it
+-- sold: 3 Big Bronze Knives gone with the gold still in the mail read
+-- "only 1 of your last 3 sold", and the next batch was 1 (user,
+-- 2026-11-18). Taking the mail clears them (ClearPendingSale).
+-- The line is the game's auction notification, not a system chat line:
+-- watching CHAT_MSG_SYSTEM caught nothing on Forever (2026-11-18). The
+-- event gives the item's plain name, as TSM and Syndicator read it.
+local PENDING_SALE_KEEP = 30 * 86400
+
+function addon:GetPendingSales()
+    return GoldsmithDB and GoldsmithDB.ahSoldPending or {}
+end
+
+-- The mail for `count` of an item was taken: its oldest pending sales go.
+-- Only sales from before the mail came (soldAt, with a little slack): mail
+-- for a sale never seen as pending (sold while logged off, or before
+-- this was read) took a later pending one with it, so that sale stopped counting
+-- until its own mail was taken (Truesilver Rod, 2026-11-18).
+-- Returns when the last of the cleared sales sold, or nil, and how many
+-- of the units were already taken off your AH count when they sold.
+local PENDING_MATCH_SLACK = 10 * 60
+function addon:ClearPendingSale(itemName, count, soldAt)
+    local list = GoldsmithDB.ahSoldPending
+    if not list then return nil, 0 end
+    local left = count or 1
+    local i = 1
+    local latest, offAH = nil, 0
+    while left > 0 and list[i] do
+        local p = list[i]
+        if p.item == itemName and not (soldAt and p.time > soldAt + PENDING_MATCH_SLACK) then
+            latest = math.max(latest or 0, p.time)
+            -- A stack sold as one (qty); less than all of it taken keeps the rest
+            local qty = p.qty or 1
+            if p.offAH then offAH = offAH + math.min(qty, left) end
+            if qty > left then
+                p.qty = qty - left
+                left = 0
+            else
+                table.remove(list, i)
+                left = left - qty
+            end
+        else
+            i = i + 1
+        end
+    end
+    return latest, offAH
+end
+
+local soldFrame = CreateFrame("Frame")
+soldFrame:RegisterEvent("AUCTION_HOUSE_SHOW_FORMATTED_NOTIFICATION")
+soldFrame:SetScript("OnEvent", function(_, _, notification, item, auctionID)
+    if not (addon.isForever and GoldsmithDB and type(item) == "string") then return end
+    if issecretvalue and issecretvalue(item) then return end
+    if item == "" then return end
+    local kinds = Enum and Enum.AuctionHouseNotification
+    if not (kinds and kinds.AuctionSold ~= nil and notification == kinds.AuctionSold) then return end
+    -- Plain name; a link just in case
+    item = item:match("|h%[(.-)%]|h") or item
+    GoldsmithDB.ahSoldPending = GoldsmithDB.ahSoldPending or {}
+    local list = GoldsmithDB.ahSoldPending
+    for i = #list, 1, -1 do
+        if time() - list[i].time > PENDING_SALE_KEEP then table.remove(list, i) end
+    end
+    -- A stack sells whole: its size from your auctions list (Characters.lua)
+    local sizes = addon.char and addon.char.auctionSizes
+    local qty = auctionID and sizes and sizes[auctionID] or 1
+    -- Sold is no longer held: off the AH count now, not when the mail is
+    -- taken (an Inlaid Mithril Cylinder sold still read "1 on the AH",
+    -- so Make waited; 2026-11-19). The mail then leaves it alone (offAH).
+    local items = addon.char and addon.char.auctionItems
+    local itemID = auctionID and items and items[auctionID]
+    local listed = addon.char and addon.char.auctions
+    local offAH = itemID and listed and listed[itemID] and addon:AuctionSold(item, qty, itemID) or nil
+    if offAH then sizes[auctionID], items[auctionID] = nil, nil end
+    table.insert(list, { item = item, time = time(), qty = qty, offAH = offAH })
+    addon:DataChanged()
 end)
 
 local frame = CreateFrame("Frame")

@@ -295,6 +295,8 @@ local scanPending = false
 
 local function ScanOpenProfession(force)
     scanPending = false
+    -- Someone's linked profession: their cooldowns aren't yours
+    if not addon:IsOwnProfessionWindow() then return end
     local ok, ids = pcall(C_TradeSkillUI.GetAllRecipeIDs)
     if not ok or not ids then return end
     local profOk, profInfo = pcall(C_TradeSkillUI.GetBaseProfessionInfo)

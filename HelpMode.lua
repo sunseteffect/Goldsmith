@@ -101,7 +101,9 @@ TAB_PARTS.overview = function(list)
             view.actionsPanel)
     else
         Add(list, "Do this next",
-            "What to do now on the character you're on, best first. Only solid bets show here: things that sell, and anything you hold that sells above break-even now. Click one to open it, or right-click a craft to queue it.",
+            addon.isForever
+                and "What to do now on the character you're on, best first. Only solid bets show here: things that sell, and anything you hold that sells above break-even now. Worth a try: crafts that make a profit but haven't shown they sell yet; make one or two. Click one to open it, or right-click a craft to queue it."
+                or "What to do now on the character you're on, best first. Only solid bets show here: things that sell, and anything you hold that sells above break-even now. Click one to open it, or right-click a craft to queue it.",
             view.actionsPanel)
         Add(list, "Followed",
             "How the suggestions you crafted turned out: what they made compared to what Goldsmith expected. Hover it for each one.",
@@ -153,7 +155,7 @@ TAB_PARTS.crafts = function(list)
             view.salvage)
     else
         Add(list, "Show",
-            "Recommended (solid bets), All crafts, or Not learned yet: recipes worth going to learn. It can hide gear too.",
+            "Recommended (solid bets), All crafts, or Not learned yet: recipes worth going to learn. It can hide gear too, and on Forever show only crafts that still give a skill point (Has skill up).",
             view.show)
         Add(list, "Only this character",
             "Only what the character you're on can make, with their own stats.", view.onlyMine)
@@ -164,7 +166,7 @@ TAB_PARTS.crafts = function(list)
                 view.concSwitch)
         end
         Add(list, "Crafts",
-            "Every craft with its cost from your own crafting stats, AH price, profit, how many you have (AH listings too) and how well it sells. A grey line under a row says who makes it, or whether it uses concentration. Click one for its plan. Right-click a column name to hide or show columns (drag the window's bottom-right corner wider for more), like Break-even, Vs usual (a price spike), Make and Batch (how many to make, and what that batch earns) or Listed.",
+            "Every craft with its cost from your own crafting stats, AH price, profit, how many you have (AH listings too) and how well it sells. A grey line under a row says who makes it, or whether it uses concentration. Make and Batch profit say how many to make and what that batch earns. Click one for its plan, or right-click it to queue the Make number or choose how many. Right-click a column name to hide or show columns (drag the window's bottom-right corner wider for more), like Break-even, Vs usual (a price spike) or Listed.",
             view.list)
         Add(list, "Concentration to spend",
             "Your concentration and the best way to spend it right now. Hover it for the details.",
@@ -211,7 +213,7 @@ TAB_PARTS.items = function(list)
             "Each quality of this item, with its price and how many you have. Click one to switch this page to it.",
             firstTier, lastTier ~= firstTier and lastTier or nil)
         Add(list, "Price history",
-            "What it has sold for over the dates picked at the top. The band is its usual range. Hover a point for that day.",
+            "What it has sold for over the dates picked at the top. The band is its usual range (prices in the note above it). Hover a point for that day.",
             page.chartNote:GetParent())
         Add(list, "Your activity",
             "Everything you've done with it, newest first: crafted, bought, posted and sold, with the gold each time. The link at the bottom opens it all in History. Craft it into, beside it: every recipe that uses it, with its profit. Above zero, crafting it beats selling it; click one to plan it.",

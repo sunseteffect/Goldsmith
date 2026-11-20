@@ -6,7 +6,7 @@
 #
 # Takes the files from git, not the folder, so only committed files ship and
 # nothing local (saved notes, test zips) slips in. Leaves out the dev-only
-# Tools/, .github/, .gitignore and Media's icon script. The zip holds one Goldsmith/ folder, as
+# Tools/, .github/, .gitignore, CLAUDE.md and Media's icon script. The zip holds one Goldsmith/ folder, as
 # CurseForge and a manual install into Interface\AddOns expect, and is named
 # from the TOC's Version at that commit: Goldsmith-<version>.zip.
 param(
@@ -31,7 +31,7 @@ if ($Ref -eq 'HEAD' -and $dirty) {
 
 $zip = Join-Path $Out "Goldsmith-$version.zip"
 & $git -C $repo archive --format=zip --prefix=Goldsmith/ -o $zip $Ref -- . `
-    ':(exclude)Tools' ':(exclude).github' ':(exclude).gitignore' ':(exclude)Media/*.ps1'
+    ':(exclude)Tools' ':(exclude).github' ':(exclude).gitignore' ':(exclude)Media/*.ps1' ':(exclude)CLAUDE.md'
 if ($LASTEXITCODE) { throw "git archive failed" }
 
 # Every file the TOC loads must be in the zip, and nothing dev-only
@@ -41,7 +41,7 @@ try { $names = $archive.Entries | ForEach-Object FullName } finally { $archive.D
 $missing = $toc | Where-Object { $_ -match '^\s*[^#\s].*\.(lua|xml)\s*$' } |
     ForEach-Object { 'Goldsmith/' + $_.Trim().Replace('\', '/') } | Where-Object { $names -notcontains $_ }
 if ($missing) { throw "Files the TOC loads are missing from the zip: $($missing -join ', ')" }
-$stray = $names | Where-Object { $_ -match '^Goldsmith/(Tools|\.github)/|\.ps1$' }
+$stray = $names | Where-Object { $_ -match '^Goldsmith/(Tools|\.github)/|\.ps1$|CLAUDE\.md$' }
 if ($stray) { throw "Dev-only files in the zip: $($stray -join ', ')" }
 
 Write-Host "Built $zip (version $version from $Ref, $($names.Count) entries)"

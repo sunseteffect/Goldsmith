@@ -52,7 +52,7 @@ local SHARED_KEYS = {
 -- Alloy the plan steps open is a concentration craft; user, 2026-10-13).
 -- false = not set.
 local TOUR_UI = {
-    profession = "All", range = "30d", craftsShow = "all", craftsGear = false, craftsOnlyMine = false,
+    profession = "All", range = "30d", craftsShow = "all", craftsGear = false, craftsOnlyMine = false, craftsSkillUp = false,
     craftsConcentration = true, historyKind = false, historyCharacter = false, planMixOpen = true,
     itemsInBags = false, itemsCheap = false,
 }

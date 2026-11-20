@@ -266,7 +266,7 @@ local function RecordRows(s)
     if s.peakGold then
         table.insert(rows, { "Richest you've been", Money(s.peakGold.copper), "gold", tooltip = function(t)
             White(t, "Richest you've been")
-            Grey(t, "Gold on all your characters and the warband bank together, at its highest.")
+            Grey(t, "Gold on all your characters" .. addon:AndWarband() .. " together, at its highest.")
             Grey(t, DayText(s.peakGold.day))
         end })
     end

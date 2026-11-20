@@ -700,7 +700,9 @@ function addon:CreateWindow()
             end
             return true
         end
-        local source = _G.HelpMicroButton
+        -- Forever: the game's art for these isn't there, so both buttons drew
+        -- nothing and help mode had no button (user, 2026-11-19). A gold "?".
+        local source = not addon.isForever and _G.HelpMicroButton
         if source and CopyArt(source:GetNormalTexture(), helpButton.SetNormalAtlas) then
             helpButton.label:Hide()
             helpButton.hover:SetAlpha(0)
@@ -723,7 +725,8 @@ function addon:CreateWindow()
         -- The game's own help button, the "i" beside the portrait as on the
         -- Adventure Guide, with its yellow hover (user, 2026-10-31). The
         -- red "?" above stays only if the game's button can't be made.
-        local ok, info = pcall(CreateFrame, "Button", nil, frame, "MainHelpPlateButton")
+        local ok, info = false, nil
+        if not addon.isForever then ok, info = pcall(CreateFrame, "Button", nil, frame, "MainHelpPlateButton") end
         if ok and info then
             info:SetPoint("TOPLEFT", frame, "TOPLEFT", 39 - framePad, 20 + framePad)
             info:SetFrameLevel(gameArt.topLevel + 6)
@@ -1088,6 +1091,19 @@ function addon:CreateWindow()
         if screen and screen.def.filters then
             for _, f in ipairs(screen.def.filters(screen.view)) do table.insert(list, f) end
         end
+        -- The tab's search counts too, so clearing filters clears it (user,
+        -- 2026-11-18: "if i am clearing filters i have to also clear the
+        -- search")
+        local view = screen and screen.view
+        local text = view and view.searchBox and type(view.search) == "string"
+            and view.search:match("^%s*(.-)%s*$") or ""
+        if text ~= "" then
+            table.insert(list, { label = '"' .. text .. '"', clear = function()
+                view.search = ""
+                view.searchBox:SetText("")
+                view.searchBox:ClearFocus()
+            end })
+        end
         return list
     end
     UpdateFilterChip = function()
@@ -1252,10 +1268,31 @@ function addon:CreateWindow()
     -- searches, bag updates), so the window refreshes once, half a second
     -- after the first of a burst.
     local refreshPending = false
+    -- While an AH scan runs, the redraw waits for it: each page of a page
+    -- scan asked for one, and the Overview started loading again every
+    -- half second until the scan was done (user, 2026-11-18). The scan
+    -- refreshes once at its end (Scan.lua); a scan stopped or failed is
+    -- caught by the check every second.
+    local afterScan = false
+    local function RedrawAfterScan()
+        if addon.IsScanning and addon:IsScanning() then
+            C_Timer.After(1, RedrawAfterScan)
+            return
+        end
+        afterScan = false
+        addon.Redraw()
+    end
     addon.Refresh = function()
         addon:DataChanged()
         -- Buy next at the AH plans from the same prices (Shop.lua)
         if addon.ShopDataChanged then addon.ShopDataChanged() end
+        if addon.IsScanning and addon:IsScanning() then
+            if not afterScan then
+                afterScan = true
+                C_Timer.After(1, RedrawAfterScan)
+            end
+            return
+        end
         addon.Redraw()
     end
     -- The same half-second redraw without emptying the caches: for a change

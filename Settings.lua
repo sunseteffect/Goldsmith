@@ -835,13 +835,14 @@ for _, value in ipairs({ 0, 5, 10, 15, 20, 30, 50 }) do
 end
 -- Forever's gold is scarce: copper and silver amounts (in gold, as the
 -- setting is). 50s hid every craft at launch, when a batch of bags makes 3s
--- (user, 2026-11-05).
+-- (user, 2026-11-05). Up to 10g, for higher levels: 25s wanted at
+-- level 40, and the list stopped at 50s (user, 2026-11-19).
 -- Built again by ApplyForeverSettings when /gsm forever turns Forever mode
 -- on in retail, which happens after this file loads.
 local function BuildMinLine(forever)
     if forever then DEFAULTS.minLine, DEFAULTS.flipMin = 0.005, 50 end
     CHOICES.minLine = {}
-    for _, value in ipairs(forever and { 0, 0.001, 0.005, 0.01, 0.05, 0.1, 0.5 } or { 0, 5, 10, 25, 50, 100 }) do
+    for _, value in ipairs(forever and { 0, 0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 5, 10 } or { 0, 5, 10, 25, 50, 100 }) do
         table.insert(CHOICES.minLine, { value = value,
             label = value == 0 and "Any profit"
                 or forever and addon:FormatMoney(value * 10000) .. " a batch"
@@ -863,10 +864,12 @@ end
 for _, value in ipairs({ 3, 5, 7, 14, 21, 30 }) do
     table.insert(CHOICES.heldDays, { value = value, label = string.format("%d days", value) })
 end
--- Mark the defaults
+-- Mark the defaults. Not the theme: a look is taste, not advice (user,
+-- 2026-11-19: "Goldsmith (recommended)" read as a judgment).
+local NOT_RECOMMENDED = { theme = true }
 local function MarkDefaults()
     for key, list in pairs(CHOICES) do
-        for _, c in ipairs(list) do
+        for _, c in ipairs(NOT_RECOMMENDED[key] and {} or list) do
             if c.value == DEFAULTS[key] and not c.label:find("recommended") then
                 c.label = c.label .. " (recommended)"
             end
@@ -1003,7 +1006,7 @@ local HELP = {
     },
     useBank = {
         "Use what's in the bank",
-        "Set for each character: this one's. On: its plans, queue and Buy next count materials in its bank (and the warband bank) as its own to craft with, so they aren't bought again.",
+        "Set for each character: this one's. On: its plans, queue and Buy next count materials in its bank" .. addon:AndWarband(" (and the warband bank)") .. " as its own to craft with, so they aren't bought again.",
         "Off: only its bags and mailbox count. What's in the bank is left alone, and Buy next buys the rest.",
         "Log in on another character to set theirs. Items and Characters still show everything you own.",
     },
@@ -1977,7 +1980,7 @@ local HELP_SECTIONS = {
     { "The tabs", table.concat({
         addon:Colorize("Overview", "text") .. ": what to do next on the character you're on (and what you hold that sells above break-even now), which of your other characters has the most waiting, and how you're doing across all of them. \"followed\" by Do this next adds up what the suggestions you crafted have made; Set a goal on the Total gold chart gives you a gold goal.",
         addon:Colorize("Characters", "text") .. ": a to-do list for each character, its craft cooldowns, and which characters count.",
-        addon:Colorize("Crafts", "text") .. ": what you can make, with its cost, profit, how many you have (bags, banks, mail and AH listings) and how well it sells. Show picks Recommended, All crafts or Not learned yet (recipes worth going to learn), and can hide gear. Search by name; cooldown lists every recipe with a cooldown. Right-click a column name to hide or show columns (here, in the Queue, History and Items); for more at once, drag the window's bottom-right corner wider. Crafts has more to show: Break-even, Vs usual (today's price against usual), Make and Batch (how many Do this next would make, and what that batch earns) and Listed (how many are on the AH). Click a craft to plan it: type how many crafts, and it shows what they make and what to buy. With concentration it plans only what yours covers now; Why this mix shows the material qualities compared, and clicking one uses it instead.",
+        addon:Colorize("Crafts", "text") .. ": what you can make, with its cost, profit, how many you have (bags, banks, mail and AH listings) and how well it sells. Show picks Recommended, All crafts or Not learned yet (recipes worth going to learn), and can hide gear or, on Forever, show only crafts with a skill up. Search by name; cooldown lists every recipe with a cooldown. Right-click a column name to hide or show columns (here, in the Queue, History and Items); for more at once, drag the window's bottom-right corner wider. Make and Batch profit show how many Do this next would make and what that batch earns. Crafts has more to show: Break-even, Vs usual (today's price against usual) and Listed (how many are on the AH). Click a craft to plan it: type how many crafts, and it shows what they make and what to buy. With concentration it plans only what yours covers now; Why this mix shows the material qualities compared, and clicking one uses it instead.",
         addon:Colorize("Queue", "text") .. ": crafts lined up to make, with one shopping list and a button that does the next step. A material several crafts need is made for all of them at once.",
         addon:Colorize("Items", "text") .. ": any item's page (Craft it into: every recipe that uses it, with its profit), In stock for everything you hold (what Gold in stock on the Overview counts), Cheap materials (right-click one to stock up), and the Held board with what sells above break-even now first.",
         addon:Colorize("History", "text") .. ": every sale, purchase, deposit, craft, order, gathering and box opened. Crafts stay 90 days. Search by item; right-click an entry to fix it.",

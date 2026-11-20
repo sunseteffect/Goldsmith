@@ -268,6 +268,22 @@ local function UpdateProfessions()
     -- and it is still showing my old"). Not when the game listed nothing:
     -- right at login it can answer before it knows.
     if not any then return end
+    -- Recipes marked known for a profession this character doesn't have:
+    -- read from someone's linked window before those were skipped (user,
+    -- 2026-11-18). Only names one of your characters has as a profession,
+    -- in the game's language: "Unassigned", or an English name on another
+    -- client, could be a profession this one does have.
+    local someoneHas = {}
+    for _, other in pairs(GoldsmithDB.characters) do
+        for name in pairs(other.professions or {}) do someoneHas[name] = true end
+    end
+    for recipeID in pairs(c.knownRecipes or {}) do
+        local recipe = GoldsmithDB.recipes[recipeID]
+        local prof = recipe and recipe.profession
+        if prof and not seen[prof] and someoneHas[prof] then
+            addon:UnmarkRecipeKnown(recipeID, c)
+        end
+    end
     for name in pairs(c.professions) do
         if not seen[name] then
             c.professions[name] = nil
@@ -684,16 +700,23 @@ local function SnapshotAuctions()
     local ok, owned = pcall(C_AuctionHouse.GetOwnedAuctions)
     if not ok or type(owned) ~= "table" then return end
     local active = Enum.AuctionStatus and Enum.AuctionStatus.Active or 0
-    local auctions, tiers = {}, {}
+    local auctions, tiers, sizes, items = {}, {}, {}, {}
     for _, a in ipairs(owned) do
         local itemID = a.itemKey and a.itemKey.itemID
+        -- How many each auction holds, sold ones too: a stack sells whole,
+        -- and the "buyer found" notice names only the item and the auction
+        -- (Core.lua; 10 Solid Sharpening Stones counted as 1, 2026-11-19)
+        -- Which item, for ones still up: their count comes off when they sell
+        if a.auctionID then sizes[a.auctionID] = a.quantity or 1 end
         if itemID and a.status == active then
+            if a.auctionID then items[a.auctionID] = itemID end
             auctions[itemID] = (auctions[itemID] or 0) + (a.quantity or 1)
             local tier = addon:IsGear(itemID) and GearTier(a.itemLink)
             if tier then AddTier(tiers, itemID, tier, a.quantity or 1) end
         end
     end
     addon.char.auctions, addon.char.auctionTiers, addon.char.auctionsTime = auctions, tiers, time()
+    addon.char.auctionSizes, addon.char.auctionItems = sizes, items
     if addon.Refresh then addon.Refresh() end
 end
 
@@ -708,6 +731,8 @@ end
 -- only when one listing has that name: qualities share it, and lowering
 -- the wrong one made Goldsmith suggest a quality still listed. Otherwise
 -- the counts wait for the next AH visit (held errs toward not suggesting).
+-- On Forever also when the buyer is found (Core.lua). Returns true if a
+-- count came off.
 function addon:AuctionSold(itemName, count, itemID)
     local auctions = addon.char.auctions
     if not (itemID and auctions[itemID]) then
@@ -722,6 +747,7 @@ function addon:AuctionSold(itemName, count, itemID)
     end
     local left = auctions[itemID] - (count or 1)
     auctions[itemID] = left > 0 and left or nil
+    return true
 end
 
 -- Everything you hold of an item, whether or not the character counts
@@ -1015,6 +1041,29 @@ function addon:MarkRecipeKnown(recipeID)
     addon.char.knownRecipes[recipeID] = true
 end
 
+-- Not known after all: its mark, stats and skill-up color go
+function addon:UnmarkRecipeKnown(recipeID, c)
+    c = c or addon.char
+    c.knownRecipes[recipeID] = nil
+    if c.recipeStats then c.recipeStats[recipeID] = nil end
+    if c.skillUps then c.skillUps[recipeID] = nil end
+end
+
+-- Your own profession window, not one linked in chat or a guild member's:
+-- the game says their recipes are learned, so opening a maxed
+-- blacksmith's link saved 69 of them as yours (user, 2026-11-18). Only
+-- your own window is read for recipes, stats and cooldowns.
+function addon:IsOwnProfessionWindow()
+    for _, name in ipairs({ "IsTradeSkillLinked", "IsTradeSkillGuild" }) do
+        local fn = C_TradeSkillUI[name]
+        if fn then
+            local ok, yes = pcall(fn)
+            if ok and yes then return false end
+        end
+    end
+    return true
+end
+
 function addon:KnowsRecipe(recipeID, charKey)
     local c = charKey and GoldsmithDB.characters[charKey] or addon.char
     return c and c.knownRecipes[recipeID] == true
@@ -1185,6 +1234,8 @@ function addon:InitializeCharacters()
             -- The bank's slots can be read now, so gear tiers there too
             stockStale = true
         end
+        -- Someone's linked profession isn't you making gold
+        if event == "TRADE_SKILL_SHOW" and not addon:IsOwnProfessionWindow() then return end
         if GOLDMAKING_OPEN[event] then
             OnGoldmakingOpen(GOLDMAKING_OPEN[event])
             C_Timer.After(1, function() addon:CountStockIfStale() end)

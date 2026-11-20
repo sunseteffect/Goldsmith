@@ -166,7 +166,9 @@ local function DecodeMarket(s)
 end
 
 local function AddMarketPrice(market, itemID, today, price)
-    price = string.format("%d", price + 0.5)
+    -- %.0f, not %d: the game's %d stops at 2^31 copper (214k gold), and a
+    -- full scan saw a listing at 2.3M gold (2026-11-17: integer overflow)
+    price = string.format("%.0f", math.floor(price + 0.5))
     local start, body
     if market[itemID] then start, body = SplitMarket(market[itemID]) end
     local last = start and LastMarketDay(start, body)

@@ -300,6 +300,54 @@ function addon:AskSalvageBatch(charKey, itemID, name, verb)
         { charKey = charKey, itemID = itemID, name = name, verb = verb or "Salvage", quantity = quantity })
 end
 
+-- Asks how many of a craft to queue, from the Crafts tab's right-click,
+-- so a number other than the Make column's doesn't need a trip through
+-- the plan and back (user, 2026-11-18: "you will be going back to queue
+-- up more things"). Counts items, as the menu's Add 3 does.
+local function AcceptQueueCount(popup, data)
+    data = data or popup.data
+    local n = tonumber(PopupBox(popup):GetText())
+    if not (data and n and n > 0) then return end
+    local updated = addon:AddToQueue(data.charKey, data.recipeID, n, data.tier, data.concentrate)
+    addon:Notify("info", "%s %d %s %s %s's queue.", updated and "Set" or "Added", n, data.name,
+        updated and "in" or "to", CharName(data.charKey))
+    if addon.RefreshWindow then addon.RefreshWindow() end
+end
+
+StaticPopupDialogs["GOLDSMITH_QUEUE_COUNT"] = {
+    text = "%s",
+    button1 = OKAY or "OK",
+    button2 = CANCEL or "Cancel",
+    hasEditBox = true,
+    OnShow = function(self, data)
+        data = data or self.data
+        local box = PopupBox(self)
+        box:SetNumeric(true)
+        box:SetText(tostring(data and data.quantity or 1))
+        box:HighlightText()
+        box:SetFocus()
+    end,
+    OnAccept = AcceptQueueCount,
+    EditBoxOnEnterPressed = function(box, data)
+        local popup = box:GetParent()
+        AcceptQueueCount(popup, data)
+        popup:Hide()
+    end,
+    EditBoxOnEscapePressed = function(box) box:GetParent():Hide() end,
+    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+}
+
+-- quantity: what the box starts at (what's left to make when it's
+-- queued, else the menu's number)
+function addon:AskQueueCount(charKey, recipe, tier, concentrate, quantity)
+    local queued = addon:FindQueueEntry(charKey, recipe.recipeID, tier, concentrate)
+    if queued then quantity = math.max(queued.quantity - (queued.made or 0), 1) end
+    StaticPopup_Show("GOLDSMITH_QUEUE_COUNT",
+        string.format("How many %s to queue? (for %s)", recipe.outputName, CharName(charKey)), nil,
+        { charKey = charKey, recipeID = recipe.recipeID, name = recipe.outputName, tier = tier,
+          concentrate = concentrate, quantity = quantity })
+end
+
 -- A crafting order from the game's order window (OrderCost.lua's Add to
 -- queue): preview is its GetOrderPreview (provided, commission, rewards)
 function addon:AddOrderToQueue(order, preview)

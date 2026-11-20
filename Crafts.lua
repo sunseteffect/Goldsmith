@@ -44,7 +44,9 @@ local function Roi(margin)
 end
 
 -- Columns marked hidden start hidden: right-click a column name to show
--- them (user, 2026-11-13: data people may find useful)
+-- them (user, 2026-11-13: data people may find useful). Make and Batch
+-- show: Do this next's "6x Massive Iron Axe +1g93" lost its number and
+-- total in Crafts (user, 2026-11-18).
 local SIMPLE_COLUMNS = {
     { key = "item", label = "Item" },
     { key = "cost", label = "Cost", width = 78, justify = "RIGHT" },
@@ -53,8 +55,8 @@ local SIMPLE_COLUMNS = {
     { key = "vsUsual", label = "Vs usual", width = 60, justify = "RIGHT", hidden = true },
     { key = "profit", label = "Profit", width = 84, justify = "RIGHT" },
     { key = "margin", label = "ROI", width = 56, justify = "RIGHT" },
-    { key = "make", label = "Make", width = 48, justify = "RIGHT", hidden = true },
-    { key = "batch", label = "Batch", width = 84, justify = "RIGHT", hidden = true },
+    { key = "make", label = "Make", width = 48, justify = "RIGHT", spare = true },
+    { key = "batch", label = "Batch profit", width = 90, justify = "RIGHT", spare = true },
     { key = "have", label = "Have", width = 48, justify = "RIGHT" },
     { key = "listed", label = "Listed", width = 56, justify = "RIGHT", hidden = true },
     { key = "demand", label = "Sold/day", width = 70, justify = "RIGHT" },
@@ -70,8 +72,8 @@ local CONC_COLUMNS = {
     { key = "margin", label = "ROI", width = 56, justify = "RIGHT" },
     { key = "conc", label = "Conc", width = 50, justify = "RIGHT" },
     { key = "gpc", label = "g/conc", width = 60, justify = "RIGHT" },
-    { key = "make", label = "Make", width = 48, justify = "RIGHT", hidden = true },
-    { key = "batch", label = "Batch", width = 84, justify = "RIGHT", hidden = true },
+    { key = "make", label = "Make", width = 48, justify = "RIGHT", spare = true },
+    { key = "batch", label = "Batch profit", width = 90, justify = "RIGHT", spare = true },
     { key = "have", label = "Have", width = 48, justify = "RIGHT" },
     { key = "listed", label = "Listed", width = 56, justify = "RIGHT", hidden = true },
     { key = "demand", label = "Sold/day", width = 70, justify = "RIGHT" },
@@ -200,6 +202,10 @@ end
 -- yours sell (SuggestedBatch), none while you hold some (more once they
 -- sell). Only for crafts worth making. Returns the count (0 while you hold
 -- some), why, and the batch's profit.
+-- The suggestion Crafts was opened from (addon:OpenCrafts): its numbers
+-- to make win, so the list says what the card said
+local openedFocus
+
 local function MakeCount(item)
     local info = item.info
     if item.salvage or item.unlearned or item.whyNot or info.partial or not (info.profit and info.profit > 0)
@@ -209,6 +215,10 @@ local function MakeCount(item)
         return 0, string.format("you have %d: more once %s", have, have == 1 and "it sells" or "they sell"), 0
     end
     local make, why = addon:SuggestedBatch(item.recipe, item.itemID or item.recipe.outputItemID)
+    local focused = openedFocus and openedFocus.make and openedFocus.make[item.key]
+    if focused and focused > 0 and focused ~= make then
+        make, why = focused, "a first try, to see if it sells"
+    end
     return make, why, make * info.profit
 end
 
@@ -239,7 +249,11 @@ local SORTS = {
 }
 local DEFAULT_SORT = { key = "profit", descending = true }
 
+-- A suggestion's list (addon:OpenCrafts with sort) is in its own order
+-- until a column name is clicked there, which doesn't change yours:
+-- Best crafts by batch profit, as on the Overview (user, 2026-11-18)
 local function GetSort()
+    if openedFocus and openedFocus.sort and SORTS[openedFocus.sort.key] then return openedFocus.sort end
     local sort = GoldsmithDB.ui2.craftSort
     if not sort or not SORTS[sort.key] then return DEFAULT_SORT end
     return sort
@@ -410,6 +424,9 @@ local function FillCraftRow(row, item)
     local other = item.charKey ~= addon.charKey and CharName(item.charKey)
     if item.unlearned then
         whoText = "to learn on " .. CharName(item.charKey)
+        -- Where, when a trainer or vendor you opened has it
+        local where = addon:GetRecipeSources(item.recipe)[1]
+        if where then whoText = whoText .. " · " .. where.kind .. " in " .. where.zone end
     elseif item.twin then
         -- Made both ways: say which this is
         local how = info.description
@@ -689,7 +706,14 @@ local function CraftTooltip(tooltip, item)
     if item.salvage then return SalvageTooltip(tooltip, item) end
     local info, recipe = item.info, item.recipe
     tooltip:AddLine(ItemText(item), 1, 1, 1)
-    addon:AddItemDescription(tooltip, item.itemID or recipe.outputItemID)
+    -- The item itself in the game's tooltip beside this one (UI.ItemBeside)
+    -- when it can show; its Use/Equip lines here otherwise
+    local itemID = item.itemID or recipe.outputItemID
+    if itemID and C_Item.IsItemDataCachedByID and C_Item.IsItemDataCachedByID(itemID) then
+        UI.ItemBeside(itemID)
+    else
+        addon:AddItemDescription(tooltip, itemID)
+    end
     if item.unlearned then
         -- Not learned yet: what it'd make if learned today, and where
         Note(tooltip, string.format("Not learned yet. Costed with %s skill and stats as they are now, as if learned today.",
@@ -702,6 +726,22 @@ local function CraftTooltip(tooltip, item)
         if recipe.source then
             tooltip:AddLine(" ")
             tooltip:AddLine(recipe.source, 1, 1, 1, true)
+        elseif addon.isForever then
+            -- The game doesn't say on Forever: the trainers and vendors
+            -- you've opened that have it
+            tooltip:AddLine(" ")
+            local sources = addon:GetRecipeSources(recipe)
+            if #sources > 0 then
+                tooltip:AddLine("Where to learn it", 1, 1, 1)
+                for _, e in ipairs(sources) do
+                    Line(tooltip, string.format("    %s: %s, %s", e.kind == "trainer" and "Trainer" or "Vendor", e.npc, e.zone),
+                        e.cost and e.cost > 0 and Money(e.cost) or "", "text")
+                end
+            elseif GoldsmithDB.trainerSkill and GoldsmithDB.trainerSkill[recipe.outputItemID] then
+                Note(tooltip, "From a trainer. Open it again and Goldsmith saves which one.")
+            else
+                Note(tooltip, "Not seen at a trainer or vendor you've opened. It may be a drop, a quest, or a trainer or vendor you haven't opened yet.")
+            end
         end
     elseif item.charKey ~= addon.charKey and info.concentrate then
         Note(tooltip, "With " .. CharName(item.charKey) .. "'s concentration and stats.")
@@ -727,9 +767,15 @@ local function CraftTooltip(tooltip, item)
     local stats = GoldsmithDB.characters[item.charKey] and GoldsmithDB.characters[item.charKey].recipeStats[recipe.recipeID]
     do
         Line(tooltip, "Cost (estimated)", Money(info.cost) .. (info.partial and "+" or ""), "gold")
-        Why(tooltip, "Materials for one item: what you paid for ones you hold, otherwise today's AH price. Less what resourcefulness saves on average, spread over the extra items multicraft makes.")
-        Why(tooltip, StatsText(stats))
-        local worst = addon:WithCharacter(item.charKey, addon.GetWorstCaseCost, addon, recipe, info)
+        -- Forever has no multicraft or resourcefulness: no procs to explain
+        -- or a worst case without them (user, 2026-11-18)
+        if addon.isForever then
+            Why(tooltip, "Materials for one item: what you paid for ones you hold, otherwise today's AH price.")
+        else
+            Why(tooltip, "Materials for one item: what you paid for ones you hold, otherwise today's AH price. Less what resourcefulness saves on average, spread over the extra items multicraft makes.")
+            Why(tooltip, StatsText(stats))
+        end
+        local worst = not addon.isForever and addon:WithCharacter(item.charKey, addon.GetWorstCaseCost, addon, recipe, info)
         if worst then
             Line(tooltip, "Worst case (no procs)", Money(worst))
             Why(tooltip, "The most the item can cost you: no multicraft, resourcefulness or finishing reagents.")
@@ -815,8 +861,8 @@ local function CraftTooltip(tooltip, item)
             return a.name < b.name
         end)
         for _, e in ipairs(where) do Line(tooltip, "   " .. e.name, WhereText(e), "muted") end
-        Why(tooltip, item.salvage and "Of what's salvaged, on all your characters and the warband bank, with your AH listings."
-            or "On all your characters and the warband bank, with your AH listings. Listings are read each time you open the AH.")
+        Why(tooltip, item.salvage and ("Of what's salvaged, on all your characters" .. addon:AndWarband() .. ", with your AH listings.")
+            or ("On all your characters" .. addon:AndWarband() .. ", with your AH listings. Listings are read each time you open the AH."))
     end
     local make, makeWhy, batch = MakeCount(item)
     if make and make > 0 then
@@ -1391,7 +1437,10 @@ local pending = nil
 local view -- the created view
 
 -- Opens Crafts showing only some crafts. focus = { keys = set of CraftKey,
--- label }. nil shows everything.
+-- label, make = optional CraftKey -> items to make, sort = optional
+-- { key, descending } for this list only }. nil shows everything.
+-- make: Do this next's "6x Massive Iron Axe" opens the plan or queues 6,
+-- not 1 (user, 2026-11-18).
 function addon:OpenCrafts(focus)
     pending = { focus = focus }
     addon:ShowTab("crafts")
@@ -2200,12 +2249,18 @@ local function CreatePlanScreen(parent)
         if IsShiftKeyDown() and addon:ShiftClickItem(screen.tierItemID, name) then return end
         addon:OpenItem(name, screen.tierItemID)
     end)
-    -- The item and what it does; the click hint always shows (it's the
-    -- only thing to explain here)
+    -- The game's own tooltip for the item, as in your bags: armor, stats
+    -- and level, not only its "Equip:" line (user, 2026-11-18: Gray Woolen
+    -- Robe "doesn't show the whole item"). The click hints always show.
     UI.SetTooltip(titleButton, function(tooltip)
         if not screen.plan then return end
-        tooltip:AddLine(screen.title:GetText() or screen.plan.recipe.outputName, 1, 1, 1)
-        addon:AddItemDescription(tooltip, screen.tierItemID)
+        local itemID = screen.tierItemID or screen.plan.recipe.outputItemID
+        if itemID and tooltip.SetItemByID and pcall(tooltip.SetItemByID, tooltip, itemID) and tooltip:NumLines() > 0 then
+            tooltip:AddLine(" ")
+        else
+            tooltip:AddLine(screen.title:GetText() or screen.plan.recipe.outputName, 1, 1, 1)
+            addon:AddItemDescription(tooltip, screen.tierItemID)
+        end
         addon:ClickHint(tooltip, "Click for the item's page", true)
         addon:ShiftClickHint(tooltip, "Shift-click to search the AH for it (or link it in chat)", true)
     end)
@@ -3942,10 +3997,22 @@ end
 
 -- Right-click a craft: queue it (as many as its plan last had) or open
 -- its item page
-local function RowMenu(item)
+-- Items to make from the suggestion that opened this list (OpenCrafts),
+-- else the Make column's
+local function FocusMake(item)
+    local n = openedFocus and openedFocus.make and openedFocus.make[item.key]
+    if not (n and n > 0) then n = MakeCount(item) end
+    return n and n > 0 and n or nil
+end
+
+local function RowMenu(item, make)
     local recipe = item.recipe
     local planned = GoldsmithDB.ui2.planCrafts and GoldsmithDB.ui2.planCrafts[recipe.recipeID]
-    local quantity = planned and addon:WithCharacter(item.charKey, addon.ItemsForCrafts, addon, recipe, planned)
+    -- make: the Make column's number when it has one (FocusMake): it
+    -- offered your last plan's 3 Big Bronze Knives with the column saying
+    -- 1 (user, 2026-11-18)
+    local quantity = make
+        or planned and addon:WithCharacter(item.charKey, addon.ItemsForCrafts, addon, recipe, planned)
         or math.max(math.floor(recipe.outputQty or 1), 1)
     local concentrate = item.info and item.info.concentrate == true or false
     local tier = item.info and item.info.tier
@@ -3957,6 +4024,9 @@ local function RowMenu(item)
             addon:AddToQueue(item.charKey, recipe.recipeID, quantity, tier, concentrate)
             addon:Notify("info", "Queued %d %s for %s.", quantity, recipe.outputName, CharName(item.charKey))
             addon.RefreshWindow()
+        end)
+        root:CreateButton("Choose how many...", function()
+            addon:AskQueueCount(item.charKey, recipe, tier, concentrate, quantity)
         end)
         root:CreateButton("Item page", function() addon:OpenItem(recipe.outputName, item.itemID) end)
         root:CreateDivider()
@@ -4047,6 +4117,15 @@ local function Create(parent)
         for _, choice in ipairs({ { nil, "All items" }, { "hide", "Hide gear" } }) do
             root:CreateRadio(choice[2], function() return ui.craftsGear == choice[1] end, function()
                 ui.craftsGear = choice[1]
+                addon.RefreshWindow()
+            end)
+        end
+        -- Forever: only crafts that still give a skill point (orange,
+        -- yellow or green for the character making it; user, 2026-11-18)
+        if addon.isForever then
+            root:CreateDivider()
+            root:CreateCheckbox("Has skill up", function() return ui.craftsSkillUp == true end, function()
+                ui.craftsSkillUp = (not ui.craftsSkillUp) or nil
                 addon.RefreshWindow()
             end)
         end
@@ -4175,20 +4254,18 @@ local function Create(parent)
                     addon:OpenSalvagePlan(item.salvage.inputID, item.charKey)
                 end
             elseif button == "LeftButton" then
-                addon:OpenCraftPlan(item.recipe, item.info, item.charKey)
+                addon:OpenCraftPlan(item.recipe, item.info, item.charKey, FocusMake(item))
             elseif MenuUtil and MenuUtil.CreateContextMenu then
-                RowMenu(item)
+                RowMenu(item, FocusMake(item))
             else
                 addon:OpenItem(item.recipe.outputName, item.itemID)
             end
         end,
         onSort = function(key)
             local current = GetSort()
-            if current.key == key then
-                ui.craftSort = { key = key, descending = not current.descending }
-            else
-                ui.craftSort = { key = key, descending = SORTS[key].firstDescending }
-            end
+            local sort = current.key == key and { key = key, descending = not current.descending }
+                or { key = key, descending = SORTS[key].firstDescending }
+            if openedFocus and openedFocus.sort then openedFocus.sort = sort else ui.craftSort = sort end
             addon.RefreshWindow()
         end,
     })
@@ -4331,6 +4408,7 @@ local function Refresh(v, state)
     -- Following a link from the Overview shows just those crafts, whatever
     -- the filters say
     local focus = v.focus
+    openedFocus = focus
     v.show:SetShown(not focus)
     v.onlyMine:SetShown(not focus)
     v.searchBox:SetShown(not focus)
@@ -4419,6 +4497,13 @@ local function Refresh(v, state)
         end
         items = kept
     end
+    if ui.craftsSkillUp and addon.isForever and not focus and not unlearnedMode then
+        local kept = {}
+        for _, item in ipairs(items) do
+            if addon:SkillUpDifficulty(item) then table.insert(kept, item) end
+        end
+        items = kept
+    end
     if mixed then
         for _, item in ipairs(items) do item.labelExpansion = true end
     end
@@ -4461,7 +4546,17 @@ local function Refresh(v, state)
 
     local sort = GetSort()
     v.list:SetSort(sort.key, sort.descending)
-    v.list:SetColumns(addon:AvailableColumns(concOn and CONC_COLUMNS or SIMPLE_COLUMNS))
+    local columns = addon:AvailableColumns(concOn and CONC_COLUMNS or SIMPLE_COLUMNS)
+    if unlearnedMode then
+        -- Nothing to make until it's learned: Make and Batch profit were
+        -- all dashes (user, 2026-11-18)
+        local kept = {}
+        for _, col in ipairs(columns) do
+            if col.key ~= "make" and col.key ~= "batch" then table.insert(kept, col) end
+        end
+        columns = kept
+    end
+    v.list:SetColumns(columns)
     if unlearnedMode then
         v.list:SetEmptyText(searching and "No recipe you haven't learned matches."
             or string.format("No %srecipes left to learn found yet. Open each profession's window on the character who has it, so Goldsmith can see which recipes you haven't learned.",
@@ -4537,6 +4632,9 @@ local function Filters(v)
     end
     if ui.craftsGear == "hide" then
         table.insert(list, { label = "No gear", clear = Clear(function() ui.craftsGear = nil end) })
+    end
+    if ui.craftsSkillUp and addon.isForever then
+        table.insert(list, { label = "Has skill up", clear = Clear(function() ui.craftsSkillUp = nil end) })
     end
     return list
 end

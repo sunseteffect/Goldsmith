@@ -37,6 +37,14 @@ local PAGE_STALL = 20           -- seconds without a page before stopping
 local PAGES_GUESS = 70          -- pages in a page scan, until one has run (69 on retail)
 local PAGES_MIN = 10            -- a remembered page count under this is from a cut-short scan
 local SHORT_KEEP = 0.25         -- a scan with under a quarter of the last one's items keeps the last
+-- Forever sends a full scan's listings in bursts with pauses between: a
+-- pause of STEADY seconds read 36,121 listings, half the AH, and the
+-- cheap half was missing (Steel Bar 15s with 66 listed; 3,375 from 8.45s
+-- a few minutes later; Buy next paid 15s; user, 2026-11-18). Short of
+-- NEAR_FULL of the most a recent full scan saw, it waits for more (up to
+-- ARRIVE_MAX). FULL_SEEN_KEEP full scans' counts are kept.
+local NEAR_FULL = 0.8
+local FULL_SEEN_KEEP = 5
 local LOW_KEEP = 0.5            -- a page scan's price under half the last one keeps the last
 -- Reading and pricing stop for the frame once FRAME_MS is used (checked
 -- every CHECK_EVERY rows or items): fixed counts of 15,000 auctions and
@@ -103,6 +111,15 @@ function addon:RecordScanPages(pages)
     GoldsmithDB.scanPagesSeen, GoldsmithDB.scanPages = seen, nil
 end
 
+-- The most listings a recent full scan here saw (fullScanSeen), or nil
+function addon:ExpectedFullListings()
+    local most
+    for _, s in ipairs(GoldsmithDB.fullScanSeen or {}) do
+        if s.group == addon:RealmGroup() and (s.auctions or 0) > (most or 0) then most = s.auctions end
+    end
+    return most
+end
+
 local StartPages -- below
 local sendingQuery = false -- the page scan's own browse search is being sent
 local function Finish(prices, auctions, method)
@@ -135,6 +152,12 @@ local function Finish(prices, auctions, method)
         run = nil
         UpdatePanel()
         return
+    end
+    if method == "full" then
+        local seen = GoldsmithDB.fullScanSeen or {}
+        table.insert(seen, { group = addon:RealmGroup(), auctions = auctions })
+        while #seen > FULL_SEEN_KEEP do table.remove(seen, 1) end
+        GoldsmithDB.fullScanSeen = seen
     end
     GoldsmithDB.ownScan = {
         time = time(), method = method, auctions = auctions, items = items, group = addon:RealmGroup(),
@@ -418,7 +441,9 @@ events:SetScript("OnEvent", function(_, event)
         UpdatePanel()
     elseif event == "REPLICATE_ITEM_LIST_UPDATE" then
         if not run then Borrow() end
-        if run and run.phase == "waiting" and not run.settling then
+        -- Forever: by the count instead (the ticker below); its event can
+        -- come with the first burst
+        if run and run.phase == "waiting" and not run.settling and not (addon.isForever and not run.borrowed) then
             run.settling = true
             C_Timer.After(SETTLE, ReadFullScan)
         end
@@ -469,7 +494,9 @@ C_Timer.NewTicker(1, function()
             else
                 run.steady = run.steady + 1
             end
-            if run.steady >= STEADY or time() - run.arriving > ARRIVE_MAX then
+            local expected = addon.isForever and addon:ExpectedFullListings()
+            local short = expected and num < expected * NEAR_FULL
+            if (run.steady >= STEADY and not short) or time() - run.arriving > ARRIVE_MAX then
                 run.settling = true
                 ReadFullScan()
                 return

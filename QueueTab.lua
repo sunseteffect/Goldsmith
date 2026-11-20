@@ -398,6 +398,10 @@ local function Create(parent)
     view.profit.why:SetPoint("TOPLEFT", view.profit.note, "BOTTOMLEFT", 0, -2)
     view.profit.why:SetWidth(360)
     view.profit.why:SetWordWrap(false)
+    -- ROI beside the profit (user, 2026-11-18: "can we put ROI on the
+    -- queue screen")
+    view.profit.roi = UI.Text(summary, "small", "muted")
+    view.profit.roi:SetPoint("BOTTOMLEFT", view.profit.value, "BOTTOMRIGHT", 8, 2)
     view.cost.label:SetText("COST")
     view.sells.label:SetText("SELLS FOR")
     view.profit.label:SetText("PROFIT")
@@ -639,6 +643,8 @@ local function Refresh(v)
     v.sells.value:SetText(noTotals and "-" or Money(q.revenue))
     v.profit.value:SetText(noTotals and "-" or Signed(q.profit))
     v.profit.value:SetTextColor(addon:Color(noTotals and "dim" or addon:MoneyColor(q.profit)))
+    local roi = not noTotals and (q.cost or 0) > 0 and q.profit / q.cost * 100
+    v.profit.roi:SetText(roi and string.format("%d%% ROI", math.floor(roi + 0.5)) or "")
     -- The to-do counts today's prices; the queue, what you paid. When what
     -- you hold makes them clearly differ, say by how much and why.
     local plans = {}

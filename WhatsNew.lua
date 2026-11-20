@@ -15,6 +15,19 @@ local UI = addon.UI
 -- true shows only in WoW Forever.
 local NEWS = {
     {
+        key = "2.10.0",
+        title = "What's new in Goldsmith 2.10",
+        items = {
+            { "Worth a try", "Do this next lists crafts that make a profit but haven't shown they sell yet. Make one or two and list them.", forever = true },
+            { "A chart for every item", "Each scan saves a day's price for every item it sees, so any item's page has a chart and usual price.", forever = true },
+            { "Sales count right away", "A sale counts when the buyer is found, so how many to make doesn't wait for the mail.", forever = true },
+            { "Where to learn it", "Crafts > Not learned yet: hover a recipe for the trainers and vendors that teach it.", forever = true },
+            { "Has skill up", "Crafts > Show > Has skill up: only crafts that still give a skill point.", forever = true },
+            { "Choose how many", "Right-click a craft in Crafts > Choose how many... to queue any number." },
+            { "Fits your gold", "When the best crafts cost more than you have, the best return per gold comes first and the rest waits." },
+        },
+    },
+    {
         key = "2.9.2",
         title = "What's new in Goldsmith 2.9.2",
         items = {

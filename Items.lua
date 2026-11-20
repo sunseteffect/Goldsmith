@@ -938,10 +938,13 @@ local function CreatePage(parent)
     local chartTitle = UI.Text(chartPanel, "heading")
     chartTitle:SetPoint("TOPLEFT", 16, -14)
     chartTitle:SetText("Price, 30 days")
-    page.chartNote = UI.Text(chartPanel, "label", "dim", "RIGHT")
-    page.chartNote:SetPoint("TOPRIGHT", -16, -16)
+    -- Its own line under the title: beside it, the band's prices ran into
+    -- the title on a narrow window (user, 2026-11-19)
+    page.chartNote = UI.Text(chartPanel, "label", "dim")
+    page.chartNote:SetPoint("TOPLEFT", chartTitle, "BOTTOMLEFT", 0, -4)
+    page.chartNote:SetPoint("RIGHT", chartPanel, "RIGHT", -16, 0)
     local chartArea = CreateFrame("Frame", nil, chartPanel)
-    chartArea:SetPoint("TOPLEFT", 16, -44)
+    chartArea:SetPoint("TOPLEFT", 16, -54)
     chartArea:SetPoint("BOTTOMRIGHT", -16, 48)
     page.chart = UI.LineChart(chartArea)
     page.chart:SetAllPoints()
@@ -1156,7 +1159,11 @@ local function CreatePage(parent)
         end
         local sub = {}
         if d.tier then table.insert(sub, string.format("Tier %d of %d", d.tier, d.tierCount or d.tier)) end
-        if d.profession then table.insert(sub, d.profession) end
+        if d.usedIn then
+            table.insert(sub, "Used in " .. table.concat(d.usedIn, ", "))
+        elseif d.profession then
+            table.insert(sub, d.profession)
+        end
         local expansion = d.itemID and addon:GetItemExpansion(d.itemID)
         if expansion and not addon.isForever then table.insert(sub, addon:GetExpansionName(expansion)) end
         if d.recipe and d.charKey and d.charKey ~= addon.charKey then
@@ -1287,7 +1294,7 @@ local function CreatePage(parent)
             for _, entry in ipairs(d.byCharacter or {}) do
                 tooltip:AddDoubleLine(entry.name, addon:StockWhereText(entry), 0.8, 0.8, 0.8, 1, 1, 1)
             end
-            if d.have == 0 then tooltip:AddLine("None on any character or in the warband bank.", 0.6, 0.6, 0.6, true) end
+            if d.have == 0 then tooltip:AddLine("None on any character" .. addon:AndWarband(" or in the warband bank") .. ".", 0.6, 0.6, 0.6, true) end
             if heldDays then
                 addon:Explain(tooltip, "Held since your oldest copy was made (oldest sold first).", 0.6, 0.6, 0.6, true)
             elseif d.have > 0 then
@@ -1365,9 +1372,14 @@ local function CreatePage(parent)
             else
                 r[1]:Set("Yours cost you", "-", "dim", "not crafted yet")
             end
+            -- Forever: no procs, so no stats to name and no worst case
             r[2]:Set("Estimated", d.estimated and (Money(d.estimated) .. (d.partial and "+" or "")) or "-", "text",
-                StatsText(d.stats, d.finishing))
-            r[3]:Set("Worst case", d.worst and Money(d.worst) or "-", "muted", "one made now, with no procs or finishing reagents")
+                addon.isForever and "one made now, at today's prices" or StatsText(d.stats, d.finishing))
+            if addon.isForever then
+                r[3]:Set(nil)
+            else
+                r[3]:Set("Worst case", d.worst and Money(d.worst) or "-", "muted", "one made now, with no procs or finishing reagents")
+            end
             -- Held ones at what they cost, else what the next ones will
             if d.yours and (d.have or 0) > 0 then ProfitNow(r[4], d.yours, "what yours cost")
             else ProfitNow(r[4], d.estimated, "the estimated cost") end
@@ -1426,13 +1438,21 @@ local function CreatePage(parent)
             end
         end
 
-        -- Price chart
+        -- Price chart. The band's prices are in the note and every hover
+        -- (user, 2026-11-19: the band had no price on it)
+        local usual = insight and insight.usual
         local points = {}
         for _, p in ipairs(d.history) do
             table.insert(points, { value = p.value, day = p.day, color = "line", tooltip = function(tooltip)
                 local y, m, dd = p.day:match("(%d+)-(%d+)-(%d+)")
                 tooltip:AddLine(date("%b %d", time({ year = tonumber(y), month = tonumber(m), day = tonumber(dd), hour = 12 })), 1, 1, 1)
                 tooltip:AddDoubleLine("AH price", Money(p.value), 0.8, 0.8, 0.8, 1, 1, 1)
+                if usual then
+                    tooltip:AddDoubleLine("Usual", Money(usual), 0.8, 0.8, 0.8, 1, 1, 1)
+                end
+                if d.bandLow then
+                    tooltip:AddDoubleLine("Usual range", Money(d.bandLow) .. " to " .. Money(d.bandHigh), 0.8, 0.8, 0.8, 1, 1, 1)
+                end
             end })
         end
         local enough = #points >= 2
@@ -1440,9 +1460,9 @@ local function CreatePage(parent)
         page.chartEmpty:SetShown(not enough)
         page.chartEmpty:SetText("Goldsmith saves the AH price once a day you log in. The chart starts after 2 days.")
         if enough then
-            local band = d.bandLow and { low = d.bandLow, high = d.bandHigh, usual = insight and insight.usual }
+            local band = d.bandLow and { low = d.bandLow, high = d.bandHigh, usual = usual }
             page.chart:SetData(points, { band = band })
-            page.chartNote:SetText(band and "band = usual range" or "")
+            page.chartNote:SetText(band and ("usual range: " .. Money(d.bandLow) .. " to " .. Money(d.bandHigh)) or "")
             local function Short(day)
                 local y, m, dd = day:match("(%d+)-(%d+)-(%d+)")
                 return date("%b %d", time({ year = tonumber(y), month = tonumber(m), day = tonumber(dd), hour = 12 }))
@@ -1772,8 +1792,8 @@ local function Refresh(v, state)
             or next(GoldsmithDB.recipes) == nil and "Nothing tracked yet. Open each of your professions once so Goldsmith knows your materials."
             or "Nothing in stock yet.")
         v.list:SetColumnsAndItems(addon:AvailableColumns(STOCK_COLUMNS), items)
-        v.footer:SetText(string.format("%s in %s, %s and the warband bank", Money(value), Plural(#items, "item"),
-            WhoCounts()))
+        v.footer:SetText(string.format("%s in %s, %s%s", Money(value), Plural(#items, "item"),
+            WhoCounts(), addon:AndWarband()))
         v.note:SetText("")
     else
         local results = addon:SearchItems(search, state.profession, SEARCH_LIMIT)

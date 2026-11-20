@@ -31,7 +31,9 @@ local BOTTOM_HEIGHT = 44
 local ACTION_COUNT = 5
 local CRAFTS_SHOWN = 3
 local ACTION_ROW_GAP = 8
-local CRAFTS_LISTED = 5
+-- The hover details as many as the card shows: 5 felt like too much
+-- (user, 2026-11-18); "Click to see all N" covers the rest
+local CRAFTS_LISTED = CRAFTS_SHOWN
 local OTHERS_HEIGHT = 30
 local OTHERS_SHOWN = 2
 -- The tile's profession icons: the value font draws icons about twice
@@ -396,16 +398,18 @@ end
 local function CraftsAction(crafts, prof)
     if #crafts == 0 then return nil end
     -- One craft per line; the row has room for CRAFTS_SHOWN, the hover lists
-    -- them all with ROI and sales. Names are shortened so a line never wraps;
-    -- who makes it goes last, when it isn't you.
+    -- the first CRAFTS_LISTED with ROI and sales. Names are shortened so a
+    -- line never wraps; who makes it goes last, when it isn't you. As the
+    -- Characters to-do shows them: how many and the gold for the batch
+    -- (user, 2026-11-18: the two lists looked different).
     local parts = {}
     for i = 1, math.min(#crafts, CRAFTS_SHOWN) do
         local c = crafts[i]
         local icon = prof == "All" and addon:ProfessionIconText(c.recipe.profession) or ""
         local who = OnWho(c.charKey)
-        table.insert(parts, string.format("%s%s   %s each%s%s", icon,
-            ItemText(c.itemID, ShortName(c.recipe.outputName, 26), c.row.tier, c.row.tierCount),
-            addon:Colorize(Signed(c.profit), "profit"), who ~= "" and ("  ·" .. who) or "",
+        table.insert(parts, string.format("%s%dx %s   %s%s%s", icon, c.make or 1,
+            ItemText(c.itemID, ShortName(c.recipe.outputName, 24), c.row.tier, c.row.tierCount),
+            addon:Colorize(Signed(c.profit * (c.make or 1)), "profit"), who ~= "" and ("  ·" .. who) or "",
             Queued(c.charKey, c.recipe, c.row.tier, false)))
     end
     local items = {}
@@ -429,7 +433,10 @@ local function CraftsAction(crafts, prof)
             tooltip:AddLine("Best crafts right now", 1, 1, 1)
             addon:Explain(tooltip, string.format("Current-expansion crafts with %d%%+ ROI (Settings) that sell at least once a day, with every cost known. A craft drops off once made and comes back when all have sold.",
                 addon:Setting("minROI")), 0.6, 0.6, 0.6, true)
-            for _, c in ipairs(crafts) do
+            -- Short of gold (FitToGold): the order and what waits
+            addon:AddGoldWaiting(tooltip, crafts[1].charKey)
+            for i = 1, math.min(#crafts, CRAFTS_LISTED) do
+                local c = crafts[i]
                 tooltip:AddLine(" ")
                 tooltip:AddLine(ItemText(c.itemID, c.recipe.outputName, c.row.tier, c.row.tierCount)
                     .. OnWho(c.charKey), 1, 0.82, 0)
@@ -456,12 +463,62 @@ local function CraftsAction(crafts, prof)
                 end
             end
             tooltip:AddLine(" ")
+            addon:ClickHint(tooltip, #crafts > CRAFTS_LISTED
+                and string.format("Click to see all %d in Crafts.", #crafts) or "Click to see these in Crafts.")
+        end,
+        onClick = function()
+            local keys, make = {}, {}
+            for _, c in ipairs(crafts) do keys[c.key] = true make[c.key] = c.make end
+            -- Short of gold the card goes by return per gold (FitToGold):
+            -- the list by ROI, so the two match
+            local short = crafts[1] and addon:GetGoldWaiting(crafts[1].charKey)
+            addon:OpenCrafts({ keys = keys, label = "Best crafts right now", make = make,
+                sort = { key = short and "margin" or "batch", descending = true } })
+        end,
+    }
+end
+
+-- Worth a try (Forever, GetWorthATry): profitable crafts with no proof
+-- they sell yet, to make one or two of and list. Testing new items was
+-- done from the full Crafts list, so Do this next went unused (user,
+-- 2026-11-18).
+local function TryAction(crafts, prof)
+    if #crafts == 0 then return nil end
+    local parts, items, queue = {}, {}, {}
+    for i = 1, math.min(#crafts, CRAFTS_SHOWN) do
+        local c = crafts[i]
+        local icon = prof == "All" and addon:ProfessionIconText(c.recipe.profession) or ""
+        table.insert(parts, string.format("%s%s   %s each · make %d%s", icon,
+            ItemText(c.itemID, ShortName(c.recipe.outputName, 26), c.row.tier, c.row.tierCount),
+            addon:Colorize(Signed(c.profit), "profit"), c.make, Queued(c.charKey, c.recipe, c.row.tier, false)))
+        table.insert(items, { itemID = c.recipe.outputItemID, name = c.recipe.outputName, qty = c.make })
+        table.insert(queue, { charKey = c.charKey, recipe = c.recipe, tier = c.row.tier, tierCount = c.row.tierCount,
+            itemID = c.itemID, concentrate = false, items = c.make })
+    end
+    return {
+        items = items,
+        queue = queue,
+        title = "Worth a try",
+        detail = table.concat(parts, "\n"),
+        tooltip = function(tooltip)
+            tooltip:AddLine("Worth a try", 1, 1, 1)
+            addon:Explain(tooltip, "Crafts that make a profit but haven't shown they sell yet. Make one or two and list them. One that sells within 2 listings at your Worth crafting ROI moves to Best crafts. Slow sales, cheap sales or none take it off this list for 2 weeks.",
+                0.6, 0.6, 0.6, true)
+            for _, c in ipairs(crafts) do
+                tooltip:AddLine(" ")
+                tooltip:AddLine(ItemText(c.itemID, c.recipe.outputName, c.row.tier, c.row.tierCount), 1, 0.82, 0)
+                tooltip:AddDoubleLine("Profit each", string.format("%s (%.0f%% ROI)", Signed(c.profit), c.margin or 0),
+                    0.8, 0.8, 0.8, 0.37, 0.81, 0.48)
+                tooltip:AddLine("    " .. c.why, 0.6, 0.6, 0.6, true)
+            end
+            tooltip:AddLine(" ")
             addon:ClickHint(tooltip, "Click to see these in Crafts.")
         end,
         onClick = function()
-            local keys = {}
-            for _, c in ipairs(crafts) do keys[c.key] = true end
-            addon:OpenCrafts({ keys = keys, label = "Best crafts right now" })
+            local keys, make = {}, {}
+            for _, c in ipairs(crafts) do keys[c.key] = true make[c.key] = c.make end
+            addon:OpenCrafts({ keys = keys, label = "Worth a try", make = make,
+                sort = { key = "profit", descending = true } })
         end,
     }
 end
@@ -792,7 +849,7 @@ local function AcceptGoal(popup)
 end
 
 StaticPopupDialogs["GOLDSMITH_GOLD_GOAL"] = {
-    text = "How much gold do you want to make?\nCounted from now, across all your characters and the warband bank\n(e.g. 5000 or 5k; 0 clears it)",
+    text = "How much gold do you want to make?\nCounted from now, across all your characters" .. addon:AndWarband() .. "\n(e.g. 5000 or 5k; 0 clears it)",
     button1 = OKAY or "OK",
     button2 = CANCEL or "Cancel",
     hasEditBox = true,
@@ -866,7 +923,7 @@ local function CreateGoal(parent)
         if not goal then
             tooltip:AddLine("Set a gold goal", 1, 1, 1)
             tooltip:AddLine("How much gold you want to make, counted from when you set it, across all your "
-                .. "characters and the warband bank. The chart shows it as a line once you're halfway.",
+                .. "characters" .. addon:AndWarband() .. ". The chart shows it as a line once you're halfway.",
                 0.6, 0.6, 0.6, true)
             addon:ClickHint(tooltip, "Click to set one.")
             return
@@ -952,7 +1009,7 @@ local function ChartData(key, state)
             end
         end
         local now = history[#history] and history[#history].copper or 0
-        local subtitle = "all characters and warband bank, now " .. Money(now)
+        local subtitle = "all characters" .. addon:AndWarband(" and warband bank") .. ", now " .. Money(now)
         return points, subtitle, "line",
             recorded < 2 and "Your total gold is saved each day you play. The line starts tomorrow."
     else
@@ -1358,14 +1415,23 @@ local function Refresh(view, state)
     if concAction then table.insert(list, concAction) end
     local cooldownAction = CooldownAction(prof)
     if cooldownAction then table.insert(list, cooldownAction) end
+    -- All of them, most gold for the batch first, as the Characters to-do
+    -- (it showed 12 where the card's click showed 5; user, 2026-11-18)
+    -- Short of gold: best return per gold first instead (FitToGold)
     local best = Mine(addon:GetBestCrafts(prof, math.huge))
-    for i = #best, CRAFTS_LISTED + 1, -1 do best[i] = nil end
+    addon:BudgetSort(best, function(c) return c.profit * (c.make or 1) end)
     local craftsAction = CraftsAction(best, prof)
     if craftsAction then table.insert(list, craftsAction) end
+    -- Forever only: a new server, where few crafts have shown they sell
+    local tryAction = addon.isForever and TryAction(Mine(addon:GetWorthATry(prof, CRAFTS_SHOWN * 3)), prof)
+    if tryAction then table.insert(list, tryAction) end
     -- Note what's suggested, so a craft of it soon after counts as followed
     if not inSetup then
         local items = {}
-        for _, action in ipairs({ concAction, cooldownAction, craftsAction }) do
+        -- By number: ipairs stops at the first card that's missing
+        local actions = { concAction or false, cooldownAction or false, craftsAction or false, tryAction or false }
+        for i = 1, #actions do
+            local action = actions[i]
             for _, item in ipairs(action and action.items or {}) do table.insert(items, item) end
         end
         addon:MarkSuggested(items)

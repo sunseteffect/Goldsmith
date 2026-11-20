@@ -537,6 +537,56 @@ end
 -- Returns whether a price is new or changed for something a recipe uses
 -- or makes: every price is saved, but a food or armor vendor's change
 -- nothing Goldsmith works out (user, 2026-11-03)
+-- Where a recipe can be learned (Forever, where the game doesn't say):
+-- the trainers and vendors you've opened that teach or sell it, by the
+-- item it makes. GoldsmithDB.recipeSources[outputItemID][npc .. "|" ..
+-- zone] = { kind = "trainer"/"vendor", npc, zone, cost, time } (user,
+-- 2026-11-18: "show how to acquire the not learned recipes").
+local RECIPE_SOURCES_PER_ITEM = 4
+
+local function RecordRecipeSource(outputItemID, kind, cost)
+    if not (outputItemID and addon.isForever) then return end
+    local npc = UnitName("npc")
+    if not npc then return end
+    local zone = (GetRealZoneText and GetRealZoneText()) or (GetZoneText and GetZoneText()) or ""
+    GoldsmithDB.recipeSources = GoldsmithDB.recipeSources or {}
+    local all = GoldsmithDB.recipeSources[outputItemID] or {}
+    GoldsmithDB.recipeSources[outputItemID] = all
+    local key = npc .. "|" .. zone
+    if not all[key] then
+        -- A few places is plenty: the oldest seen goes
+        local count, oldest = 0, nil
+        for k, e in pairs(all) do
+            count = count + 1
+            if not oldest or e.time < all[oldest].time then oldest = k end
+        end
+        if count >= RECIPE_SOURCES_PER_ITEM then all[oldest] = nil end
+    end
+    all[key] = { kind = kind, npc = npc, zone = zone, cost = cost, time = time() }
+end
+
+-- Recipes by name, for a vendor's "Plans: Steel Plate Helm"
+local function RecipeOutputByName(name)
+    for _, list in ipairs({ GoldsmithDB.unlearned or {}, GoldsmithDB.recipes or {} }) do
+        for _, r in pairs(list) do
+            if r.outputItemID and (r.name == name or r.outputName == name) then return r.outputItemID end
+        end
+    end
+end
+
+-- The places to learn a recipe, cheapest first. Returns a list (empty
+-- when none was seen).
+function addon:GetRecipeSources(recipe)
+    local all = recipe and GoldsmithDB.recipeSources and GoldsmithDB.recipeSources[recipe.outputItemID]
+    local list = {}
+    for _, e in pairs(all or {}) do table.insert(list, e) end
+    table.sort(list, function(a, b)
+        if (a.cost or 0) ~= (b.cost or 0) then return (a.cost or 0) < (b.cost or 0) end
+        return a.npc < b.npc
+    end)
+    return list
+end
+
 local function RecordVendorPrices()
     local changed = false
     local count = GetMerchantNumItems and GetMerchantNumItems() or 0
@@ -561,6 +611,14 @@ local function RecordVendorPrices()
         elseif GetMerchantItemInfo then
             local _
             _, _, price, stackCount, _, _, _, hasExtendedCost = GetMerchantItemInfo(i)
+        end
+        -- A recipe for sale ("Plans: Steel Plate Helm"): where to learn it
+        if addon.isForever and price and price > 0 and not hasExtendedCost then
+            local info = C_MerchantFrame and C_MerchantFrame.GetItemInfo and C_MerchantFrame.GetItemInfo(i)
+            local name = info and info.name or (GetMerchantItemInfo and GetMerchantItemInfo(i))
+            local taught = name and name:match("^%a+: (.+)$")
+            local output = taught and RecipeOutputByName(taught)
+            if output then RecordRecipeSource(output, "vendor", price) end
         end
         if itemID and price and price > 0 and not hasExtendedCost then
             local unit = price / math.max(stackCount or 1, 1)
@@ -1121,6 +1179,27 @@ function addon:GetOwnSalePrice(itemName)
     end
     if units == 0 then return nil end
     return copper / units
+end
+
+-- Your AH sales of an item over the last OWN_SALES_DAYS days and how many
+-- you listed (deposits; each relist counts again), or nil if none sold:
+-- { sold, got (each, after the cut), posted }
+function addon:GetOwnSaleRecord(itemName)
+    if not itemName then return nil end
+    local since = time() - OWN_SALES_DAYS * 86400
+    local sold, copper, posted = 0, 0, 0
+    for _, e in ipairs(addon.ledger:getAll()) do
+        if e.item == itemName and (e.timestamp or 0) >= since then
+            if e.type == "REVENUE" and not e.vendor and not e.trade then
+                sold = sold + (e.quantity or 0)
+                copper = copper + (e.totalCopper or 0)
+            elseif e.kind == "DEPOSIT" then
+                posted = posted + (e.quantity or 0)
+            end
+        end
+    end
+    if sold == 0 then return nil end
+    return { sold = sold, got = copper / sold, posted = posted }
 end
 
 -- Weapons, armor and profession equipment. They aren't commodities: each
@@ -3180,8 +3259,13 @@ SlotCost = function(slot)
     local best, bestSource, bestName, bestID
     -- Today's price: the AH, or the vendor when it's cheaper. Recipes saved
     -- before item IDs were stored have no itemIDs until re-crafted.
+    -- What it costs to buy (buying): not capped at what it sold for before.
+    -- After the cheap Small Lustrous Pearls sold out (676 left from 14.30s)
+    -- Crafts still costed them at TSM's 2.95s sale average: Pearl-handled
+    -- Dagger read +20s there and -1s in the queue once bought (user,
+    -- 2026-11-18), as plans and Buy next already price it.
     for i, itemID in ipairs(slot.itemIDs or {}) do
-        local price, source = addon:GetMarketPriceInfo(itemID)
+        local price, source = addon:GetMarketPriceInfo(itemID, true)
         if price and (not best or price < best) then
             best, bestName, bestID = price, slot.names[i], itemID
             bestSource = source == "Vendor" and "vendor" or "AH price"
@@ -3425,7 +3509,7 @@ function addon:GetRecipeCost(recipe, noProcs)
             unitCost = cost,
             source = source,
             -- how old the AH price is, when the cost came from the AH
-            ageText = marketItemID and addon:PriceAgeText(marketItemID),
+            ageText = marketItemID and addon:PriceAgeText(marketItemID, true),
         })
     end
     return perCraft / outputPerCraft, missing, breakdown, stats
@@ -4042,6 +4126,9 @@ local function ScanLearnedRecipes()
     -- MatchEnchantScrolls with a profession open in the tour; user,
     -- 2026-10-24). The next profession window after the tour reads them.
     if TourPrices() then return end
+    -- Someone's linked profession: their recipes aren't yours (see
+    -- IsOwnProfessionWindow)
+    if not addon:IsOwnProfessionWindow() then return end
 
     local ok, ids = pcall(C_TradeSkillUI.GetAllRecipeIDs)
     if not ok or not ids then return end
@@ -4096,6 +4183,13 @@ local function ScanLearnedRecipes()
             local learned = info and info.learned
             if learned then
                 addon:MarkRecipeKnown(id)
+            end
+            -- Marked known but your own window says not learned: read from
+            -- someone's linked window before those were skipped (user,
+            -- 2026-11-18)
+            if info and not learned and addon.char.knownRecipes[id] then
+                addon:UnmarkRecipeKnown(id)
+                addon.recipesVersion = addon.recipesVersion + 1
             end
             if info and not learned and GoldsmithDB.recipes[id] and not KnownByAnyone(id) then
                 -- Saved but nobody knows it: moved to the ones not learned
@@ -4451,7 +4545,10 @@ function addon:InitializePricing()
                 local link = GetTrainerServiceItemLink(i)
                 local itemID = link and tonumber(link:match("item:(%d+)"))
                 local _, rank = GetTrainerServiceSkillReq(i)
-                if itemID and rank and rank > 0 then GoldsmithDB.trainerSkill[itemID] = rank end
+                if itemID and rank and rank > 0 then
+                    GoldsmithDB.trainerSkill[itemID] = rank
+                    RecordRecipeSource(itemID, "trainer", GetTrainerServiceCost and GetTrainerServiceCost(i) or nil)
+                end
             end
         end)
     end
@@ -4661,6 +4758,8 @@ function addon:InitializePricing()
         EventRegistry:RegisterCallback("ProfessionsRecipeListMixin.Event.OnRecipeSelected", function(_, recipeInfo)
             if recipeInfo and recipeInfo.recipeID then
                 addon.selectedRecipeID = recipeInfo.recipeID
+                -- Someone's linked profession: not saved as yours
+                if not addon:IsOwnProfessionWindow() then return end
                 local info = C_TradeSkillUI.GetRecipeInfo(recipeInfo.recipeID)
                 if info and info.learned == false then
                     -- Kept with the ones not learned yet (Crafts > Show:

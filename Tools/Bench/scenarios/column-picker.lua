@@ -74,9 +74,14 @@ addon.RefreshWindow()
 bench.Advance(5)
 list:Update()
 
--- Columns that start hidden: Break-even, Vs usual, Make, Batch, Listed
-for _, key in ipairs({ "breakEven", "vsUsual", "make", "batch", "listed" }) do
+-- Columns that start hidden: Break-even, Vs usual, Listed
+for _, key in ipairs({ "breakEven", "vsUsual", "listed" }) do
     bench.Check("starts hidden: " .. key, not Shown(list, key))
+end
+-- Make and Batch start shown (user, 2026-11-18: Do this next's "6x ...
+-- +1g93" lost its number and total in Crafts)
+for _, key in ipairs({ "make", "batch" }) do
+    bench.Check("starts shown: " .. key, Shown(list, key))
 end
 boxes = Menu()
 bench.Check("Break-even off in the menu", boxes["Break-even"] and not boxes["Break-even"].on())
@@ -86,8 +91,6 @@ bench.Check("the open menu ticks it straight away", boxes["Break-even"].on())
 boxes["Break-even"].toggle()
 bench.Check("and unticks it", not boxes["Break-even"].on())
 boxes["Break-even"].toggle()
-Menu()["Listed"].toggle()
-Menu()["Make"].toggle()
 bench.Check("Break-even shown", Shown(list, "breakEven"))
 bench.Equal("saved as shown", ui.hiddenColumns.crafts.breakEven, false)
 -- A row with a cost: its break-even is cost / 0.95
@@ -111,8 +114,13 @@ for _, r in ipairs(list.rows) do
 end
 bench.Equal("no errors with them shown", #bench.TakeErrors(), 0)
 -- Hiding one that starts hidden again saves nothing
+Menu()["Break-even"].toggle()
+bench.Equal("back as it started: nothing saved", ui.hiddenColumns.crafts and ui.hiddenColumns.crafts.breakEven, nil)
+-- Hiding one that starts shown is saved
 Menu()["Make"].toggle()
-bench.Equal("back as it started: nothing saved", ui.hiddenColumns.crafts.make, nil)
+bench.Check("Make hidden", not Shown(list, "make"))
+bench.Equal("saved as hidden", ui.hiddenColumns.crafts.make, true)
+Menu()["Make"].toggle()
 
 -- Tick everything: the name always keeps its room (with every one ticked
 -- the names were an icon and a letter, user 2026-11-13). What doesn't fit
@@ -140,6 +148,28 @@ bench.Check("nothing runs past the list", right <= 860, tostring(right))
 select(2, Menu())["Default columns"]()
 bench.Equal("Default columns clears it", ui.hiddenColumns.crafts, nil)
 bench.Check("Break-even hidden again", not Shown(list, "breakEven"))
+-- Not learned yet: nothing to make, so no Make or Batch profit (they
+-- were all dashes, user 2026-11-18)
+ui.craftsShow = "unlearned"
+addon.RefreshWindow()
+bench.Advance(3)
+list:Update()
+bench.Check("not learned: no Make", not Shown(list, "make"))
+bench.Check("not learned: no Batch profit", not Shown(list, "batch"))
+bench.Check("not learned: Profit still", Shown(list, "profit"))
+ui.craftsShow = nil
+addon.RefreshWindow()
+bench.Advance(3)
+list:Update()
+bench.Check("back: Make again", Shown(list, "make"))
+-- A narrow window: Make and Batch give the names their room
+for _, child in ipairs({ list:GetChildren() }) do child:SetWidth(760) end
+list:Update()
+bench.Check("narrow: Batch makes room", not Shown(list, "batch"))
+bench.Check("narrow: names keep 150 or more", list.headerCells.item:GetWidth() >= 150, tostring(list.headerCells.item:GetWidth()))
+bench.Check("narrow: Profit stays", Shown(list, "profit"))
+for _, child in ipairs({ list:GetChildren() }) do child:SetWidth(860) end
+list:Update()
 
 -- History keeps its own
 addon:ShowTab("history")

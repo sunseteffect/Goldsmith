@@ -349,6 +349,8 @@ local function CreateCard(parent)
             for _, item in ipairs(todo.items) do
                 tooltip:AddDoubleLine(TodoText(item, card.key), TodoProfitText(item), 0.9, 0.9, 0.9, 0.37, 0.81, 0.48)
             end
+            -- Short of gold (Insights.lua FitToGold)
+            addon:AddGoldWaiting(tooltip, card.key)
         end
         if card.cooldowns and #card.cooldowns > 0 then
             tooltip:AddLine(" ")

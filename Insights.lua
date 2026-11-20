@@ -57,13 +57,19 @@ local ENOUGH_STOCK_CAP = 20    -- see GetBestCrafts
 -- everything else (Do this next, to-dos, concentration) stays current only.
 -- Returns nil if it's worth recommending, otherwise why not (plain words).
 
--- Your sales over the last 14 days averaged at least what the craft costs
--- now (row.cost, per item). A sale at a loss shows people buy it cheap,
--- not that making it pays (a Deadly Amethyst sold for 5.64g against a 46g
--- craft cost).
+-- Your sales over the last 14 days prove it sells: at your "Worth
+-- crafting at" ROI or better on what the craft costs now (row.cost, per
+-- item), and quickly, within MAX_POSTS_PER_SALE listings per one sold.
+-- A sale at a loss shows people buy it cheap, not that making it pays (a
+-- Deadly Amethyst sold for 5.64g against a 46g craft cost). One sold after
+-- many relists isn't worth making again either: held too long, its price
+-- drops and it goes for what you can get (user, 2026-11-18).
+local MAX_POSTS_PER_SALE = 2
 local function SoldAtProfit(recipe, row)
-    local got = addon:GetOwnSalePrice(recipe.outputName)
-    return got ~= nil and row.cost ~= nil and got >= row.cost
+    local r = addon:GetOwnSaleRecord(recipe.outputName)
+    if not (r and row.cost and row.cost > 0) then return false end
+    return (r.got - row.cost) / row.cost * 100 >= addon:Setting("minROI")
+        and r.posted <= r.sold * MAX_POSTS_PER_SALE
 end
 
 local WhyNotBase
@@ -99,6 +105,9 @@ function addon:WhyNotRecommended(recipe, row, shownExpansions)
     end
 end
 
+-- A second return of true: the reason is only that there's no proof it
+-- sells (few region sales, none of yours yet), not that it's known bad.
+-- Those are Worth a try (GetWorthATry).
 WhyNotBase = function(recipe, row, shownExpansions)
     if addon:IsIgnored(recipe.outputItemID) then
         return "You're ignoring this item. Right-click it to stop, or Settings > Ignored crafts."
@@ -130,23 +139,28 @@ WhyNotBase = function(recipe, row, shownExpansions)
     -- to the rules below.
     local level = not addon:HasTSM() and addon:GetSellLevel(itemID)
     if level == addon.SELL_LEVEL.hardly and not SoldAtProfit(recipe, row) then
-        return "Hardly sells: few sales across the region this past week (Goldsmith Data)."
+        return "Hardly sells: few sales across the region this past week (Goldsmith Data).", true
     elseif level == addon.SELL_LEVEL.slow and (row.margin or 0) < SLOW_MIN_ROI and not SoldAtProfit(recipe, row) then
-        return string.format("Sells slowly across the region (Goldsmith Data): worth it from %d%% ROI.", SLOW_MIN_ROI)
+        return string.format("Sells slowly across the region (Goldsmith Data): worth it from %d%% ROI.", SLOW_MIN_ROI), true
     elseif level then
         return nil
     end
     local demand, source = row.demand, row.demandSource
     if not demand then demand, source = addon:GetDemand(itemID, recipe.outputName) end
-    if demand == nil then return "No sales data, so there's no telling whether it sells." end
+    if demand == nil then return "No sales data, so there's no telling whether it sells.", true end
+    -- Only your own sales to go on: they have to show it sells quickly at
+    -- a profit, not just once (user, 2026-11-18)
+    if source == "your sales" and not SoldAtProfit(recipe, row) then
+        return "Only your sales to go on, and they were slow or under your ROI. Recommended once one sells quickly at a profit.", true
+    end
     -- Only the region's sales (TSM) can say it sells too slowly: your own
     -- only show what you made and sold (user, 2026-10-09)
     if demand < MIN_DEMAND and source == "TSM region" then
-        return string.format("Sells under %d a day, so it may take a long time to sell.", MIN_DEMAND)
+        return string.format("Sells under %d a day, so it may take a long time to sell.", MIN_DEMAND), true
     end
     if addon:IsGear(itemID) and demand < GEAR_MIN_DEMAND and not SoldAtProfit(recipe, row) then
-        return string.format("Gear sells realm by realm: about %s a day across the whole region is a sale every few weeks or months on yours. Recommended once you've sold one yourself at a profit.",
-            addon:FormatDemand(demand))
+        return string.format("Gear sells realm by realm: about %s a day across the whole region is a sale every few weeks or months on yours. Recommended once one of yours sells quickly at a profit.",
+            addon:FormatDemand(demand)), true
     end
     local saleRate = row.saleRate or addon:GetSaleRate(itemID)
     if saleRate and saleRate < MIN_SALE_RATE and not SoldAtProfit(recipe, row) then
@@ -155,7 +169,7 @@ WhyNotBase = function(recipe, row, shownExpansions)
             addon:FormatSaleRate(saleRate),
             (got and row.cost and got < row.cost)
                 and string.format(" Yours sold for %s each lately, less than it costs to make.", addon:FormatMoney(got))
-                or " Recommended once you've sold one yourself at a profit.")
+                or " Recommended once one of yours sells quickly at a profit."), not (got and row.cost and got < row.cost)
     end
 end
 
@@ -752,7 +766,181 @@ end
 -- hold: never more while some sit unsold, in case the market turns.
 -- Crafts whose crafter is excluded aren't recommended.
 -- Returns up to `count` { recipe, row, charKey, profit, margin, demand,
--- have, make (items to make), makeReason, outputPerCraft }.
+-- have, make (items to make), makeReason, outputPerCraft, budgetRank }.
+--
+-- A character's gold: no craft takes more than GOLD_SHARE of it, so it's
+-- spread over several items. When their Best crafts cost more than they
+-- have, the best return per gold goes first too (ROI, then sold a day). What
+-- doesn't fit waits (addon:GetGoldWaiting). The to-do said make 6 Massive
+-- Iron Axes (9.12g) and more, with 11.53g on the character (user,
+-- 2026-11-18: "diversifying across items is also good rather than just do
+-- 5 axes"). budgetRank is set on the ones fitted, for that order.
+-- A quarter: 4 Moonsteel Broadswords (6g) of 25g is what the user is
+-- comfortable with; 40% allowed 6 (user, 2026-11-18: "if those sell i can
+-- always craft more")
+local GOLD_SHARE = 0.25
+local goldWaiting = {}
+
+-- charKey -> { money, spare (after the queue), need, queueSpend, waiting
+-- = { crafts that didn't fit } }, from the last GetBestCrafts; nil when
+-- that character's gold covers it all
+function addon:GetGoldWaiting(charKey)
+    return goldWaiting[charKey]
+end
+
+-- The hover's lines for that (Overview card, Characters to-do)
+function addon:AddGoldWaiting(tooltip, charKey)
+    local gold = goldWaiting[charKey]
+    if not gold then return end
+    local M = function(c) return addon:FormatMoney(c) end
+    tooltip:AddLine(" ")
+    if gold.covered then
+        -- Gold for all; a quarter of it made too small a batch of some
+        local names = {}
+        for _, c in ipairs(gold.waiting) do table.insert(names, c.recipe.outputName) end
+        tooltip:AddLine(string.format("Waiting for gold: %s. A quarter of your %s makes too small a batch to be worth a to-do.",
+            table.concat(names, ", "), M(gold.money)), 0.6, 0.6, 0.6, true)
+        return
+    end
+    if gold.queueSpend > 0 then
+        tooltip:AddLine(string.format("You have %s. Your queue still needs %s of materials; these cost %s.",
+            M(gold.money), M(gold.queueSpend), M(gold.need)), 1, 0.82, 0, true)
+    else
+        tooltip:AddLine(string.format("These cost %s; you have %s.", M(gold.need), M(gold.money)), 1, 0.82, 0, true)
+    end
+    if gold.queueSpend > gold.money then
+        local r, g, b = addon:Color("warning")
+        tooltip:AddLine("Your queue needs more than you have: make fewer there.", r, g, b, true)
+    end
+    tooltip:AddLine("Best return per gold first, spread over several crafts.", 0.6, 0.6, 0.6, true)
+    if #gold.waiting > 0 then
+        local names = {}
+        for _, c in ipairs(gold.waiting) do table.insert(names, c.recipe.outputName) end
+        tooltip:AddLine("Waiting for gold: " .. table.concat(names, ", "), 0.6, 0.6, 0.6, true)
+    end
+end
+
+local function FitToGold(list)
+    local byChar = {}
+    for _, c in ipairs(list) do
+        byChar[c.charKey] = byChar[c.charKey] or {}
+        table.insert(byChar[c.charKey], c)
+    end
+    goldWaiting = {}
+    local keep = {}
+    -- A batch cut down by the gold must still make "Worth a to-do at": 4
+    -- Solid Sharpening Stones for 2s74 showed with it at 10s (user,
+    -- 2026-11-18). It waits for more gold instead.
+    local minLine = (addon:Setting("minLine") or 0) * 10000
+    local function Worth(c, n) return c.profit * n >= minLine end
+    for charKey, crafts in pairs(byChar) do
+        local ch = GoldsmithDB.characters[charKey]
+        local money = ch and ch.money
+        -- Queued ones stay as you queued them. Queuing buys nothing: what
+        -- the queue still has to buy comes off the gold first (6 Massive
+        -- Iron Axes queued and not bought skipped the check, user
+        -- 2026-11-18). Bought ones are in your bags, so not counted again.
+        local queueSpend = 0
+        local entries = addon:GetQueue(charKey)
+        if money and entries and #entries > 0 then
+            local q = addon:BuildQueue(charKey)
+            queueSpend = q and q.spend or 0
+        end
+        local need, open = 0, {}
+        for _, c in ipairs(crafts) do
+            if addon:FindQueueEntry(charKey, c.recipe.recipeID, c.row.tier, false) then
+                keep[c] = true
+            else
+                table.insert(open, c)
+                need = need + (c.row.cost or 0) * c.make
+            end
+        end
+        crafts = open
+        local spare = money and math.max(money - queueSpend, 0)
+        if not money then
+            for _, c in ipairs(crafts) do keep[c] = true end
+        elseif need <= spare and queueSpend <= money then
+            -- Gold for all of them: still no more than GOLD_SHARE on one
+            -- item (9 Moonsteel Broadswords were 13.50g of 25g, user
+            -- 2026-11-18), at least one
+            local small = {}
+            for _, c in ipairs(crafts) do
+                local each = c.row.cost or 0
+                local n = c.make
+                if each > 0 then n = math.max(math.min(c.make, math.floor(spare * GOLD_SHARE / each)), 1) end
+                if n < c.make and not Worth(c, n) then
+                    table.insert(small, c)
+                else
+                    if n < c.make then
+                        c.makeReason = string.format("%d of %d: no more than %d%% of %s's gold on one item",
+                            n, c.make, GOLD_SHARE * 100, (ch.name or charKey:match("^[^-]+")))
+                        c.make = n
+                    end
+                    keep[c] = true
+                end
+            end
+            if #small > 0 then
+                goldWaiting[charKey] = { money = ch.money, spare = spare, need = need, queueSpend = queueSpend,
+                    waiting = small, covered = true }
+            end
+        else
+            money = spare
+            table.sort(crafts, function(a, b)
+                if (a.margin or 0) ~= (b.margin or 0) then return (a.margin or 0) > (b.margin or 0) end
+                if (a.demand or 0) ~= (b.demand or 0) then return (a.demand or 0) > (b.demand or 0) end
+                return a.profit > b.profit
+            end)
+            local left, share, rank = money, money * GOLD_SHARE, 0
+            local waiting = {}
+            for _, c in ipairs(crafts) do
+                local each = c.row.cost or 0
+                local n = c.make
+                if each > 0 then
+                    n = math.min(n, math.floor(share / each), math.floor(left / each))
+                    -- One costs more than the share but still fits: one
+                    if n < 1 and each <= left then n = 1 end
+                end
+                if n >= 1 and (n >= c.make or Worth(c, n)) then
+                    if n < c.make then
+                        c.makeReason = string.format("%d of %d: what %s's gold covers, spread over several crafts",
+                            n, c.make, (ch.name or charKey:match("^[^-]+")))
+                    end
+                    c.make = n
+                    left = left - n * each
+                    rank = rank + 1
+                    c.budgetRank = rank
+                    keep[c] = true
+                else
+                    table.insert(waiting, c)
+                end
+            end
+            goldWaiting[charKey] = { money = ch.money, spare = spare, need = need, queueSpend = queueSpend,
+                waiting = waiting }
+        end
+    end
+    for i = #list, 1, -1 do
+        if not keep[list[i]] then table.remove(list, i) end
+    end
+end
+
+-- Order for lists that mix fitted and other lines: lines without a
+-- budgetRank first (concentration, cooldowns, characters with the gold),
+-- by `value`, then the fitted ones by character and rank. A total order,
+-- so table.sort can use it.
+function addon:BudgetSort(list, value)
+    table.sort(list, function(a, b)
+        local ra, rb = a.budgetRank, b.budgetRank
+        if (ra ~= nil) ~= (rb ~= nil) then return ra == nil end
+        if ra then
+            if a.charKey ~= b.charKey then return a.charKey < b.charKey end
+            return ra < rb
+        end
+        local x, y = value(a), value(b)
+        if x ~= y then return x > y end
+        return (a.profit or 0) > (b.profit or 0)
+    end)
+end
+
 function addon:GetBestCrafts(prof, count)
     local list = {}
     for _, recipeID in ipairs(addon:Keys(GoldsmithDB.recipes)) do
@@ -787,8 +975,73 @@ function addon:GetBestCrafts(prof, count)
             end
         end
     end
-    table.sort(list, function(a, b) return a.profit > b.profit end)
+    FitToGold(list)
+    addon:BudgetSort(list, function(c) return c.profit end)
     for i = #list, count + 1, -1 do list[i] = nil end
+    return list
+end
+
+-- Worth a try (Forever): crafts that make a profit on paper but have no
+-- proof they sell, so Best crafts leaves them out. On a new server few
+-- crafts have that proof, and TSM's region numbers were a poor guide:
+-- Moonsteel Broadsword and Massive Iron Axe looked weak there and sold
+-- fast (user, 2026-11-18). Make one or two and list them: one that sells
+-- quickly at a profit becomes a Best craft (SoldAtProfit). One that sold
+-- slowly or for too little, or that you listed lately and is gone without
+-- an AH sale (vendored), didn't pan out: it stays off for TRY_DAYS. Not while you hold one: that test is still running.
+-- Returns { key, recipe, row, charKey, itemID, profit, margin, why, make },
+-- most profit first.
+local TRY_DAYS = 14
+function addon:GetWorthATry(prof, count)
+    local list = {}
+    local since = time() - TRY_DAYS * 86400
+    local posted, sold
+    for _, recipeID in ipairs(addon:Keys(GoldsmithDB.recipes)) do
+        addon:Yield()
+        local recipe = GoldsmithDB.recipes[recipeID]
+        if recipe and (prof == "All" or recipe.profession == prof) and MakesCurrentItem(recipe)
+            and addon:CanAuction(recipe.outputItemID) ~= false then
+            local charKey = CrafterFor(recipeID)
+            if charKey and addon:IsCharacterIncluded(charKey) then
+                local row = PlainRowFor(charKey, recipe)
+                if row and row.profit and row.profit > 0 and not row.partial
+                    and (row.margin or 0) >= addon:Setting("minROI") then
+                    local why, unproven = WhyNotBase(recipe, row)
+                    local itemID = row.itemID or recipe.outputItemID
+                    -- Sold lately but still unproven: too slowly or for too
+                    -- little (SoldAtProfit), so it was tried
+                    if why and unproven and not addon:GetOwnSaleRecord(recipe.outputName)
+                        and (itemID and addon:GetHeld(itemID, row.tier) or 0) == 0 then
+                        -- Your listings and AH sales lately, once
+                        if not posted then
+                            posted, sold = {}, {}
+                            for _, e in ipairs(addon.ledger:getAll()) do
+                                if e.item and (e.timestamp or 0) >= since then
+                                    if e.kind == "DEPOSIT" then
+                                        posted[e.item] = math.min(posted[e.item] or math.huge, e.timestamp)
+                                    elseif e.type == "REVENUE" and not e.vendor and not e.trade then
+                                        sold[e.item] = math.max(sold[e.item] or 0, e.timestamp)
+                                    end
+                                end
+                            end
+                        end
+                        local name = recipe.outputName
+                        local triedAndGone = posted[name] and not (sold[name] and sold[name] >= posted[name])
+                        if not triedAndGone then
+                            table.insert(list, {
+                                key = addon:CraftKey(recipeID, row),
+                                recipe = recipe, row = row, charKey = charKey, itemID = itemID,
+                                profit = row.profit, margin = row.margin, why = why,
+                                make = addon:IsGear(itemID) and 1 or 2,
+                            })
+                        end
+                    end
+                end
+            end
+        end
+    end
+    table.sort(list, function(a, b) return a.profit > b.profit end)
+    for i = #list, (count or #list) + 1, -1 do list[i] = nil end
     return list
 end
 
@@ -1023,12 +1276,23 @@ local salesCache = addon:NewCache()
 local function SalesByName()
     local store = salesCache:Get()
     if not store.sales then
-        -- The ledger's index is already by name, oldest first
+        -- By name, oldest first. When it sold (soldAt, from the mail's days
+        -- left), not when the mail was taken: hours later after a night
+        -- away, a fast seller read as slow (user, 2026-11-18). Forever's
+        -- pending sales too: sold, gold not taken from the mail yet
+        -- (Core.lua ahSoldPending).
         local sales = {}
         for name, list in pairs(addon.ledger:index().sales) do
             local out = {}
-            for i, e in ipairs(list) do out[i] = { time = e.timestamp, qty = e.quantity or 1 } end
+            for i, e in ipairs(list) do out[i] = { time = e.soldAt or e.timestamp, qty = e.quantity or 1 } end
             sales[name] = out
+        end
+        for _, p in ipairs(addon:GetPendingSales()) do
+            sales[p.item] = sales[p.item] or {}
+            table.insert(sales[p.item], { time = p.time, qty = p.qty or 1 })
+        end
+        for _, out in pairs(sales) do
+            table.sort(out, function(a, b) return a.time < b.time end)
         end
         store.sales = sales
     end
@@ -1426,12 +1690,15 @@ function addon:GetCharacterTodo(prof, conc)
                 recipe = c.recipe, row = c.row, itemID = c.itemID, tierCount = c.row.tierCount,
                 crafts = crafts, quantity = make, made = crafts * c.outputPerCraft,
                 profit = c.profit * crafts * c.outputPerCraft, why = c.makeReason,
+                budgetRank = c.budgetRank, charKey = c.charKey,
             })
         end
     end
 
     for _, t in pairs(todo) do
-        table.sort(t.items, function(a, b) return a.profit > b.profit end)
+        -- Short of gold: the best return per gold after concentration and
+        -- cooldowns (FitToGold)
+        addon:BudgetSort(t.items, function(i) return i.profit end)
         -- A leftover mix right under its first line
         local ordered = {}
         for _, item in ipairs(t.items) do
@@ -2065,6 +2332,27 @@ function addon:GetItemDetails(name, itemID)
         tiers = {},
     }
     d.profession = info.profession or (d.recipe and d.recipe.profession) or addon:GetProfessionForItemName(name)
+    -- Nothing makes it: the professions that use it, all of them. Pristine
+    -- Leather (skinned) read just "Blacksmithing", the first one seen using
+    -- it, with Tailoring recipes in its list too (user, 2026-11-17)
+    if itemID and not d.recipe then
+        local seen, usedIn = {}, {}
+        local function Use(prof)
+            if prof and not seen[prof] then seen[prof] = true; table.insert(usedIn, prof) end
+        end
+        for _, recipe in pairs(RecipesByMaterial()[itemID] or {}) do Use(recipe.profession) end
+        for _, recipe in pairs(GoldsmithDB.unlearned or {}) do
+            for _, slot in ipairs(recipe.reagents or {}) do
+                for _, id in ipairs(slot.itemIDs or {}) do
+                    if id == itemID then Use(recipe.profession) end
+                end
+            end
+        end
+        if #usedIn > 0 then
+            table.sort(usedIn)
+            d.usedIn = usedIn
+        end
+    end
     for _, id in ipairs(ids) do
         table.insert(d.tiers, { itemID = id, tier = byID[id] and byID[id].tier,
             price = addon:GetMarketPrice(id), have = (addon:GetStock(id)) })
